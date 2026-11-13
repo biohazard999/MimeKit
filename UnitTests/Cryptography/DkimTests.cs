@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,19 +24,16 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-
-using NUnit.Framework;
+using System.Globalization;
+using System.Text.RegularExpressions;
 
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.OpenSsl;
+using Org.BouncyCastle.X509;
 using Org.BouncyCastle.Crypto.Parameters;
 
 using MimeKit;
+using MimeKit.IO;
 using MimeKit.Cryptography;
 
 namespace UnitTests.Cryptography {
@@ -47,40 +44,54 @@ namespace UnitTests.Cryptography {
 		static readonly AsymmetricKeyParameter Ed25519PrivateKey;
 		static readonly AsymmetricCipherKeyPair DkimKeys;
 
-		class DummyPublicKeyLocator : IDkimPublicKeyLocator
+		class DummyDnsResolver : IDnsResolver
 		{
-			readonly AsymmetricKeyParameter key;
+			readonly DnsTxtResponse response;
 
-			public DummyPublicKeyLocator (AsymmetricKeyParameter publicKey)
+			public DummyDnsResolver (AsymmetricKeyParameter publicKey)
 			{
-				key = publicKey;
+				string txt;
+
+				if (publicKey is Ed25519PublicKeyParameters ed25519)
+					txt = "v=DKIM1; k=ed25519; p=" + Convert.ToBase64String (ed25519.GetEncoded ());
+				else
+					txt = "v=DKIM1; k=rsa; p=" + Convert.ToBase64String (SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo (publicKey).GetEncoded ());
+
+				response = new DnsTxtResponse (new[] { txt });
 			}
 
-			public AsymmetricKeyParameter LocatePublicKey (string methods, string domain, string selector, CancellationToken cancellationToken = default (CancellationToken))
+			public DnsTxtResponse QueryTxt (string domain, CancellationToken cancellationToken = default)
 			{
-				return key;
+				return response;
 			}
 
-			public Task<AsymmetricKeyParameter> LocatePublicKeyAsync (string methods, string domain, string selector, CancellationToken cancellationToken = default (CancellationToken))
+			public Task<DnsTxtResponse> QueryTxtAsync (string domain, CancellationToken cancellationToken = default)
 			{
-				return Task.FromResult (key);
+				return Task.FromResult (response);
+			}
+		}
+
+		class NullDnsResolver : IDnsResolver
+		{
+			public DnsTxtResponse QueryTxt (string domain, CancellationToken cancellationToken = default)
+			{
+				return null;
+			}
+
+			public Task<DnsTxtResponse> QueryTxtAsync (string domain, CancellationToken cancellationToken = default)
+			{
+				return Task.FromResult<DnsTxtResponse> (null);
 			}
 		}
 
 		static DkimTests ()
 		{
-			using (var stream = new StreamReader (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "example.pem"))) {
-				var reader = new PemReader (stream);
-
+			using (var reader = new PemReader (new StreamReader (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "example.pem"))))
 				DkimKeys = reader.ReadObject () as AsymmetricCipherKeyPair;
-			}
 
 			// Note: you can use http://dkimcore.org/tools/dkimrecordcheck.html to get public keys manually
-			using (var stream = new StreamReader (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.pub"))) {
-				var reader = new PemReader (stream);
-
+			using (var reader = new PemReader (new StreamReader (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.pub"))))
 				GMailDkimPublicKey = reader.ReadObject () as AsymmetricKeyParameter;
-			}
 
 			var rawData = Convert.FromBase64String ("nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=");
 			Ed25519PrivateKey = new Ed25519PrivateKeyParameters (rawData, 0);
@@ -95,6 +106,590 @@ namespace UnitTests.Cryptography {
 				AgentOrUserIdentifier = "@eng.example.com",
 				QueryMethod = "dns/txt"
 			};
+		}
+
+		const string ExampleKeyName = "1433868189.example._domainkey.example.com";
+
+		static string WriteHeaders (MimeMessage message, IList<string> fields, DkimCanonicalizationAlgorithm algorithm)
+		{
+			var options = FormatOptions.Default.Clone ();
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			using var stream = new MemoryStream ();
+			using var filtered = new FilteredStream (stream);
+
+			// Match the signer/verifier, which normalize raw header newlines after canonicalization.
+			filtered.Add (options.CreateNewLineFilter ());
+			DkimVerifierBase.WriteHeaders (options, message, fields, algorithm, filtered);
+			filtered.Flush ();
+
+			return System.Text.Encoding.ASCII.GetString (stream.ToArray ());
+		}
+
+		[Test]
+		public void TestWriteRepeatedHeaders ([Values] DkimCanonicalizationAlgorithm algorithm, [Values (false, true)] bool body, [Values (NewLineFormat.Unix, NewLineFormat.Dos)] NewLineFormat newLineFormat)
+		{
+			using var message = new MimeMessage ();
+			message.Headers.Clear ();
+			message.Headers.Add ("X-Test", "first");
+			message.Headers.Add ("X-Other", "ignored");
+			message.Headers.Add ("x-test", "last");
+			message.Headers.Add ("Content-Test", "message content");
+
+			if (body) {
+				message.Body = new TextPart ("plain");
+				message.Body.Headers.Add ("Content-Test", "body first");
+				message.Body.Headers.Add ("Content-Test", "body last");
+				message.Body.Headers.Add ("X-Test", "body extension");
+			}
+
+			var inputOptions = FormatOptions.Default.Clone ();
+			inputOptions.NewLineFormat = newLineFormat;
+			var headers = body ? message.Headers.Concat (message.Body.Headers) : message.Headers;
+
+			foreach (var header in headers)
+				header.SetValue (inputOptions, System.Text.Encoding.UTF8, header.Value);
+
+			var fields = new[] { "X-Missing", "X-TEST", "Content-Test", "x-test", "X-Test", "content-test", "CONTENT-TEST", "X-Test", "Content-Test", "X-Missing" };
+			var actual = WriteHeaders (message, fields, algorithm);
+			string expected;
+
+			if (algorithm == DkimCanonicalizationAlgorithm.Relaxed) {
+				expected = body ?
+					"x-test:body extension\r\ncontent-test:body last\r\nx-test:last\r\nx-test:first\r\ncontent-test:body first\r\ncontent-test:message content\r\n" :
+					"x-test:last\r\ncontent-test:message content\r\nx-test:first\r\n";
+			} else {
+				expected = body ?
+					"X-Test: body extension\r\nContent-Test: body last\r\nx-test: last\r\nX-Test: first\r\nContent-Test: body first\r\nContent-Test: message content\r\n" :
+					"x-test: last\r\nContent-Test: message content\r\nX-Test: first\r\n";
+			}
+
+			Assert.That (actual, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestWriteMergedHeaders ([Values] DkimCanonicalizationAlgorithm algorithm)
+		{
+			const string text = "X-Test: first\r\nX-Test: middle\r\nX-Test: last\r\nContent-Type: text/plain\r\n\r\nbody";
+			using var input = new MemoryStream (System.Text.Encoding.ASCII.GetBytes (text));
+			using var message = MimeMessage.Load (input);
+			var middle = message.Headers[1];
+			Assert.That (middle.Value, Is.EqualTo ("middle"));
+			Assert.That (middle.Offset, Is.Not.Null);
+			message.Headers.Remove (middle);
+			message.Body.Headers.Insert (0, middle);
+
+			var actual = WriteHeaders (message, new[] { "X-Test", "X-Test", "X-Test", "X-Test" }, algorithm);
+			var expected = algorithm == DkimCanonicalizationAlgorithm.Relaxed ?
+				"x-test:last\r\nx-test:middle\r\nx-test:first\r\n" :
+				"X-Test: last\r\nX-Test: middle\r\nX-Test: first\r\n";
+
+			Assert.That (actual, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestWriteManyRepeatedHeaders ([Values (1000, 2000, 4000, 8000, 16000)] int count)
+		{
+			using var message = new MimeMessage ();
+			message.Headers.Clear ();
+			var fields = new List<string> (count * 2);
+
+			for (int i = 0; i < count; i++) {
+				message.Headers.Add ("X-Test", i.ToString (CultureInfo.InvariantCulture));
+				fields.Add ("x-test");
+				fields.Add ("X-Missing");
+			}
+
+			fields.Add ("X-Test");
+			var actual = WriteHeaders (message, fields, DkimCanonicalizationAlgorithm.Relaxed);
+			var expected = new System.Text.StringBuilder ();
+
+			for (int i = count - 1; i >= 0; i--)
+				expected.Append ("x-test:").Append (i.ToString (CultureInfo.InvariantCulture)).Append ("\r\n");
+
+			Assert.That (actual, Is.EqualTo (expected.ToString ()));
+		}
+
+		static string ExamplePublicKey {
+			get { return Convert.ToBase64String (SubjectPublicKeyInfoFactory.CreateSubjectPublicKeyInfo (DkimKeys.Public).GetEncoded ()); }
+		}
+
+		static MimeMessage CreateSignedMessage (out Header dkim)
+		{
+			var signer = CreateSigner (DkimSignatureAlgorithm.RsaSha256, DkimCanonicalizationAlgorithm.Relaxed, DkimCanonicalizationAlgorithm.Relaxed);
+			var message = new MimeMessage ();
+
+			message.From.Add (new MailboxAddress ("", "mimekit@example.com"));
+			message.To.Add (new MailboxAddress ("", "mimekit@example.com"));
+			message.Subject = "Key lookup test";
+			message.Date = new DateTimeOffset (2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+			message.Body = new TextPart ("plain") { Text = "This is the body." };
+
+			signer.Sign (message, new HeaderId[] { HeaderId.From, HeaderId.To, HeaderId.Subject, HeaderId.Date });
+
+			dkim = message.Headers[0];
+
+			return message;
+		}
+
+		static async Task AssertVerifyAsync (MockDnsResolver resolver, DkimSignatureStatus expected, string description, Action<Header> modify = null)
+		{
+			var verifier = new DkimVerifier (resolver);
+
+			using var message = CreateSignedMessage (out var dkim);
+
+			modify?.Invoke (dkim);
+
+			Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (expected), description);
+			Assert.That ((await verifier.VerifyAsync (message, dkim)).Status, Is.EqualTo (expected), description + " (async)");
+		}
+
+		static void AssertPermError (DkimSignatureValidationResult result, string description)
+		{
+			Assert.That (result.Status, Is.EqualTo (DkimSignatureStatus.PermError), description);
+			Assert.That (result.Exception, Is.InstanceOf<FormatException> (), description);
+			Assert.That (result.Reason, Is.EqualTo (result.Exception.Message), description);
+		}
+
+		class TimestampDkimSigner : DkimSigner
+		{
+			readonly long timestamp;
+
+			public TimestampDkimSigner (AsymmetricKeyParameter key, long timestamp) : base (key, "example.com", "1433868189.example")
+			{
+				this.timestamp = timestamp;
+			}
+
+			protected override long GetTimestamp ()
+			{
+				return timestamp;
+			}
+		}
+
+		static MimeMessage CreateMessage ()
+		{
+			var message = new MimeMessage ();
+
+			message.From.Add (new MailboxAddress ("", "mimekit@example.com"));
+			message.To.Add (new MailboxAddress ("", "mimekit@example.com"));
+			message.Subject = "Verification result test";
+			message.Date = new DateTimeOffset (2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+			message.Body = new TextPart ("plain") { Text = "This is the body." };
+
+			return message;
+		}
+
+		static readonly HeaderId[] SignedHeaders = new HeaderId[] { HeaderId.From, HeaderId.To, HeaderId.Subject, HeaderId.Date };
+
+		static async Task<DkimSignatureValidationResult> AssertResultAsync (DkimVerifier verifier, MimeMessage message, Header dkim, DkimSignatureStatus expected, string reason)
+		{
+			var result = verifier.Verify (message, dkim);
+
+			Assert.That (result.Status, Is.EqualTo (expected), "Status");
+			Assert.That (result.Reason, Is.EqualTo (reason), "Reason");
+			Assert.That (result.Header, Is.SameAs (dkim), "Header");
+
+			var asyncResult = await verifier.VerifyAsync (message, dkim);
+
+			Assert.That (asyncResult.Status, Is.EqualTo (expected), "Status (async)");
+			Assert.That (asyncResult.Reason, Is.EqualTo (reason), "Reason (async)");
+			Assert.That (asyncResult.Header, Is.SameAs (dkim), "Header (async)");
+
+			return result;
+		}
+
+		[Test]
+		public async Task TestVerifyResultProperties ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			using var message = CreateSignedMessage (out var dkim);
+
+			var result = await AssertResultAsync (verifier, message, dkim, DkimSignatureStatus.Pass, null);
+
+			Assert.That (result.Domain, Is.EqualTo ("example.com"), "Domain");
+			Assert.That (result.Selector, Is.EqualTo ("1433868189.example"), "Selector");
+			Assert.That (result.AgentOrUserIdentifier, Is.EqualTo ("@eng.example.com"), "AgentOrUserIdentifier");
+			Assert.That (result.SignatureAlgorithm, Is.EqualTo (DkimSignatureAlgorithm.RsaSha256), "SignatureAlgorithm");
+			Assert.That (result.Exception, Is.Null, "Exception");
+
+			var b = Regex.Match (dkim.Value, @"(?:^|[;\s])b=\s*([^;\s]{8})").Groups[1].Value;
+			var authResult = result.ToAuthenticationMethodResult ();
+
+			Assert.That (authResult.Method, Is.EqualTo ("dkim"));
+			Assert.That (authResult.Result, Is.EqualTo ("pass"));
+			Assert.That (authResult.Reason, Is.Null);
+			Assert.That (authResult.Properties.Select (p => $"{p.PropertyType}.{p.Property}={p.Value}"), Is.EqualTo (new[] {
+				"header.d=example.com",
+				"header.i=@eng.example.com",
+				"header.s=1433868189.example",
+				"header.a=rsa-sha256",
+				"header.b=" + b
+			}));
+		}
+
+		[Test]
+		public async Task TestVerifyBodyHashMismatch ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			using var message = CreateSignedMessage (out var dkim);
+
+			((TextPart) message.Body).Text = "This is a modified body.";
+
+			var result = await AssertResultAsync (verifier, message, dkim, DkimSignatureStatus.Fail, "body hash did not verify");
+			var authResult = result.ToAuthenticationMethodResult ();
+
+			Assert.That (authResult.Result, Is.EqualTo ("fail"));
+			Assert.That (authResult.Reason, Is.EqualTo ("body hash did not verify"));
+		}
+
+		[Test]
+		public async Task TestVerifySignatureMismatch ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			using var message = CreateSignedMessage (out var dkim);
+
+			message.Subject = "This is a modified subject";
+
+			await AssertResultAsync (verifier, message, dkim, DkimSignatureStatus.Fail, "signature did not verify");
+		}
+
+		[Test]
+		public async Task TestVerifyDisabledAlgorithm ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			var signer = CreateSigner (DkimSignatureAlgorithm.RsaSha1, DkimCanonicalizationAlgorithm.Relaxed, DkimCanonicalizationAlgorithm.Relaxed);
+			using var message = CreateMessage ();
+
+			signer.Sign (message, SignedHeaders);
+
+			var result = await AssertResultAsync (verifier, message, message.Headers[0], DkimSignatureStatus.Policy, "signature algorithm disabled");
+
+			Assert.That (result.SignatureAlgorithm, Is.EqualTo (DkimSignatureAlgorithm.RsaSha1));
+			Assert.That (result.ToAuthenticationMethodResult ().Result, Is.EqualTo ("policy"));
+		}
+
+		[Test]
+		public async Task TestVerifyShortRsaKey ()
+		{
+			var generator = new Org.BouncyCastle.Crypto.Generators.RsaKeyPairGenerator ();
+			generator.Init (new KeyGenerationParameters (new Org.BouncyCastle.Security.SecureRandom (), 512));
+			var keys = generator.GenerateKeyPair ();
+
+			var verifier = new DkimVerifier (new DummyDnsResolver (keys.Public));
+			var signer = new DkimSigner (keys.Private, "example.com", "1433868189.example");
+			using var message = CreateMessage ();
+
+			signer.Sign (message, SignedHeaders);
+
+			await AssertResultAsync (verifier, message, message.Headers[0], DkimSignatureStatus.Policy, "key too short");
+
+			verifier.MinimumRsaKeyLength = 512;
+
+			await AssertResultAsync (verifier, message, message.Headers[0], DkimSignatureStatus.Pass, null);
+		}
+
+		[Test]
+		public async Task TestVerifyResolverExceptionIsReported ()
+		{
+			var resolver = new MockDnsResolver ();
+			var exception = new IOException ("network unreachable");
+			resolver.AddException (ExampleKeyName, exception);
+
+			var verifier = new DkimVerifier (resolver);
+			using var message = CreateSignedMessage (out var dkim);
+
+			var result = verifier.Verify (message, dkim);
+			Assert.That (result.Status, Is.EqualTo (DkimSignatureStatus.TempError));
+			Assert.That (result.Exception, Is.SameAs (exception));
+			Assert.That (result.Reason, Is.Not.Null);
+			Assert.That (result.ToAuthenticationMethodResult ().Result, Is.EqualTo ("temperror"));
+
+			result = await verifier.VerifyAsync (message, dkim);
+			Assert.That (result.Status, Is.EqualTo (DkimSignatureStatus.TempError));
+			Assert.That (result.Exception, Is.SameAs (exception));
+		}
+
+		[Test]
+		public async Task TestVerifyExpiredSignature ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			var timestamp = DateTimeOffset.UtcNow.AddDays (-2).ToUnixTimeSeconds ();
+			var signer = new TimestampDkimSigner (DkimKeys.Private, timestamp) {
+				SignaturesExpireAfter = TimeSpan.FromHours (1)
+			};
+			using var message = CreateMessage ();
+
+			signer.Sign (message, SignedHeaders);
+
+			var dkim = message.Headers[0];
+
+			Assert.That (dkim.Value, Does.Contain ("; x=" + (timestamp + 3600).ToString (CultureInfo.InvariantCulture) + ";"));
+
+			await AssertResultAsync (verifier, message, dkim, DkimSignatureStatus.PermError, "signature expired");
+		}
+
+		[Test]
+		public async Task TestVerifyUnexpiredSignature ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			var signer = CreateSigner (DkimSignatureAlgorithm.RsaSha256, DkimCanonicalizationAlgorithm.Relaxed, DkimCanonicalizationAlgorithm.Relaxed);
+			using var message = CreateMessage ();
+
+			signer.SignaturesExpireAfter = TimeSpan.FromDays (1);
+			signer.Sign (message, SignedHeaders);
+
+			await AssertResultAsync (verifier, message, message.Headers[0], DkimSignatureStatus.Pass, null);
+		}
+
+		[Test]
+		public async Task TestVerifyLargeTimestamp ()
+		{
+			// t= values larger than int.MaxValue (i.e. after the year 2038) must be accepted.
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			var signer = new TimestampDkimSigner (DkimKeys.Private, (long) int.MaxValue + 1);
+			using var message = CreateMessage ();
+
+			signer.Sign (message, SignedHeaders);
+
+			await AssertResultAsync (verifier, message, message.Headers[0], DkimSignatureStatus.Pass, null);
+		}
+
+		[TestCase ("x=abc; ", TestName = "TestVerifyInvalidExpiration")]
+		[TestCase ("x=-1; ", TestName = "TestVerifyNegativeExpiration")]
+		[TestCase ("x=1; ", TestName = "TestVerifyExpirationBeforeTimestamp")]
+		public async Task TestVerifyMalformedExpiration (string x)
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			using var message = CreateSignedMessage (out var dkim);
+
+			dkim.Value = x + dkim.Value;
+
+			AssertPermError (verifier.Verify (message, dkim), x);
+			AssertPermError (await verifier.VerifyAsync (message, dkim), x + " (async)");
+		}
+
+		[Test]
+		public async Task TestVerifyMalformedSignatureBestEffortProperties ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			using var message = CreateSignedMessage (out var dkim);
+
+			dkim.Value = dkim.Value.Replace ("v=1;", "v=2;");
+
+			foreach (var result in new[] { verifier.Verify (message, dkim), await verifier.VerifyAsync (message, dkim) }) {
+				Assert.That (result.Status, Is.EqualTo (DkimSignatureStatus.PermError));
+				Assert.That (result.Exception, Is.InstanceOf<FormatException> ());
+				Assert.That (result.Domain, Is.EqualTo ("example.com"));
+				Assert.That (result.Selector, Is.EqualTo ("1433868189.example"));
+				Assert.That (result.AgentOrUserIdentifier, Is.EqualTo ("@eng.example.com"));
+
+				var authResult = result.ToAuthenticationMethodResult ();
+				Assert.That (authResult.Result, Is.EqualTo ("permerror"));
+				Assert.That (authResult.Reason, Is.EqualTo (result.Reason));
+			}
+		}
+
+		static MimeMessage CreateMultiplySignedMessage (int count)
+		{
+			var message = CreateMessage ();
+
+			for (int i = 0; i < count; i++) {
+				var signer = new DkimSigner (DkimKeys.Private, $"example{i}.com", "selector");
+
+				signer.Sign (message, SignedHeaders);
+			}
+
+			return message;
+		}
+
+		[Test]
+		public async Task TestVerifyAllSignatures ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			using var message = CreateMultiplySignedMessage (3);
+
+			// break the signature added by the first signer (now the last DKIM-Signature header)
+			var broken = message.Headers[2];
+			broken.Value = broken.Value.Replace ("v=1;", "v=2;");
+
+			foreach (var results in new[] { verifier.Verify (message), await verifier.VerifyAsync (message), verifier.Verify (FormatOptions.Default, message), await verifier.VerifyAsync (FormatOptions.Default, message) }) {
+				Assert.That (results, Has.Length.EqualTo (3));
+
+				for (int i = 0; i < results.Length; i++)
+					Assert.That (results[i].Header, Is.SameAs (message.Headers[i]), $"Header[{i}]");
+
+				Assert.That (results[0].Status, Is.EqualTo (DkimSignatureStatus.Pass));
+				Assert.That (results[0].Domain, Is.EqualTo ("example2.com"));
+				Assert.That (results[1].Status, Is.EqualTo (DkimSignatureStatus.Pass));
+				Assert.That (results[1].Domain, Is.EqualTo ("example1.com"));
+				Assert.That (results[2].Status, Is.EqualTo (DkimSignatureStatus.PermError));
+				Assert.That (results[2].Domain, Is.EqualTo ("example0.com"));
+			}
+		}
+
+		[Test]
+		public async Task TestVerifyAllSignaturesMaxSignatures ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			using var message = CreateMultiplySignedMessage (3);
+
+			Assert.That (verifier.MaxSignatures, Is.EqualTo (10), "default MaxSignatures");
+
+			verifier.MaxSignatures = 2;
+
+			foreach (var results in new[] { verifier.Verify (message), await verifier.VerifyAsync (message) }) {
+				Assert.That (results, Has.Length.EqualTo (2));
+				Assert.That (results[0].Domain, Is.EqualTo ("example2.com"));
+				Assert.That (results[1].Domain, Is.EqualTo ("example1.com"));
+			}
+
+			Assert.Throws<ArgumentOutOfRangeException> (() => verifier.MaxSignatures = 0);
+			Assert.Throws<ArgumentOutOfRangeException> (() => verifier.MaxSignatures = -1);
+			Assert.That (verifier.MaxSignatures, Is.EqualTo (2));
+		}
+
+		[Test]
+		public async Task TestVerifyAllSignaturesNoSignatures ()
+		{
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			using var message = CreateMessage ();
+
+			Assert.That (verifier.Verify (message), Is.Empty);
+			Assert.That (await verifier.VerifyAsync (message), Is.Empty);
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookup ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.Add (ExampleKeyName, "v=DKIM1; k=rsa; p=" + ExamplePublicKey);
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.Pass, "valid key");
+			Assert.That (resolver.Queries, Is.EqualTo (new[] { ExampleKeyName, ExampleKeyName }));
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupSkipsInvalidRecords ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.Add (ExampleKeyName, "this is not a dkim record");
+			resolver.Add (ExampleKeyName, "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
+			resolver.Add (ExampleKeyName, "v=DKIM1; k=rsa; p=" + ExamplePublicKey);
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.Pass, "valid key after invalid and incompatible records");
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupNonExistentDomain ()
+		{
+			await AssertVerifyAsync (new MockDnsResolver (), DkimSignatureStatus.PermError, "NXDOMAIN");
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupNoRecords ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.AddFailure (ExampleKeyName, DnsQueryStatus.Success);
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.PermError, "NODATA");
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupTemporaryFailure ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.AddFailure (ExampleKeyName, DnsQueryStatus.TemporaryFailure);
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.TempError, "SERVFAIL");
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupResolverThrows ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.AddException (ExampleKeyName, new IOException ("network unreachable"));
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.TempError, "resolver exception");
+		}
+
+		[Test]
+		public void TestVerifyKeyLookupCancelled ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.AddException (ExampleKeyName, new OperationCanceledException ());
+
+			var verifier = new DkimVerifier (resolver);
+			using var message = CreateSignedMessage (out var dkim);
+
+			Assert.Throws<OperationCanceledException> (() => verifier.Verify (message, dkim));
+			Assert.ThrowsAsync<OperationCanceledException> (() => verifier.VerifyAsync (message, dkim));
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupRevoked ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.Add (ExampleKeyName, "v=DKIM1; k=rsa; p=");
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.PermError, "revoked key");
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupKeyTypeMismatch ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.Add (ExampleKeyName, "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.PermError, "key type mismatch");
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupHashAlgorithmMismatch ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.Add (ExampleKeyName, "v=DKIM1; k=rsa; h=sha1; p=" + ExamplePublicKey);
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.PermError, "h=sha1 does not permit rsa-sha256");
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupStrictFlag ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.Add (ExampleKeyName, "v=DKIM1; k=rsa; t=s; p=" + ExamplePublicKey);
+
+			// The signer uses i=@eng.example.com which is a subdomain of d=example.com
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.PermError, "t=s with a subdomain AUID");
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupInvalidSelector ()
+		{
+			var resolver = new MockDnsResolver ();
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.PermError, "s=bad/selector", dkim => dkim.Value = dkim.Value.Replace ("s=1433868189.example", "s=bad/selector"));
+			Assert.That (resolver.Queries, Is.Empty);
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupNullResponse ()
+		{
+			var verifier = new DkimVerifier (new NullDnsResolver ());
+			using var message = CreateSignedMessage (out var dkim);
+
+			var result = await AssertResultAsync (verifier, message, dkim, DkimSignatureStatus.TempError, "key query failed");
+
+			Assert.That (result.Exception, Is.Null);
+		}
+
+		[Test]
+		public async Task TestVerifyKeyLookupUnsupportedQueryMethod ()
+		{
+			var resolver = new MockDnsResolver ();
+			resolver.Add (ExampleKeyName, "v=DKIM1; k=rsa; p=" + ExamplePublicKey);
+
+			await AssertVerifyAsync (resolver, DkimSignatureStatus.PermError, "q=dns/other", dkim => dkim.Value = dkim.Value.Replace ("q=dns/txt", "q=dns/other"));
+			Assert.That (resolver.Queries, Is.Empty);
 		}
 
 		[Test]
@@ -118,45 +713,122 @@ namespace UnitTests.Cryptography {
 		}
 
 		[Test]
+		public void TestDkimSignerRejectsPublicKeyStream ()
+		{
+			var path = Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.pub");
+
+			using (var stream = File.OpenRead (path)) {
+				var ex = Assert.Throws<FormatException> (() => new DkimSigner (stream, "example.com", "1433868189.example"));
+
+				Assert.That (ex.Message, Is.EqualTo ("Private key not found."));
+			}
+		}
+
+		[Test]
 		public void TestDkimSignerDefaults ()
 		{
 			var path = Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "example.pem");
 			DkimSigner signer;
 
 			signer = new DkimSigner (DkimKeys.Private, "example.com", "1433868189.example");
-			Assert.AreEqual (DkimSignatureAlgorithm.RsaSha256, signer.SignatureAlgorithm, "SignatureAlgorithm #1");
+			Assert.That (signer.SignatureAlgorithm, Is.EqualTo (DkimSignatureAlgorithm.RsaSha256), "SignatureAlgorithm #1");
 
 			signer = new DkimSigner (path, "example.com", "1433868189.example");
-			Assert.AreEqual (DkimSignatureAlgorithm.RsaSha256, signer.SignatureAlgorithm, "SignatureAlgorithm #2");
+			Assert.That (signer.SignatureAlgorithm, Is.EqualTo (DkimSignatureAlgorithm.RsaSha256), "SignatureAlgorithm #2");
 
 			using (var stream = File.OpenRead (path)) {
 				signer = new DkimSigner (stream, "example.com", "1433868189.example");
-				Assert.AreEqual (DkimSignatureAlgorithm.RsaSha256, signer.SignatureAlgorithm, "SignatureAlgorithm #3");
+				Assert.That (signer.SignatureAlgorithm, Is.EqualTo (DkimSignatureAlgorithm.RsaSha256), "SignatureAlgorithm #3");
 			}
+		}
+
+		[Test]
+		public void TestDkimUnsupportedSignatureAlgorithm ()
+		{
+			var signer = CreateSigner (DkimSignatureAlgorithm.RsaSha256, DkimCanonicalizationAlgorithm.Simple, DkimCanonicalizationAlgorithm.Simple);
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
+			var algorithm = (DkimSignatureAlgorithm) 500;
+
+			signer.SignatureAlgorithm = algorithm;
+
+			Assert.Throws<NotSupportedException> (() => signer.CreateSigningContext ());
+			Assert.Throws<NotSupportedException> (() => verifier.CreateVerifyContext (algorithm, DkimKeys.Public));
+		}
+
+		[Test]
+		public void TestDkimParameterParsingDefaults ()
+		{
+			var parameters = DkimVerifierBase.ParseParameterTags (HeaderId.DkimSignature, " a = rsa-sha256 ; d=example.com; s=selector; h=from; bh=abc; b=def;   ");
+
+			DkimVerifierBase.ValidateCommonSignatureParameters ("DKIM-Signature", parameters, out var algorithm, out var headerAlgorithm,
+				out var bodyAlgorithm, out var domain, out var selector, out var queryMethod, out var headers, out var bodyHash, out var signature, out var maxLength);
+
+			Assert.That (algorithm, Is.EqualTo (DkimSignatureAlgorithm.RsaSha256));
+			Assert.That (headerAlgorithm, Is.EqualTo (DkimCanonicalizationAlgorithm.Simple));
+			Assert.That (bodyAlgorithm, Is.EqualTo (DkimCanonicalizationAlgorithm.Simple));
+			Assert.That (domain, Is.EqualTo ("example.com"));
+			Assert.That (selector, Is.EqualTo ("selector"));
+			Assert.That (queryMethod, Is.EqualTo ("dns/txt"));
+			Assert.That (headers, Is.EqualTo (new[] { "from" }));
+			Assert.That (bodyHash, Is.EqualTo ("abc"));
+			Assert.That (signature, Is.EqualTo ("def"));
+			Assert.That (maxLength, Is.EqualTo (-1));
+
+			parameters["c"] = "relaxed";
+			DkimVerifierBase.ValidateCommonSignatureParameters ("DKIM-Signature", parameters, out algorithm, out headerAlgorithm,
+				out bodyAlgorithm, out domain, out selector, out queryMethod, out headers, out bodyHash, out signature, out maxLength);
+
+			Assert.That (headerAlgorithm, Is.EqualTo (DkimCanonicalizationAlgorithm.Relaxed));
+			Assert.That (bodyAlgorithm, Is.EqualTo (DkimCanonicalizationAlgorithm.Simple));
+		}
+
+		[Test]
+		public void TestDkimParameterParsingTagNames ()
+		{
+			var parameters = DkimVerifierBase.ParseParameterTags (HeaderId.DkimSignature, "v=1;\tx_2 \t= 1 2 ;Ab9=c");
+
+			Assert.That (parameters, Has.Count.EqualTo (3));
+			Assert.That (parameters["v"], Is.EqualTo ("1"));
+			Assert.That (parameters["x_2"], Is.EqualTo ("12"));
+			Assert.That (parameters["Ab9"], Is.EqualTo ("c"));
+		}
+
+		// tag-name = ALPHA *ALNUMPUNC (rfc6376, section 3.2)
+		[TestCase ("v=1; a b=c", TestName = "TestDkimParameterParsingTagNameWithWhiteSpace")]
+		[TestCase ("v=1; t\tWjEJt; filename=\"doc\"", TestName = "TestDkimParameterParsingTagNameWithSemicolon")]
+		[TestCase ("v=1; a-b=c", TestName = "TestDkimParameterParsingTagNameWithHyphen")]
+		[TestCase ("v=1; a:rsa-sha256; d=example.com", TestName = "TestDkimParameterParsingTagWithoutEquals")]
+		[TestCase ("v=1; d=example.com; s", TestName = "TestDkimParameterParsingTrailingTagWithoutEquals")]
+		[TestCase ("v=1; d=example.com; s ", TestName = "TestDkimParameterParsingTrailingTagWithoutEqualsAndWhiteSpace")]
+		public void TestDkimParameterParsingInvalidTagName (string value)
+		{
+			var ex = Assert.Throws<FormatException> (() => DkimVerifierBase.ParseParameterTags (HeaderId.DkimSignature, value));
+
+			Assert.That (ex.Message, Is.EqualTo ("Malformed DKIM-Signature value."));
 		}
 
 		[Test]
 		public void TestDkimVerifierDefaults ()
 		{
-			var verifier = new DkimVerifier (new DummyPublicKeyLocator (DkimKeys.Public));
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
 
-			Assert.AreEqual (1024, verifier.MinimumRsaKeyLength, "MinimumRsaKeyLength");
-			Assert.IsFalse (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha1), "rsa-sha1");
-			Assert.IsTrue (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha256), "rsa-sha256");
+			Assert.That (verifier.MinimumRsaKeyLength, Is.EqualTo (1024), "MinimumRsaKeyLength");
+			Assert.That (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha1), Is.False, "rsa-sha1");
+			Assert.That (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha256), Is.True, "rsa-sha256");
 		}
 
 		[Test]
 		public void TestDkimVerifierEnableDisable ()
 		{
-			var verifier = new DkimVerifier (new DummyPublicKeyLocator (DkimKeys.Public));
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
 
-			Assert.IsFalse (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha1), "initial value");
+			Assert.That (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha1), Is.False, "initial value");
 
 			verifier.Enable (DkimSignatureAlgorithm.RsaSha1);
-			Assert.IsTrue (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha1), "rsa-sha1 enabled");
+			Assert.That (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha1), Is.True, "rsa-sha1 enabled");
 
 			verifier.Disable (DkimSignatureAlgorithm.RsaSha1);
-			Assert.IsFalse (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha1), "rsa-sha1 disabled");
+			Assert.That (verifier.IsEnabled (DkimSignatureAlgorithm.RsaSha1), Is.False, "rsa-sha1 disabled");
 		}
 
 		[Test]
@@ -165,10 +837,10 @@ namespace UnitTests.Cryptography {
 			var buffer = new byte[128];
 
 			using (var stream = new DkimHashStream (DkimSignatureAlgorithm.RsaSha1)) {
-				Assert.IsFalse (stream.CanRead);
-				Assert.IsTrue (stream.CanWrite);
-				Assert.IsFalse (stream.CanSeek);
-				Assert.IsFalse (stream.CanTimeout);
+				Assert.That (stream.CanRead, Is.False);
+				Assert.That (stream.CanWrite, Is.True);
+				Assert.That (stream.CanSeek, Is.False);
+				Assert.That (stream.CanTimeout, Is.False);
 
 				Assert.Throws<NotSupportedException> (() => stream.Read (buffer, 0, buffer.Length));
 
@@ -176,8 +848,8 @@ namespace UnitTests.Cryptography {
 				Assert.Throws<ArgumentOutOfRangeException> (() => stream.Write (buffer, -1, 0));
 				Assert.Throws<ArgumentOutOfRangeException> (() => stream.Write (buffer, 0, -1));
 
-				Assert.AreEqual (0, stream.Position);
-				Assert.AreEqual (0, stream.Length);
+				Assert.That (stream.Position, Is.EqualTo (0));
+				Assert.That (stream.Length, Is.EqualTo (0));
 
 				Assert.Throws<NotSupportedException> (() => stream.Position = 64);
 
@@ -185,6 +857,12 @@ namespace UnitTests.Cryptography {
 				Assert.Throws<NotSupportedException> (() => stream.SetLength (256));
 
 				stream.Flush ();
+			}
+
+			using (var stream = new DkimHashStream (DkimSignatureAlgorithm.RsaSha1)) {
+				stream.Dispose ();
+
+				Assert.Throws<ObjectDisposedException> (() => stream.Write (buffer, 0, 1));
 			}
 		}
 
@@ -197,10 +875,10 @@ namespace UnitTests.Cryptography {
 			Assert.Throws<ArgumentNullException> (() => new DkimSignatureStream (null));
 
 			using (var stream = new DkimSignatureStream (signer.CreateSigningContext ())) {
-				Assert.IsFalse (stream.CanRead);
-				Assert.IsTrue (stream.CanWrite);
-				Assert.IsFalse (stream.CanSeek);
-				Assert.IsFalse (stream.CanTimeout);
+				Assert.That (stream.CanRead, Is.False);
+				Assert.That (stream.CanWrite, Is.True);
+				Assert.That (stream.CanSeek, Is.False);
+				Assert.That (stream.CanTimeout, Is.False);
 
 				Assert.Throws<NotSupportedException> (() => stream.Read (buffer, 0, buffer.Length));
 
@@ -208,8 +886,8 @@ namespace UnitTests.Cryptography {
 				Assert.Throws<ArgumentOutOfRangeException> (() => stream.Write (buffer, -1, 0));
 				Assert.Throws<ArgumentOutOfRangeException> (() => stream.Write (buffer, 0, -1));
 
-				Assert.AreEqual (0, stream.Position);
-				Assert.AreEqual (0, stream.Length);
+				Assert.That (stream.Position, Is.EqualTo (0));
+				Assert.That (stream.Length, Is.EqualTo (0));
 
 				Assert.Throws<NotSupportedException> (() => stream.Position = 64);
 
@@ -220,6 +898,55 @@ namespace UnitTests.Cryptography {
 
 				stream.Flush ();
 			}
+
+			using (var stream = new DkimSignatureStream (signer.CreateSigningContext ())) {
+				stream.Dispose ();
+
+				Assert.Throws<ObjectDisposedException> (() => stream.Write (buffer, 0, 1));
+			}
+		}
+
+		[Test]
+		public void TestDkimSignaturesExpirationHeaderValue ()
+		{
+			var signer = CreateSigner (DkimSignatureAlgorithm.RsaSha1, DkimCanonicalizationAlgorithm.Simple, DkimCanonicalizationAlgorithm.Simple);
+			signer.SignaturesExpireAfter = TimeSpan.FromDays (1);
+			
+			var headers = new [] { HeaderId.From, HeaderId.To, HeaderId.Subject, HeaderId.Date };
+			var message = new MimeMessage ();
+
+			message.From.Add (new MailboxAddress ("", "mimekit@example.com"));
+			message.To.Add (new MailboxAddress ("", "mimekit@example.com"));
+			message.Subject = "This is an empty message";
+			message.Date = DateTimeOffset.Now;
+
+			message.Body = new TextPart ("plain") { Text = "" };
+
+			message.Prepare (EncodingConstraint.SevenBit);
+
+			signer.Sign (message, headers);
+			
+			var headerValue = message.Headers[HeaderId.DkimSignature];
+			
+			var parameters = headerValue.Split (';');
+			long? timestamp = null, expiration = null;
+
+			for (int i = 0; i < parameters.Length; i++) {
+				var param = parameters[i].Trim ();
+
+				if (param.StartsWith ("t=", StringComparison.Ordinal)) {
+					timestamp = long.Parse (param.Substring (3));
+				}
+				
+				if (param.StartsWith ("x=", StringComparison.Ordinal)) {
+					expiration =  long.Parse (param.Substring (3));
+				}
+			}
+
+			Assert.That (timestamp, Is.Not.Null, "Timestamp should not be null.");
+			Assert.That (expiration, Is.Not.Null, "Signature expiration should not be null.");
+			var diff = expiration - timestamp;
+			Assert.That (diff, Is.EqualTo (TimeSpan.FromDays(1).TotalSeconds), "Difference between timestamp and signature expiration should have expected value.");
 		}
 
 		static void VerifyDkimBodyHash (MimeMessage message, DkimSignatureAlgorithm algorithm, string expectedHash)
@@ -237,14 +964,14 @@ namespace UnitTests.Cryptography {
 				}
 			}
 
-			Assert.AreEqual (expectedHash, hash, "The {0} hash does not match the expected value.", algorithm.ToString ().ToUpperInvariant ().Substring (3));
+			Assert.That (hash, Is.EqualTo (expectedHash), $"The {algorithm.ToString ().ToUpperInvariant ().Substring (3)} hash does not match the expected value.");
 		}
 
 		static void TestEmptyBody (DkimSignatureAlgorithm signatureAlgorithm, DkimCanonicalizationAlgorithm bodyAlgorithm, string expectedHash)
 		{
 			var signer = CreateSigner (signatureAlgorithm, DkimCanonicalizationAlgorithm.Simple, bodyAlgorithm);
 			var headers = new [] { HeaderId.From, HeaderId.To, HeaderId.Subject, HeaderId.Date };
-			var verifier = new DkimVerifier (new DummyPublicKeyLocator (DkimKeys.Public));
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
 			var message = new MimeMessage ();
 
 			message.From.Add (new MailboxAddress ("", "mimekit@example.com"));
@@ -263,20 +990,20 @@ namespace UnitTests.Cryptography {
 			var dkim = message.Headers[0];
 
 			if (signatureAlgorithm == DkimSignatureAlgorithm.RsaSha1) {
-				Assert.IsFalse (verifier.Verify (message, dkim), "DKIM-Signature using rsa-sha1 should not verify.");
+				Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (DkimSignatureStatus.Policy), "DKIM-Signature using rsa-sha1 should not verify.");
 
 				// now enable rsa-sha1 to verify again, this time it should pass...
 				verifier.Enable (DkimSignatureAlgorithm.RsaSha1);
 			}
 
-			Assert.IsTrue (verifier.Verify (message, dkim), "Failed to verify DKIM-Signature.");
+			Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify DKIM-Signature.");
 		}
 
 		[Test]
 		public void TestArgumentExceptions ()
 		{
-			var locator = new DummyPublicKeyLocator (DkimKeys.Public);
-			var verifier = new DkimVerifier (locator);
+			var resolver = new DummyDnsResolver (DkimKeys.Public);
+			var verifier = new DkimVerifier (resolver);
 			var dkimHeader = new Header (HeaderId.DkimSignature, "value");
 			var arcHeader = new Header (HeaderId.ArcMessageSignature, "value");
 			var options = FormatOptions.Default;
@@ -341,48 +1068,19 @@ namespace UnitTests.Cryptography {
 			Assert.ThrowsAsync<ArgumentNullException> (async () => await verifier.VerifyAsync (FormatOptions.Default, message, null));
 			Assert.ThrowsAsync<ArgumentException> (async () => await verifier.VerifyAsync (FormatOptions.Default, message, arcHeader));
 
-			Assert.Throws<ArgumentNullException> (() => message.Sign (null, new HeaderId[] { HeaderId.From }));
-			Assert.Throws<ArgumentNullException> (() => message.Sign (signer, (IList<HeaderId>) null));
-			Assert.Throws<ArgumentException> (() => message.Sign (signer, new HeaderId[] { HeaderId.Unknown, HeaderId.From }));
-			Assert.Throws<ArgumentException> (() => message.Sign (signer, new HeaderId[] { HeaderId.Received, HeaderId.From }));
-			Assert.Throws<ArgumentException> (() => message.Sign (signer, new HeaderId[] { HeaderId.ContentType }));
-			Assert.Throws<ArgumentNullException> (() => message.Sign (null, new string[] { "From" }));
-			Assert.Throws<ArgumentNullException> (() => message.Sign (signer, (IList<string>) null));
-			Assert.Throws<ArgumentException> (() => message.Sign (signer, new string[] { "", "From" }));
-			Assert.Throws<ArgumentException> (() => message.Sign (signer, new string[] { null, "From" }));
-			Assert.Throws<ArgumentException> (() => message.Sign (signer, new string[] { "Received", "From" }));
-			Assert.Throws<ArgumentException> (() => message.Sign (signer, new string[] { "Content-Type" }));
-
-			Assert.Throws<ArgumentNullException> (() => message.Sign (null, signer, new HeaderId[] { HeaderId.From }));
-			Assert.Throws<ArgumentNullException> (() => message.Sign (options, null, new HeaderId[] { HeaderId.From }));
-			Assert.Throws<ArgumentException> (() => message.Sign (options, signer, new HeaderId[] { HeaderId.From, HeaderId.Unknown }));
-			Assert.Throws<ArgumentNullException> (() => message.Sign (options, signer, (IList<HeaderId>) null));
-
-			Assert.Throws<ArgumentNullException> (() => message.Sign (null, signer, new string[] { "From" }));
-			Assert.Throws<ArgumentNullException> (() => message.Sign (options, null, new string[] { "From" }));
-			Assert.Throws<ArgumentException> (() => message.Sign (options, signer, new string[] { "From", null }));
-			Assert.Throws<ArgumentNullException> (() => message.Sign (options, signer, (IList<string>) null));
-
-			Assert.Throws<ArgumentNullException> (() => message.Verify (null, locator));
-			Assert.Throws<ArgumentNullException> (() => message.Verify (dkimHeader, null));
-			Assert.Throws<ArgumentNullException> (() => message.Verify (null, dkimHeader, locator));
-			Assert.Throws<ArgumentNullException> (() => message.Verify (FormatOptions.Default, null, locator));
-			Assert.Throws<ArgumentNullException> (() => message.Verify (FormatOptions.Default, dkimHeader, null));
-			Assert.Throws<ArgumentException> (() => message.Verify (FormatOptions.Default, arcHeader, locator));
-
-			Assert.ThrowsAsync<ArgumentNullException> (async () => await message.VerifyAsync (null, locator));
-			Assert.ThrowsAsync<ArgumentNullException> (async () => await message.VerifyAsync (dkimHeader, null));
-			Assert.ThrowsAsync<ArgumentNullException> (async () => await message.VerifyAsync (null, dkimHeader, locator));
-			Assert.ThrowsAsync<ArgumentNullException> (async () => await message.VerifyAsync (FormatOptions.Default, null, locator));
-			Assert.ThrowsAsync<ArgumentNullException> (async () => await message.VerifyAsync (FormatOptions.Default, dkimHeader, null));
-			Assert.ThrowsAsync<ArgumentException> (async () => await message.VerifyAsync (FormatOptions.Default, arcHeader, locator));
+			Assert.Throws<ArgumentNullException> (() => verifier.Verify ((MimeMessage) null));
+			Assert.Throws<ArgumentNullException> (() => verifier.Verify (null, message));
+			Assert.Throws<ArgumentNullException> (() => verifier.Verify (FormatOptions.Default, (MimeMessage) null));
+			Assert.ThrowsAsync<ArgumentNullException> (async () => await verifier.VerifyAsync ((MimeMessage) null));
+			Assert.ThrowsAsync<ArgumentNullException> (async () => await verifier.VerifyAsync (null, message));
+			Assert.ThrowsAsync<ArgumentNullException> (async () => await verifier.VerifyAsync (FormatOptions.Default, (MimeMessage) null));
 		}
 
 		[Test]
-		public void TestFormatExceptions ()
+		public void TestMalformedSignatures ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.msg"));
-			var verifier = new DkimVerifier (new DummyPublicKeyLocator (DkimKeys.Public));
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.msg"));
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
 			var index = message.Headers.IndexOf (HeaderId.DkimSignature);
 			var dkim = message.Headers[index];
 			var original = dkim.Value;
@@ -390,47 +1088,47 @@ namespace UnitTests.Cryptography {
 			// first, remove the 'v' tag and its value
 			dkim.Value = dkim.Value.Substring (4);
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for missing v=1;");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for missing v=1;");
 
 			// add back a 'v' tag with an invalid value
 			dkim.Value = "v=x; " + dkim.Value;
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for v=x;");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for v=x;");
 
 			// remove "from:"
 			dkim.Value = original.Replace ("from:", "");
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for missing from header");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for missing from header");
 
 			// add an invalid i= value w/o an '@'
 			dkim.Value = "i=1; " + original;
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for an invalid i= value (missing '@')");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for an invalid i= value (missing '@')");
 
 			// add an invalid i= value that does not match the domain
 			dkim.Value = "i=user@domain; " + original;
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for an invalid i= that does not contain the domain");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for an invalid i= that does not contain the domain");
 
 			// add an invalid l= value
 			dkim.Value = "l=abc; " + original;
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for an invalid l= value");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for an invalid l= value");
 
 			// set an invalid body canonicalization algorithm
 			dkim.Value = original.Replace ("c=relaxed/relaxed;", "c=simple/complex;");
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for an invalid body canonicalization value");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for an invalid body canonicalization value");
 
 			// set an invalid c= value
 			dkim.Value = original.Replace ("c=relaxed/relaxed;", "c=;");
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for an invalid c= value (empty)");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for an invalid c= value (empty)");
 
 			// set an invalid c= value
 			dkim.Value = original.Replace ("c=relaxed/relaxed;", "c=relaxed/relaxed/extra;");
 
-			Assert.Throws<FormatException> (() => verifier.Verify (message, dkim), "Expected FormatException for an invalid c= value (3 values)");
+			AssertPermError (verifier.Verify (message, dkim), "Expected FormatException for an invalid c= value (3 values)");
 		}
 
 		[Test]
@@ -461,7 +1159,7 @@ namespace UnitTests.Cryptography {
 		{
 			var signer = CreateSigner (signatureAlgorithm, DkimCanonicalizationAlgorithm.Simple, bodyAlgorithm);
 			var headers = new [] { HeaderId.From, HeaderId.To, HeaderId.Subject, HeaderId.Date };
-			var verifier = new DkimVerifier (new DummyPublicKeyLocator (DkimKeys.Public));
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
 			var message = new MimeMessage ();
 
 			message.From.Add (new MailboxAddress ("", "mimekit@example.com"));
@@ -469,9 +1167,10 @@ namespace UnitTests.Cryptography {
 			message.Subject = "This is a unicode message";
 			message.Date = DateTimeOffset.Now;
 
-			var builder = new BodyBuilder ();
-			builder.TextBody = " تست  ";
-			builder.HtmlBody = "  <div> تست </div> ";
+			var builder = new BodyBuilder {
+				TextBody = " تست  ",
+				HtmlBody = "  <div> تست </div> "
+			};
 			message.Body = builder.ToMessageBody ();
 
 			((Multipart) message.Body).Boundary = "=-MultipartAlternativeBoundary";
@@ -486,13 +1185,13 @@ namespace UnitTests.Cryptography {
 			VerifyDkimBodyHash (message, signatureAlgorithm, expectedHash);
 
 			if (signatureAlgorithm == DkimSignatureAlgorithm.RsaSha1) {
-				Assert.IsFalse (verifier.Verify (message, dkim), "DKIM-Signature using rsa-sha1 should not verify.");
+				Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (DkimSignatureStatus.Policy), "DKIM-Signature using rsa-sha1 should not verify.");
 
 				// now enable rsa-sha1 to verify again, this time it should pass...
 				verifier.Enable (DkimSignatureAlgorithm.RsaSha1);
 			}
 
-			Assert.IsTrue (verifier.Verify (message, dkim), "Failed to verify DKIM-Signature.");
+			Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify DKIM-Signature.");
 		}
 
 		[Test]
@@ -522,73 +1221,73 @@ namespace UnitTests.Cryptography {
 		[Test]
 		public void TestVerifyGoogleMailDkimSignature ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.msg"));
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.msg"));
 			int index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			var locator = new DummyPublicKeyLocator (GMailDkimPublicKey);
-			var verifier = new DkimVerifier (locator);
+			var resolver = new DummyDnsResolver (GMailDkimPublicKey);
+			var verifier = new DkimVerifier (resolver);
 
-			Assert.IsTrue (verifier.Verify (message, message.Headers[index]), "Failed to verify GMail signature.");
+			Assert.That (verifier.Verify (message, message.Headers[index]).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify GMail signature.");
 		}
 
 		[Test]
 		public async Task TestVerifyGoogleMailDkimSignatureAsync ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.msg"));
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "gmail.msg"));
 			int index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			var locator = new DummyPublicKeyLocator (GMailDkimPublicKey);
-			var verifier = new DkimVerifier (locator);
+			var resolver = new DummyDnsResolver (GMailDkimPublicKey);
+			var verifier = new DkimVerifier (resolver);
 
-			Assert.IsTrue (await verifier.VerifyAsync (message, message.Headers[index]), "Failed to verify GMail signature.");
+			Assert.That ((await verifier.VerifyAsync (message, message.Headers[index])).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify GMail signature.");
 		}
 
 		[Test]
 		public void TestVerifyGoogleMultipartRelatedDkimSignature ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "related.msg"));
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "related.msg"));
 			int index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			var locator = new DummyPublicKeyLocator (GMailDkimPublicKey);
-			var verifier = new DkimVerifier (locator);
+			var resolver = new DummyDnsResolver (GMailDkimPublicKey);
+			var verifier = new DkimVerifier (resolver);
 
-			Assert.IsTrue (verifier.Verify (message, message.Headers[index]), "Failed to verify GMail signature.");
+			Assert.That (verifier.Verify (message, message.Headers[index]).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify GMail signature.");
 		}
 
 		[Test]
 		public async Task TestVerifyGoogleMultipartRelatedDkimSignatureAsync ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "related.msg"));
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "related.msg"));
 			int index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			var locator = new DummyPublicKeyLocator (GMailDkimPublicKey);
-			var verifier = new DkimVerifier (locator);
+			var resolver = new DummyDnsResolver (GMailDkimPublicKey);
+			var verifier = new DkimVerifier (resolver);
 
-			Assert.IsTrue (await verifier.VerifyAsync (message, message.Headers[index]), "Failed to verify GMail signature.");
+			Assert.That ((await verifier.VerifyAsync (message, message.Headers[index])).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify GMail signature.");
 		}
 
 		[Test]
 		public void TestVerifyGoogleMultipartWithoutEndBoundaryDkimSignature ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "multipart-no-end-boundary.msg"));
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "multipart-no-end-boundary.msg"));
 			int index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			var locator = new DummyPublicKeyLocator (GMailDkimPublicKey);
-			var verifier = new DkimVerifier (locator);
+			var resolver = new DummyDnsResolver (GMailDkimPublicKey);
+			var verifier = new DkimVerifier (resolver);
 
-			Assert.IsTrue (verifier.Verify (message, message.Headers[index]), "Failed to verify GMail signature.");
+			Assert.That (verifier.Verify (message, message.Headers[index]).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify GMail signature.");
 		}
 
 		[Test]
 		public async Task TestVerifyGoogleMultipartWithoutEndBoundaryDkimSignatureAsync ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "multipart-no-end-boundary.msg"));
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "multipart-no-end-boundary.msg"));
 			int index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			var locator = new DummyPublicKeyLocator (GMailDkimPublicKey);
-			var verifier = new DkimVerifier (locator);
+			var resolver = new DummyDnsResolver (GMailDkimPublicKey);
+			var verifier = new DkimVerifier (resolver);
 
-			Assert.IsTrue (await verifier.VerifyAsync (message, message.Headers[index]), "Failed to verify GMail signature.");
+			Assert.That ((await verifier.VerifyAsync (message, message.Headers[index])).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify GMail signature.");
 		}
 
 		[Test]
 		public void TestSignRfc8463Example ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "rfc8463-example.msg"));
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "rfc8463-example.msg"));
 			var signer = new DkimSigner (Ed25519PrivateKey, "football.example.com", "brisbane", DkimSignatureAlgorithm.Ed25519Sha256) {
 				HeaderCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Relaxed,
 				BodyCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Relaxed,
@@ -599,60 +1298,101 @@ namespace UnitTests.Cryptography {
 			signer.Sign (message, headers);
 
 			int index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			var locator = new DkimPublicKeyLocator ();
-			var verifier = new DkimVerifier (locator);
+			var resolver = new MockDnsResolver ();
+			var verifier = new DkimVerifier (resolver);
 			var dkim = message.Headers[index];
 
-			locator.Add ("brisbane._domainkey.football.example.com", "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
-			locator.Add ("test._domainkey.football.example.com", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3idY6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lxj+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("brisbane._domainkey.football.example.com", "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
+			resolver.Add ("test._domainkey.football.example.com", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3idY6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lxj+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Assert.IsTrue (verifier.Verify (message, message.Headers[index]), "Failed to verify ed25519-sha256");
+			Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify ed25519-sha256");
 		}
 
 		[Test]
 		public void TestVerifyRfc8463Example ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "rfc8463-example.msg"));
-			var locator = new DkimPublicKeyLocator ();
-			var verifier = new DkimVerifier (locator);
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "rfc8463-example.msg"));
+			var resolver = new MockDnsResolver ();
+			var verifier = new DkimVerifier (resolver);
 			int index;
 
-			locator.Add ("brisbane._domainkey.football.example.com", "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
-			locator.Add ("test._domainkey.football.example.com", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3idY6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lxj+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("brisbane._domainkey.football.example.com", "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
+			resolver.Add ("test._domainkey.football.example.com", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3idY6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lxj+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
 			// the last DKIM-Signature uses rsa-sha256
 			index = message.Headers.LastIndexOf (HeaderId.DkimSignature);
-			Assert.IsTrue (verifier.Verify (message, message.Headers[index]), "Failed to verify rsa-sha256");
+			Assert.That (verifier.Verify (message, message.Headers[index]).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify rsa-sha256");
 
 			// the first DKIM-Signature uses ed25519-sha256
 			index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			Assert.IsTrue (verifier.Verify (message, message.Headers[index]), "Failed to verify ed25519-sha256");
+			Assert.That (verifier.Verify (message, message.Headers[index]).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify ed25519-sha256");
 		}
 
 		[Test]
 		public async Task TestVerifyRfc8463ExampleAsync ()
 		{
-			var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "rfc8463-example.msg"));
-			var locator = new DkimPublicKeyLocator ();
-			var verifier = new DkimVerifier (locator);
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "rfc8463-example.msg"));
+			var resolver = new MockDnsResolver ();
+			var verifier = new DkimVerifier (resolver);
 			int index;
 
-			locator.Add ("brisbane._domainkey.football.example.com", "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
-			locator.Add ("test._domainkey.football.example.com", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3idY6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lxj+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("brisbane._domainkey.football.example.com", "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
+			resolver.Add ("test._domainkey.football.example.com", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3idY6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lxj+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
 			// the last DKIM-Signature uses rsa-sha256
 			index = message.Headers.LastIndexOf (HeaderId.DkimSignature);
-			Assert.IsTrue (await verifier.VerifyAsync (message, message.Headers[index]), "Failed to verify rsa-sha256");
+			Assert.That ((await verifier.VerifyAsync (message, message.Headers[index])).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify rsa-sha256");
 
 			// the first DKIM-Signature uses ed25519-sha256
 			index = message.Headers.IndexOf (HeaderId.DkimSignature);
-			Assert.IsTrue (await verifier.VerifyAsync (message, message.Headers[index]), "Failed to verify ed25519-sha256");
+			Assert.That ((await verifier.VerifyAsync (message, message.Headers[index])).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify ed25519-sha256");
+		}
+
+		// An Ed25519 key record that does not decode to a point on the curve is skipped rather than aborting the key lookup.
+		const string InvalidEd25519PointRecord = "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHO7PvpcghaiMlrwIaaPcHURo=";
+
+		[Test]
+		public void TestVerifySkipsInvalidEd25519PointRecord ()
+		{
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "rfc8463-example.msg"));
+			var dkim = message.Headers[message.Headers.IndexOf (HeaderId.DkimSignature)];
+			var resolver = new MockDnsResolver ();
+			var verifier = new DkimVerifier (resolver);
+
+			resolver.Add ("brisbane._domainkey.football.example.com", InvalidEd25519PointRecord);
+
+			var result = verifier.Verify (message, dkim);
+			Assert.That (result.Status, Is.EqualTo (DkimSignatureStatus.PermError));
+			Assert.That (result.Exception, Is.Null);
+
+			resolver.Add ("brisbane._domainkey.football.example.com", "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
+
+			Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (DkimSignatureStatus.Pass));
+		}
+
+		[Test]
+		public async Task TestVerifySkipsInvalidEd25519PointRecordAsync ()
+		{
+			using var message = MimeMessage.Load (Path.Combine (TestHelper.ProjectDir, "TestData", "dkim", "rfc8463-example.msg"));
+			var dkim = message.Headers[message.Headers.IndexOf (HeaderId.DkimSignature)];
+			var resolver = new MockDnsResolver ();
+			var verifier = new DkimVerifier (resolver);
+
+			resolver.Add ("brisbane._domainkey.football.example.com", InvalidEd25519PointRecord);
+
+			var result = await verifier.VerifyAsync (message, dkim);
+			Assert.That (result.Status, Is.EqualTo (DkimSignatureStatus.PermError));
+			Assert.That (result.Exception, Is.Null);
+
+			resolver.Add ("brisbane._domainkey.football.example.com", "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=");
+
+			Assert.That ((await verifier.VerifyAsync (message, dkim)).Status, Is.EqualTo (DkimSignatureStatus.Pass));
 		}
 
 		static void TestDkimSignVerify (MimeMessage message, DkimSignatureAlgorithm signatureAlgorithm, DkimCanonicalizationAlgorithm headerAlgorithm, DkimCanonicalizationAlgorithm bodyAlgorithm)
 		{
 			var headers = new HeaderId[] { HeaderId.From, HeaderId.Subject, HeaderId.Date };
-			var verifier = new DkimVerifier (new DummyPublicKeyLocator (DkimKeys.Public));
+			var verifier = new DkimVerifier (new DummyDnsResolver (DkimKeys.Public));
 			var signer = CreateSigner (signatureAlgorithm, headerAlgorithm, bodyAlgorithm);
 
 			signer.Sign (message, headers);
@@ -660,13 +1400,13 @@ namespace UnitTests.Cryptography {
 			var dkim = message.Headers[0];
 
 			if (signatureAlgorithm == DkimSignatureAlgorithm.RsaSha1) {
-				Assert.IsFalse (verifier.Verify (message, dkim), "DKIM-Signature using rsa-sha1 should not verify.");
+				Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (DkimSignatureStatus.Policy), "DKIM-Signature using rsa-sha1 should not verify.");
 
 				// now enable rsa-sha1 to verify again, this time it should pass...
 				verifier.Enable (DkimSignatureAlgorithm.RsaSha1);
 			}
 
-			Assert.IsTrue (verifier.Verify (message, dkim), "Failed to verify DKIM-Signature.");
+			Assert.That (verifier.Verify (message, dkim).Status, Is.EqualTo (DkimSignatureStatus.Pass), "Failed to verify DKIM-Signature.");
 
 			message.Headers.RemoveAt (0);
 		}
@@ -680,23 +1420,23 @@ namespace UnitTests.Cryptography {
 				int i = 0;
 
 				while (!parser.IsEndOfStream && i < 10) {
-					var message = parser.ParseMessage ();
+					using (var message = parser.ParseMessage ()) {
+						TestDkimSignVerify (message, DkimSignatureAlgorithm.RsaSha1,
+							DkimCanonicalizationAlgorithm.Relaxed,
+							DkimCanonicalizationAlgorithm.Relaxed);
 
-					TestDkimSignVerify (message, DkimSignatureAlgorithm.RsaSha1,
-						DkimCanonicalizationAlgorithm.Relaxed,
-						DkimCanonicalizationAlgorithm.Relaxed);
+						TestDkimSignVerify (message, DkimSignatureAlgorithm.RsaSha256,
+							DkimCanonicalizationAlgorithm.Relaxed,
+							DkimCanonicalizationAlgorithm.Simple);
 
-					TestDkimSignVerify (message, DkimSignatureAlgorithm.RsaSha256,
-						DkimCanonicalizationAlgorithm.Relaxed,
-						DkimCanonicalizationAlgorithm.Simple);
+						TestDkimSignVerify (message, DkimSignatureAlgorithm.RsaSha1,
+							DkimCanonicalizationAlgorithm.Simple,
+							DkimCanonicalizationAlgorithm.Relaxed);
 
-					TestDkimSignVerify (message, DkimSignatureAlgorithm.RsaSha1,
-						DkimCanonicalizationAlgorithm.Simple,
-						DkimCanonicalizationAlgorithm.Relaxed);
-
-					TestDkimSignVerify (message, DkimSignatureAlgorithm.RsaSha256,
-						DkimCanonicalizationAlgorithm.Simple,
-						DkimCanonicalizationAlgorithm.Simple);
+						TestDkimSignVerify (message, DkimSignatureAlgorithm.RsaSha256,
+							DkimCanonicalizationAlgorithm.Simple,
+							DkimCanonicalizationAlgorithm.Simple);
+					}
 
 					i++;
 				}

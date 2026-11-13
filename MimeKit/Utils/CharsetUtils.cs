@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,47 +27,31 @@
 using System;
 using System.IO;
 using System.Text;
-using System.Reflection;
+using System.Globalization;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 namespace MimeKit.Utils {
 	static class CharsetUtils
 	{
+		static readonly char[] DashUnderscore = new[] { '-', '_' };
 		static readonly Dictionary<string, int> aliases;
 		public static readonly Encoding Latin1;
 		public static readonly Encoding UTF8;
 
 		static CharsetUtils ()
 		{
-			int gb2312;
-
-#if NETSTANDARD || NET5_0_OR_GREATER
-			var encodingProviderType = typeof (Encoding).Assembly.GetType ("System.Text.EncodingProvider");
-			var registerProvider = typeof (Encoding).GetMethod ("RegisterProvider", new Type[] { encodingProviderType });
-			if (registerProvider != null) {
-				try {
-					var assembly = Assembly.Load ("System.Text.Encoding.CodePages");
-					if (assembly != null) {
-						var providerType = assembly.GetType ("System.Text.CodePagesEncodingProvider");
-						var property = providerType.GetProperty ("Instance").GetGetMethod ();
-						var instance = property.Invoke (providerType, new object[0]);
-
-						registerProvider.Invoke (typeof (Encoding), new object[] { instance });
-					}
-				} catch (FileNotFoundException) {
-				}
-			}
-#endif
-
 			try {
 				Latin1 = Encoding.GetEncoding (28591, new EncoderExceptionFallback (), new DecoderExceptionFallback ());
 			} catch (NotSupportedException) {
-				// Note: Some ASP.NET web hosts such as GoDaddy's Windows environment do not have
-				// iso-8859-1 support, they only have the built-in text encodings, so we need to
-				// hack around it by using an alternative encoding.
+				// Note: Some ASP.NET environments running on .NET Framework >= v4.6.1 do not include the full spectrum of
+				// text encodings, so iso-8859-1 will not always be available unless the program includes a reference to
+				// the System.Text.Encoding.CodePages nuget package *and* it has been registered via the
+				// System.Text.Encoding.RegisterProvider method. In cases where this hasn't been done, we need some fallback
+				// logic that tries to handle this at least somewhat.
 
-				// Try to use Windows-1252 if it is available...
-				Latin1 = Encoding.GetEncoding (1252, new EncoderExceptionFallback (), new DecoderExceptionFallback ());
+				// Use ASCII as a fallback.
+				Latin1 = Encoding.ASCII;
 			}
 
 			// Note: Encoding.UTF8.GetString() replaces invalid bytes with a unicode '?' character,
@@ -76,7 +60,7 @@ namespace MimeKit.Utils {
 
 			aliases = new Dictionary<string, int> (MimeUtils.OrdinalIgnoreCase);
 
-			AddAliases (aliases, 65001, -1, "utf-8", "utf8");
+			AddAliases (aliases, 65001, -1, "utf-8", "utf8", "unicode");
 
 			// ANSI_X3.4-1968 is used on some systems and should be
 			// treated the same as US-ASCII.
@@ -108,7 +92,7 @@ namespace MimeKit.Utils {
 			AddAliases (aliases, 950, -1, "big5", "big5-0", "big5-hkscs", "big5.eten-0", "big5hkscs-0");
 
 			// Chinese charsets (aliases for gb2312)
-			gb2312 = AddAliases (aliases, 936, -1, "gb2312", "gb-2312", "gb2312-0", "gb2312-80", "gb2312.1980-0");
+			int gb2312 = AddAliases (aliases, 936, -1, "gb2312", "gb-2312", "gb2312-0", "gb2312-80", "gb2312.1980-0");
 
 			// Chinese charsets (euc-cn and gbk not supported on Mono)
 			// https://bugzilla.mozilla.org/show_bug.cgi?id=844082 seems to suggest falling back to gb2312.
@@ -162,11 +146,11 @@ namespace MimeKit.Utils {
 
 		public static string GetMimeCharset (Encoding encoding)
 		{
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
 			switch (encoding.CodePage) {
-			case 932:   return "iso-2022-jp"; // shift_jis
+			case 932:   return "shift_jis";   // shift_jis
 			case 949:   return "euc-kr";      // ks_c_5601-1987
 			case 50220: return "iso-2022-jp"; // csISO2022JP
 			case 50221: return "iso-2022-jp"; // csISO2022JP
@@ -186,17 +170,25 @@ namespace MimeKit.Utils {
 			}
 		}
 
-		static int ParseIsoCodePage (string charset)
+		static bool TryParseInt32 (string text, int startIndex, int count, out int value)
 		{
-			if (charset.Length < 5)
+#if NETSTANDARD2_1_OR_GREATER || NET5_0_OR_GREATER
+			return int.TryParse (text.AsSpan (startIndex, count), NumberStyles.None, CultureInfo.InvariantCulture, out value);
+#else
+			return int.TryParse (text.Substring (startIndex, count), NumberStyles.None, CultureInfo.InvariantCulture, out value);
+#endif
+		}
+
+		static int ParseIsoCodePage (string charset, int startIndex)
+		{
+			if ((charset.Length - startIndex) < 5)
 				return -1;
 
-			int dash = charset.IndexOfAny (new [] { '-', '_' });
+			int dash = charset.IndexOfAny (DashUnderscore, startIndex);
 			if (dash == -1)
 				dash = charset.Length;
 
-			int iso;
-			if (!int.TryParse (charset.Substring (0, dash), out iso))
+			if (!TryParseInt32 (charset, startIndex, dash - startIndex, out int iso))
 				return -1;
 
 			if (iso == 10646)
@@ -205,12 +197,12 @@ namespace MimeKit.Utils {
 			if (dash + 2 > charset.Length)
 				return -1;
 
-			string suffix = charset.Substring (dash + 1);
+			int codepageIndex = dash + 1;
 			int codepage;
 
 			switch (iso) {
 			case 8859:
-				if (!int.TryParse (suffix, out codepage))
+				if (!TryParseInt32 (charset, codepageIndex, charset.Length - codepageIndex, out codepage))
 					return -1;
 
 				if (codepage <= 0 || (codepage > 9 && codepage < 13) || codepage > 15)
@@ -219,11 +211,14 @@ namespace MimeKit.Utils {
 				codepage += 28590;
 				break;
 			case 2022:
-				switch (suffix.ToLowerInvariant ()) {
-				case "jp": codepage = 50220; break;
-				case "kr": codepage = 50225; break;
-				default: return -1;
-				}
+				int n = charset.Length - codepageIndex;
+
+				if (n == 2 && string.Compare (charset, codepageIndex, "jp", 0, 2, StringComparison.OrdinalIgnoreCase) == 0)
+					codepage = 50220;
+				else if (n == 2 && string.Compare (charset, codepageIndex, "kr", 0, 2, StringComparison.OrdinalIgnoreCase) == 0)
+					codepage = 50225;
+				else
+					codepage = -1;
 				break;
 			default:
 				return -1;
@@ -250,10 +245,10 @@ namespace MimeKit.Utils {
 					i++;
 				}
 
-				if (i + 2 < charset.Length && charset[i] == 'c' && charset[i + 1] == 'p')
+				if (i + 2 < charset.Length && (charset[i] == 'c' || charset[i] == 'C') && (charset[i + 1] == 'p' || charset[i + 1] == 'P'))
 					i += 2;
 
-				if (int.TryParse (charset.Substring (i), out codepage))
+				if (TryParseInt32 (charset, i, charset.Length - i, out codepage))
 					return codepage;
 			} else if (charset.StartsWith ("ibm", StringComparison.OrdinalIgnoreCase)) {
 				i = 3;
@@ -264,7 +259,7 @@ namespace MimeKit.Utils {
 				if (charset[i] == '-' || charset[i] == '_')
 					i++;
 
-				if (int.TryParse (charset.Substring (i), out codepage))
+				if (TryParseInt32 (charset, i, charset.Length - i, out codepage))
 					return codepage;
 			} else if (charset.StartsWith ("iso", StringComparison.OrdinalIgnoreCase)) {
 				i = 3;
@@ -275,7 +270,7 @@ namespace MimeKit.Utils {
 				if (charset[i] == '-' || charset[i] == '_')
 					i++;
 
-				if ((codepage = ParseIsoCodePage (charset.Substring (i))) != -1)
+				if ((codepage = ParseIsoCodePage (charset, i)) != -1)
 					return codepage;
 			} else if (charset.StartsWith ("cp", StringComparison.OrdinalIgnoreCase)) {
 				i = 2;
@@ -286,7 +281,7 @@ namespace MimeKit.Utils {
 				if (charset[i] == '-' || charset[i] == '_')
 					i++;
 
-				if (int.TryParse (charset.Substring (i), out codepage))
+				if (TryParseInt32 (charset, i, charset.Length - i, out codepage))
 					return codepage;
 			} else if (charset.Equals ("latin1", StringComparison.OrdinalIgnoreCase)) {
 				return 28591;
@@ -297,7 +292,7 @@ namespace MimeKit.Utils {
 
 		public static int GetCodePage (string charset)
 		{
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
 			int codepage;
@@ -340,14 +335,14 @@ namespace MimeKit.Utils {
 		{
 			int codepage;
 
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
-			if (fallback == null)
+			if (fallback is null)
 				throw new ArgumentNullException (nameof (fallback));
 
 			if ((codepage = GetCodePage (charset)) == -1)
-				throw new NotSupportedException (string.Format ("The '{0}' encoding is not supported.", charset));
+				throw new NotSupportedException ($"The '{charset}' encoding is not supported.");
 
 			var encoderFallback = new EncoderReplacementFallback (fallback);
 			var decoderFallback = new DecoderReplacementFallback (fallback);
@@ -371,7 +366,7 @@ namespace MimeKit.Utils {
 
 		public static Encoding GetEncoding (int codepage, string fallback)
 		{
-			if (fallback == null)
+			if (fallback is null)
 				throw new ArgumentNullException (nameof (fallback));
 
 			var encoderFallback = new EncoderReplacementFallback (fallback);
@@ -383,6 +378,25 @@ namespace MimeKit.Utils {
 		public static Encoding GetEncoding (int codepage)
 		{
 			return Encoding.GetEncoding (codepage);
+		}
+
+		public static bool TryGetEncoding (int codepage, [NotNullWhen (true)] out Encoding? encoding)
+		{
+			encoding = null;
+
+			try {
+				encoding = Encoding.GetEncoding (codepage);
+				return true;
+			} catch (NotSupportedException) {
+				return false;
+			} catch (ArgumentException) {
+				return false;
+			}
+		}
+
+		public static Encoding GetEncodingOrDefault (int codepage, Encoding defaultEncoding)
+		{
+			return TryGetEncoding (codepage, out var encoding) ? encoding : defaultEncoding;
 		}
 
 		class InvalidByteCountFallback : DecoderFallback
@@ -467,11 +481,18 @@ namespace MimeKit.Utils {
 
 		internal static char[] ConvertToUnicode (ParserOptions options, byte[] input, int startIndex, int length, out int charCount)
 		{
+			// UTF-8 is always the first choice when no invalid sequences are present.
+			if (Utf8.IsValid (input.AsSpan (startIndex, length))) {
+				var unicode = UTF8.GetChars (input, startIndex, length);
+
+				charCount = unicode.Length;
+				return unicode;
+			}
+
 			var invalid = new InvalidByteCountFallback ();
 			var userCharset = options.CharsetEncoding;
 			int min = int.MaxValue;
 			int bestCharCount = 0;
-			char[] output = null;
 			Encoding encoding;
 			Decoder decoder;
 			int[] codepages;
@@ -487,7 +508,7 @@ namespace MimeKit.Utils {
 
 			for (int i = 0; i < codepages.Length; i++) {
 				encoding = Encoding.GetEncoding (codepages[i], new EncoderReplacementFallback ("?"), invalid);
-				decoder = (Decoder) encoding.GetDecoder ();
+				decoder = encoding.GetDecoder ();
 
 				count = decoder.GetCharCount (input, startIndex, length, true);
 				if (invalid.InvalidByteCount < min) {
@@ -503,20 +524,25 @@ namespace MimeKit.Utils {
 			}
 
 			encoding = GetEncoding (best, "?");
-			decoder = (Decoder) encoding.GetDecoder ();
-			output = new char[bestCharCount];
+			decoder = encoding.GetDecoder ();
 
-			charCount = decoder.GetChars (input, startIndex, length, output, 0, true);
+			var output = new char[bestCharCount];
+
+			try {
+				charCount = decoder.GetChars (input, startIndex, length, output, 0, true);
+			} catch {
+				charCount = 0;
+			}
 
 			return output;
 		}
 
 		public static string ConvertToUnicode (ParserOptions options, byte[] buffer, int startIndex, int length)
 		{
-			if (options == null)
+			if (options is null)
 				throw new ArgumentNullException (nameof (options));
 
-			if (buffer == null)
+			if (buffer is null)
 				throw new ArgumentNullException (nameof (buffer));
 
 			if (startIndex < 0 || startIndex > buffer.Length)
@@ -525,9 +551,7 @@ namespace MimeKit.Utils {
 			if (length < 0 || length > (buffer.Length - startIndex))
 				throw new ArgumentOutOfRangeException (nameof (length));
 
-			int count;
-
-			return new string (ConvertToUnicode (options, buffer, startIndex, length, out count), 0, count);
+			return new string (ConvertToUnicode (options, buffer, startIndex, length, out int count), 0, count);
 		}
 
 		internal static char[] ConvertToUnicode (Encoding encoding, byte[] input, int startIndex, int length, out int charCount)
@@ -536,35 +560,48 @@ namespace MimeKit.Utils {
 			int count = decoder.GetCharCount (input, startIndex, length, true);
 			var output = new char[count];
 
-			charCount = decoder.GetChars (input, startIndex, length, output, 0, true);
+			try {
+				charCount = decoder.GetChars (input, startIndex, length, output, 0, true);
+			} catch (ArgumentException) {
+				charCount = 0;
+			}
 
 			return output;
 		}
 
-		internal static char[] ConvertToUnicode (ParserOptions options, int codepage, byte[] input, int startIndex, int length, out int charCount)
+		internal static void ConvertToUnicode (ParserOptions options, byte[] input, int startIndex, int length, ref ValueStringBuilder output)
 		{
-			Encoding encoding = null;
+#if NET8_0_OR_GREATER
+			if (output.TryAppendUtf8 (input.AsSpan (startIndex, length)))
+				return;
+#endif
 
-			if (codepage != -1) {
-				try {
-					encoding = GetEncoding (codepage);
-				} catch (NotSupportedException) {
-				} catch (ArgumentException) {
-				}
+			var unicode = ConvertToUnicode (options, input, startIndex, length, out int charCount);
+			output.Append (unicode.AsSpan (0, charCount));
+		}
+
+		internal static void ConvertToUnicode (ParserOptions options, int codepage, byte[] input, int startIndex, int length, ref ValueStringBuilder output)
+		{
+#if NET8_0_OR_GREATER
+			if (codepage == 65001 && output.TryAppendUtf8 (input.AsSpan (startIndex, length)))
+				return;
+#endif
+
+			if (codepage == -1 || !TryGetEncoding (codepage, out var encoding)) {
+				ConvertToUnicode (options, input, startIndex, length, ref output);
+				return;
 			}
 
-			if (encoding == null)
-				return ConvertToUnicode (options, input, startIndex, length, out charCount);
-
-			return ConvertToUnicode (encoding, input, startIndex, length, out charCount);
+			var unicode = ConvertToUnicode (encoding, input, startIndex, length, out int charCount);
+			output.Append (unicode.AsSpan (0, charCount));
 		}
 
 		public static string ConvertToUnicode (Encoding encoding, byte[] buffer, int startIndex, int length)
 		{
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
-			if (buffer == null)
+			if (buffer is null)
 				throw new ArgumentNullException (nameof (buffer));
 
 			if (startIndex < 0 || startIndex > buffer.Length)
@@ -573,12 +610,10 @@ namespace MimeKit.Utils {
 			if (length < 0 || length > (buffer.Length - startIndex))
 				throw new ArgumentOutOfRangeException (nameof (length));
 
-			int count;
-
-			return new string (ConvertToUnicode (encoding, buffer, startIndex, length, out count), 0, count);
+			return new string (ConvertToUnicode (encoding, buffer, startIndex, length, out int count), 0, count);
 		}
 
-		public static bool TryGetBomEncoding (byte[] buffer, int length, out Encoding encoding)
+		public static bool TryGetBomEncoding (byte[] buffer, int length, [NotNullWhen (true)] out Encoding? encoding)
 		{
 			if (length >= 2 && buffer[0] == 0xFF && buffer[1] == 0xFE)
 				encoding = Encoding.Unicode; // UTF-16LE
@@ -592,7 +627,7 @@ namespace MimeKit.Utils {
 			return encoding != null;
 		}
 
-		public static bool TryGetBomEncoding (Stream stream, out Encoding encoding)
+		public static bool TryGetBomEncoding (Stream stream, [NotNullWhen (true)] out Encoding? encoding)
 		{
 			var bom = new byte[3];
 

@@ -1,0 +1,392 @@
+//
+// QuotedPrintableValidator.cs
+//
+// Author: Jeffrey Stedfast <jestedfa@microsoft.com>
+//
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+//
+
+using System;
+using System.Runtime.CompilerServices;
+#if NET8_0_OR_GREATER
+using System.Numerics;
+using System.Runtime.Intrinsics;
+#endif
+
+using MimeKit.Utils;
+
+namespace MimeKit.Encodings {
+	/// <summary>
+	/// Incrementally validates content encoded with the quoted-printable encoding.
+	/// </summary>
+	/// <remarks>
+	/// Quoted-Printable is an encoding often used in MIME to textual content outside
+	/// the ASCII range in order to ensure that the text remains intact when sent
+	/// via 7bit transports such as SMTP.
+	/// </remarks>
+	class QuotedPrintableValidator : IEncodingValidator
+	{
+#if NET8_0_OR_GREATER
+		const int ScalarScanLength = 16;
+#endif
+
+		enum QpValidatorState : byte
+		{
+			PassThrough,
+			EqualSign,
+			SoftBreak,
+			DecodeByte
+		}
+
+		readonly IMimeComplianceLogger logger;
+		readonly MimeComplianceContext context;
+		long lineBeginOffset;
+		long streamOffset;
+		int lineNumber;
+		QpValidatorState state;
+
+		// Note: Each of these violations is reported at most once per line. Reporting every occurrence
+		// of them would let a crafted part emit an issue for every couple of bytes of content (content
+		// such as "=~=~=~..." logs once per two octets), swamping every other finding in the report.
+		// They are instance fields rather than locals because a line can span multiple Write() calls.
+		bool reportedInvalidEncoding;
+		bool reportedInvalidSoftBreak;
+
+		/// <summary>
+		/// Initialize a new instance of the <see cref="QuotedPrintableValidator"/> class.
+		/// </summary>
+		/// <remarks>
+		/// Creates a new quoted-printable validator.
+		/// </remarks>
+		/// <param name="logger">The compliance logger.</param>
+		/// <param name="context">The context that the message is being used in.</param>
+		/// <param name="streamOffset">The current stream offset.</param>
+		/// <param name="lineNumber">The current line number.</param>
+		public QuotedPrintableValidator (IMimeComplianceLogger logger, MimeComplianceContext context, long streamOffset, int lineNumber)
+		{
+			this.logger = logger;
+			this.context = context;
+			this.lineBeginOffset = streamOffset;
+			this.streamOffset = streamOffset;
+			this.lineNumber = lineNumber;
+		}
+
+		// Note: The validator only ever tracks the offset that the current line begins at. The column
+		// is worked out from the offset being reported rather than from the cursor, because not every
+		// violation is reported at the exact position that the cursor happens to be sitting at.
+		int GetColumnNumber (long offset)
+		{
+			return (int) (offset - lineBeginOffset) + 1;
+		}
+
+		/// <summary>
+		/// Get the encoding.
+		/// </summary>
+		/// <remarks>
+		/// Gets the encoding that the validator supports.
+		/// </remarks>
+		/// <value>The encoding.</value>
+		public ContentEncoding Encoding {
+			get { return ContentEncoding.QuotedPrintable; }
+		}
+
+#if NET8_0_OR_GREATER
+		/// <summary>
+		/// Get whether the current state permits consuming prevalidated content.
+		/// </summary>
+		public bool CanConsumeCleanContent => state == QpValidatorState.PassThrough;
+
+		/// <summary>
+		/// Get the number of encoded payload bytes remaining in the current UU line.
+		/// </summary>
+		/// <remarks>
+		/// For UU encoding, -1 indicates a new length byte is expected, while 0
+		/// indicates only the line ending remains. Other encodings return 0,
+		/// and the reader does not use this property for those encodings.
+		/// </remarks>
+		public int CleanContentRemaining => 0;
+
+		/// <summary>
+		/// Advance the validator state over a prevalidated content prefix.
+		/// </summary>
+		/// <remarks>
+		/// The caller must validate the content for this encoding and end the range
+		/// immediately after an LF. This method does not report diagnostics.
+		/// </remarks>
+		/// <param name="input">The prevalidated content.</param>
+		/// <param name="length">The number of bytes to consume.</param>
+		/// <param name="alphabetCount">The number of Base64 alphabet bytes, ignored by other encodings.</param>
+		/// <param name="lines">The number of line feeds in the content.</param>
+		public unsafe void ConsumeCleanContent (byte* input, int length, uint alphabetCount, int lines)
+		{
+			streamOffset += length;
+			lineBeginOffset = streamOffset;
+			lineNumber += lines;
+			reportedInvalidEncoding = false;
+			reportedInvalidSoftBreak = false;
+		}
+
+		[MethodImpl (MethodImplOptions.AggressiveInlining)]
+		internal static uint HexDigits (Vector128<byte> block)
+		{
+			var letters = Vector128.LessThan (((block | Vector128.Create ((byte) 0x20)) + Vector128.Create (unchecked ((byte) (0x80 - 'a')))).AsSByte (), Vector128.Create ((sbyte) (-128 + 6)));
+			var digits = Vector128.LessThan ((block + Vector128.Create (unchecked ((byte) (0x80 - '0')))).AsSByte (), Vector128.Create ((sbyte) (-128 + 10)));
+
+			return (letters | digits).ExtractMostSignificantBits ();
+		}
+
+		[MethodImpl (MethodImplOptions.AggressiveInlining)]
+		internal static uint HexDigits (Vector256<byte> block)
+		{
+			var letters = Vector256.LessThan (((block | Vector256.Create ((byte) 0x20)) + Vector256.Create (unchecked ((byte) (0x80 - 'a')))).AsSByte (), Vector256.Create ((sbyte) (-128 + 6)));
+			var digits = Vector256.LessThan ((block + Vector256.Create (unchecked ((byte) (0x80 - '0')))).AsSByte (), Vector256.Create ((sbyte) (-128 + 10)));
+
+			return (letters | digits).ExtractMostSignificantBits ();
+		}
+
+		[MethodImpl (MethodImplOptions.AggressiveInlining)]
+		internal static unsafe bool AreEscapesValid (byte* input, byte* end, uint equals, uint hex, uint cr, uint lf, int width)
+		{
+			uint tail = equals & (3u << (width - 2));
+			uint valid = ((hex >> 1) & (hex >> 2)) | ((cr >> 1) & (lf >> 2));
+
+			if ((equals & ~tail & ~valid) != 0)
+				return false;
+
+			// Escapes crossing a vector edge need real input, not the reader's LF sentinel.
+			while (tail != 0) {
+				byte* escape = input + BitOperations.TrailingZeroCount (tail);
+
+				if (end - escape < 3 || !((escape[1].IsXDigit () && escape[2].IsXDigit ()) ||
+					(escape[1] == (byte) '\r' && escape[2] == (byte) '\n')))
+					return false;
+
+				tail &= tail - 1;
+			}
+
+			return true;
+		}
+
+		// The input must be a single line, starting in PassThrough state. Check without reporting
+		// so the reader can resume fused validation without moving encoding issues ahead of structural issues.
+		internal static unsafe bool IsLineValid (byte* input, int length)
+		{
+			byte* end = input + length;
+
+			if (length < 1 || end[-1] != (byte) '\n')
+				return false;
+
+			while (input < end) {
+				int index = new ReadOnlySpan<byte> (input, (int) (end - input)).IndexOf ((byte) '=');
+
+				if (index == -1)
+					return true;
+
+				input += index;
+
+				if (end - input == 2 && input[1] == (byte) '\n')
+					return true;
+
+				if (end - input < 3 || !((input[1].IsXDigit () && input[2].IsXDigit ()) ||
+					(input[1] == (byte) '\r' && input[2] == (byte) '\n')))
+					return false;
+
+				input += 3;
+			}
+
+			return true;
+		}
+#endif
+
+#if NET6_0_OR_GREATER
+		[SkipLocalsInit]
+#endif
+		[MethodImpl (MethodImplOptions.AggressiveInlining)]
+		unsafe void Validate (byte* input, int length)
+		{
+			byte* inend = input + length;
+			byte* inptr = input;
+			byte c;
+
+			while (inptr < inend) {
+				switch (state) {
+				case QpValidatorState.PassThrough:
+#if NET8_0_OR_GREATER
+					// Note: Scan the first few bytes one at a time because heavily-encoded content (e.g. non-Latin
+					// text) tends to have very short runs between '=' characters and the fixed overhead of
+					// IndexOfAny() outweighs its benefit for short runs. This is only done on .NET (Core) because
+					// the .NET Framework JIT generates code for this loop that is slow enough to make mostly-ASCII
+					// content slower to validate rather than faster.
+					byte* scanEnd = inend - inptr > ScalarScanLength ? inptr + ScalarScanLength : inend;
+
+					while (inptr < scanEnd) {
+						c = *inptr++;
+
+						if (c == '=') {
+							state = QpValidatorState.EqualSign;
+							break;
+						}
+
+						if (c == '\n') {
+							lineBeginOffset = streamOffset + (inptr - input);
+							lineNumber++;
+							reportedInvalidEncoding = false;
+							reportedInvalidSoftBreak = false;
+						}
+					}
+
+					if (state != QpValidatorState.PassThrough)
+						break;
+#endif
+
+					// Note: The bulk of quoted-printable content consists of literal characters that are
+					// simply passed through, so use a vectorized search to locate the next byte that the
+					// validator actually needs to inspect.
+					while (inptr < inend) {
+						int index = new ReadOnlySpan<byte> (inptr, (int) (inend - inptr)).IndexOfAny ((byte) '=', (byte) '\n');
+
+						if (index == -1) {
+							inptr = inend;
+							break;
+						}
+
+						c = inptr[index];
+						inptr += index + 1;
+
+						if (c == '=') {
+							state = QpValidatorState.EqualSign;
+							break;
+						}
+
+						lineBeginOffset = streamOffset + (inptr - input);
+						lineNumber++;
+						reportedInvalidEncoding = false;
+						reportedInvalidSoftBreak = false;
+					}
+					break;
+				case QpValidatorState.EqualSign:
+					c = *inptr;
+
+					if (c.IsXDigit ()) {
+						state = QpValidatorState.DecodeByte;
+					} else if (c == '\r') {
+						state = QpValidatorState.SoftBreak;
+					} else if (c == '\n') {
+						state = QpValidatorState.PassThrough;
+						lineBeginOffset = streamOffset + (inptr - input) + 1;
+						lineNumber++;
+						reportedInvalidEncoding = false;
+						reportedInvalidSoftBreak = false;
+					} else {
+						if (!reportedInvalidEncoding) {
+							reportedInvalidEncoding = true;
+
+							logger.Log (new MimeComplianceIssue (context, MimeComplianceViolation.InvalidQuotedPrintableEncoding, streamOffset + (inptr - input), lineNumber, GetColumnNumber (streamOffset + (inptr - input))));
+						}
+
+						state = QpValidatorState.PassThrough;
+					}
+
+					inptr++;
+					break;
+				case QpValidatorState.SoftBreak:
+					if (*inptr == '\n') {
+						inptr++;
+						lineBeginOffset = streamOffset + (inptr - input);
+						lineNumber++;
+						reportedInvalidEncoding = false;
+						reportedInvalidSoftBreak = false;
+					} else if (!reportedInvalidSoftBreak) {
+						reportedInvalidSoftBreak = true;
+
+						logger.Log (new MimeComplianceIssue (context, MimeComplianceViolation.InvalidQuotedPrintableSoftBreak, streamOffset + (inptr - input), lineNumber, GetColumnNumber (streamOffset + (inptr - input))));
+					}
+
+					state = QpValidatorState.PassThrough;
+					break;
+				case QpValidatorState.DecodeByte:
+					c = *inptr;
+
+					if (!c.IsXDigit ()) {
+						if (!reportedInvalidEncoding) {
+							reportedInvalidEncoding = true;
+
+							logger.Log (new MimeComplianceIssue (context, MimeComplianceViolation.InvalidQuotedPrintableEncoding, streamOffset + (inptr - input), lineNumber, GetColumnNumber (streamOffset + (inptr - input))));
+						}
+
+						if (c == '\n') {
+							lineBeginOffset = streamOffset + (inptr - input) + 1;
+							lineNumber++;
+							reportedInvalidEncoding = false;
+							reportedInvalidSoftBreak = false;
+						}
+					}
+
+					state = QpValidatorState.PassThrough;
+					inptr++;
+					break;
+				}
+			}
+
+			streamOffset += length;
+		}
+
+		/// <summary>
+		/// Write a sequence of bytes to the validator.
+		/// </summary>
+		/// <remarks>
+		/// Writes a sequence of bytes to the validator.
+		/// </remarks>
+		/// <param name="buffer">The buffer.</param>
+		/// <param name="startIndex">The starting index of the buffer.</param>
+		/// <param name="length">The length of the buffer.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="buffer"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
+		/// a valid range in the <paramref name="buffer"/> byte array.
+		/// </exception>
+		public unsafe void Write (byte[] buffer, int startIndex, int length)
+		{
+			ArgumentValidator.Validate (buffer, startIndex, length);
+
+			fixed (byte* inbuf = buffer) {
+				Validate (inbuf + startIndex, length);
+			}
+		}
+
+		/// <summary>
+		/// Flush the validator state.
+		/// </summary>
+		/// <remarks>
+		/// Flushes the validator state.
+		/// </remarks>
+		public void Flush ()
+		{
+			// Note: the only valid state to end on is the pass-through state.
+			if (state == QpValidatorState.EqualSign || state == QpValidatorState.DecodeByte)
+				logger.Log (new MimeComplianceIssue (context, MimeComplianceViolation.InvalidQuotedPrintableEncoding, streamOffset, lineNumber, GetColumnNumber (streamOffset)));
+			else if (state == QpValidatorState.SoftBreak)
+				logger.Log (new MimeComplianceIssue (context, MimeComplianceViolation.InvalidQuotedPrintableSoftBreak, streamOffset, lineNumber, GetColumnNumber (streamOffset)));
+		}
+	}
+}

@@ -1,9 +1,9 @@
-﻿//
+//
 // ParameterList.cs
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,12 @@
 //
 
 using System;
-using System.IO;
 using System.Text;
+using System.Buffers;
 using System.Collections;
 using System.Globalization;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 using MimeKit.Encodings;
 using MimeKit.Utils;
@@ -67,9 +68,9 @@ namespace MimeKit {
 		/// <param name="name">The parameter name.</param>
 		/// <param name="value">The parameter value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="name"/> is <c>null</c>.</para>
+		/// <para><paramref name="name"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// The <paramref name="name"/> contains illegal characters.
@@ -89,11 +90,11 @@ namespace MimeKit {
 		/// <param name="name">The parameter name.</param>
 		/// <param name="value">The parameter value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="encoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="encoding"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="name"/> is <c>null</c>.</para>
+		/// <para><paramref name="name"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <paramref name="name"/> contains illegal characters.
@@ -113,11 +114,11 @@ namespace MimeKit {
 		/// <param name="name">The parameter name.</param>
 		/// <param name="value">The parameter value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="charset"/> is <c>null</c>.</para>
+		/// <para><paramref name="charset"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="name"/> is <c>null</c>.</para>
+		/// <para><paramref name="name"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <para><paramref name="charset"/> cannot be empty.</para>
@@ -136,17 +137,17 @@ namespace MimeKit {
 		/// Check if the <see cref="ParameterList"/> contains a parameter with the specified name.
 		/// </summary>
 		/// <remarks>
-		/// Determines whether or not the parameter list contains a parameter with the specified name.
+		/// Determines whether the parameter list contains a parameter with the specified name.
 		/// </remarks>
-		/// <returns><value>true</value> if the requested parameter exists;
-		/// otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the requested parameter exists;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="name">The parameter name.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <paramref name="name"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Contains (string name)
 		{
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
 			return table.ContainsKey (name);
@@ -161,11 +162,11 @@ namespace MimeKit {
 		/// <returns>The index of the requested parameter; otherwise <value>-1</value>.</returns>
 		/// <param name="name">The parameter name.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <paramref name="name"/> is <see langword="null"/>.
 		/// </exception>
 		public int IndexOf (string name)
 		{
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
 			for (int i = 0; i < parameters.Count; i++) {
@@ -186,9 +187,9 @@ namespace MimeKit {
 		/// <param name="name">The parameter name.</param>
 		/// <param name="value">The parameter value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="name"/> is <c>null</c>.</para>
+		/// <para><paramref name="name"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// The <paramref name="name"/> contains illegal characters.
@@ -205,24 +206,23 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Remove the specified parameter.
+		/// Remove a parameter.
 		/// </summary>
 		/// <remarks>
 		/// Removes the parameter with the specified name from the list, if it exists.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified parameter was removed;
-		/// otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the specified parameter was removed;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="name">The parameter name.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <paramref name="name"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Remove (string name)
 		{
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
-			Parameter param;
-			if (!table.TryGetValue (name, out param))
+			if (!table.TryGetValue (name, out var param))
 				return false;
 
 			return Remove (param);
@@ -234,36 +234,35 @@ namespace MimeKit {
 		/// <remarks>
 		/// Gets or sets the value of a parameter with the specified name.
 		/// </remarks>
-		/// <value>The value of the specified parameter if it exists; otherwise <c>null</c>.</value>
+		/// <value>The value of the specified parameter if it exists; otherwise <see langword="null"/>.</value>
 		/// <param name="name">The parameter name.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="name"/> is <c>null</c>.</para>
+		/// <para><paramref name="name"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// The <paramref name="name"/> contains illegal characters.
 		/// </exception>
-		public string this [string name] {
+		[DisallowNull]
+		public string? this [string name] {
 			get {
-				if (name == null)
+				if (name is null)
 					throw new ArgumentNullException (nameof (name));
 
-				Parameter param;
-				if (table.TryGetValue (name, out param))
+				if (table.TryGetValue (name, out var param))
 					return param.Value;
 
 				return null;
 			}
 			set {
-				if (name == null)
+				if (name is null)
 					throw new ArgumentNullException (nameof (name));
 
-				if (value == null)
+				if (value is null)
 					throw new ArgumentNullException (nameof (value));
 
-				Parameter param;
-				if (table.TryGetValue (name, out param)) {
+				if (table.TryGetValue (name, out var param)) {
 					param.Value = value;
 				} else {
 					Add (name, value);
@@ -280,15 +279,15 @@ namespace MimeKit {
 		/// <example>
 		/// <code language="c#" source="Examples\ParameterExamples.cs" region="OverrideFileNameParameterEncoding"/>
 		/// </example>
-		/// <returns><c>true</c> if the parameter exists; otherwise, <c>false</c>.</returns>
+		/// <returns><see langword="true" /> if the parameter exists; otherwise, <see langword="false" />.</returns>
 		/// <param name="name">The parameter name.</param>
 		/// <param name="param">The parameter.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <paramref name="name"/> is <see langword="null"/>.
 		/// </exception>
-		public bool TryGetValue (string name, out Parameter param)
+		public bool TryGetValue (string name, [NotNullWhen (true)] out Parameter? param)
 		{
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
 			return table.TryGetValue (name, out param);
@@ -300,20 +299,18 @@ namespace MimeKit {
 		/// <remarks>
 		/// Gets the value of the parameter with the specified name.
 		/// </remarks>
-		/// <returns><c>true</c> if the parameter exists; otherwise, <c>false</c>.</returns>
+		/// <returns><see langword="true" /> if the parameter exists; otherwise, <see langword="false" />.</returns>
 		/// <param name="name">The parameter name.</param>
 		/// <param name="value">The parameter value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <paramref name="name"/> is <see langword="null"/>.
 		/// </exception>
-		public bool TryGetValue (string name, out string value)
+		public bool TryGetValue (string name, [NotNullWhen (true)] out string? value)
 		{
-			Parameter param;
-
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
-			if (!table.TryGetValue (name, out param)) {
+			if (!table.TryGetValue (name, out var param)) {
 				value = null;
 				return false;
 			}
@@ -342,7 +339,7 @@ namespace MimeKit {
 		/// <remarks>
 		/// A <see cref="ParameterList"/> is never read-only.
 		/// </remarks>
-		/// <value><c>true</c> if this instance is read only; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if this instance is read only; otherwise, <see langword="false" />.</value>
 		public bool IsReadOnly {
 			get { return false; }
 		}
@@ -355,7 +352,7 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="param">The parameter to add.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// The <paramref name="param"/> is <c>null</c>.
+		/// The <paramref name="param"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// A parameter with the same name as <paramref name="param"/>
@@ -363,7 +360,7 @@ namespace MimeKit {
 		/// </exception>
 		public void Add (Parameter param)
 		{
-			if (param == null)
+			if (param is null)
 				throw new ArgumentNullException (nameof (param));
 
 			if (table.ContainsKey (param.Name))
@@ -373,6 +370,9 @@ namespace MimeKit {
 			table.Add (param.Name, param);
 			parameters.Add (param);
 
+			if (param.Name.Equals ("boundary", StringComparison.OrdinalIgnoreCase))
+				OnBoundaryChanged ();
+
 			OnChanged ();
 		}
 
@@ -380,15 +380,24 @@ namespace MimeKit {
 		/// Clear the parameter list.
 		/// </summary>
 		/// <remarks>
-		/// Removes all of the parameters from the list.
+		/// Removes all the parameters from the list.
 		/// </remarks>
 		public void Clear ()
 		{
-			foreach (var param in parameters)
+			bool hadBoundary = false;
+
+			foreach (var param in parameters) {
+				if (param.Name.Equals ("boundary", StringComparison.OrdinalIgnoreCase))
+					hadBoundary = true;
+
 				param.Changed -= OnParamChanged;
+			}
 
 			parameters.Clear ();
 			table.Clear ();
+
+			if (hadBoundary)
+				OnBoundaryChanged ();
 
 			OnChanged ();
 		}
@@ -397,24 +406,24 @@ namespace MimeKit {
 		/// Check if the <see cref="ParameterList"/> contains the specified parameter.
 		/// </summary>
 		/// <remarks>
-		/// Determines whether or not the parameter list contains the specified parameter.
+		/// Determines whether the parameter list contains the specified parameter.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified parameter is contained;
-		/// otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the specified parameter is contained;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="param">The parameter.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// The <paramref name="param"/> is <c>null</c>.
+		/// The <paramref name="param"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Contains (Parameter param)
 		{
-			if (param == null)
+			if (param is null)
 				throw new ArgumentNullException (nameof (param));
 
 			return parameters.Contains (param);
 		}
 
 		/// <summary>
-		/// Copy all of the parameters in the list to the specified array.
+		/// Copy all of the parameters in the list to an array.
 		/// </summary>
 		/// <remarks>
 		/// Copies all of the parameters within the <see cref="ParameterList"/> into the array,
@@ -433,15 +442,15 @@ namespace MimeKit {
 		/// <remarks>
 		/// Removes the specified parameter from the list.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified parameter was removed;
-		/// otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the specified parameter was removed;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="param">The parameter.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// The <paramref name="param"/> is <c>null</c>.
+		/// The <paramref name="param"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Remove (Parameter param)
 		{
-			if (param == null)
+			if (param is null)
 				throw new ArgumentNullException (nameof (param));
 
 			if (!parameters.Remove (param))
@@ -449,6 +458,9 @@ namespace MimeKit {
 
 			param.Changed -= OnParamChanged;
 			table.Remove (param.Name);
+
+			if (param.Name.Equals ("boundary", StringComparison.OrdinalIgnoreCase))
+				OnBoundaryChanged ();
 
 			OnChanged ();
 
@@ -460,7 +472,7 @@ namespace MimeKit {
 		#region IList implementation
 
 		/// <summary>
-		/// Ges the index of the requested parameter, if it exists.
+		/// Get the index of the requested parameter, if it exists.
 		/// </summary>
 		/// <remarks>
 		/// Finds the index of the specified parameter, if it exists.
@@ -468,11 +480,11 @@ namespace MimeKit {
 		/// <returns>The index of the requested parameter; otherwise <value>-1</value>.</returns>
 		/// <param name="param">The parameter.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// The <paramref name="param"/> is <c>null</c>.
+		/// The <paramref name="param"/> is <see langword="null"/>.
 		/// </exception>
 		public int IndexOf (Parameter param)
 		{
-			if (param == null)
+			if (param is null)
 				throw new ArgumentNullException (nameof (param));
 
 			return parameters.IndexOf (param);
@@ -487,7 +499,7 @@ namespace MimeKit {
 		/// <param name="index">The index to insert the parameter.</param>
 		/// <param name="param">The parameter.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// The <paramref name="param"/> is <c>null</c>.
+		/// The <paramref name="param"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// The <paramref name="index"/> is out of range.
@@ -501,7 +513,7 @@ namespace MimeKit {
 			if (index < 0 || index > Count)
 				throw new ArgumentOutOfRangeException (nameof (index));
 
-			if (param == null)
+			if (param is null)
 				throw new ArgumentNullException (nameof (param));
 
 			if (table.ContainsKey (param.Name))
@@ -510,6 +522,9 @@ namespace MimeKit {
 			parameters.Insert (index, param);
 			table.Add (param.Name, param);
 			param.Changed += OnParamChanged;
+
+			if (param.Name.Equals ("boundary", StringComparison.OrdinalIgnoreCase))
+				OnBoundaryChanged ();
 
 			OnChanged ();
 		}
@@ -535,6 +550,9 @@ namespace MimeKit {
 			parameters.RemoveAt (index);
 			table.Remove (param.Name);
 
+			if (param.Name.Equals ("boundary", StringComparison.OrdinalIgnoreCase))
+				OnBoundaryChanged ();
+
 			OnChanged ();
 		}
 
@@ -547,7 +565,7 @@ namespace MimeKit {
 		/// <value>The parameter at the specified index.</value>
 		/// <param name="index">The index.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// The <paramref name="value"/> is <c>null</c>.
+		/// The <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// The <paramref name="index"/> is out of range.
@@ -564,7 +582,7 @@ namespace MimeKit {
 				if (index < 0 || index >= Count)
 					throw new ArgumentOutOfRangeException (nameof (index));
 
-				if (value == null)
+				if (value is null)
 					throw new ArgumentNullException (nameof (value));
 
 				var param = parameters[index];
@@ -586,6 +604,10 @@ namespace MimeKit {
 				param.Changed -= OnParamChanged;
 				value.Changed += OnParamChanged;
 				parameters[index] = value;
+
+				if (param.Name.Equals ("boundary", StringComparison.OrdinalIgnoreCase) ||
+					value.Name.Equals ("boundary", StringComparison.OrdinalIgnoreCase))
+					OnBoundaryChanged ();
 
 				OnChanged ();
 			}
@@ -625,10 +647,18 @@ namespace MimeKit {
 
 		#endregion
 
-		internal void Encode (FormatOptions options, StringBuilder builder, ref int lineLength, Encoding charset)
+		internal void Encode (FormatOptions options, ref ValueStringBuilder builder, ref int lineLength, Encoding charset)
 		{
 			foreach (var param in parameters)
-				param.Encode (options, builder, ref lineLength, charset);
+				param.Encode (options, ref builder, ref lineLength, charset);
+		}
+
+		internal void WriteTo (ref ValueStringBuilder builder)
+		{
+			foreach (var param in parameters) {
+				builder.Append ("; ");
+				param.WriteTo (ref builder);
+			}
 		}
 
 		/// <summary>
@@ -640,27 +670,33 @@ namespace MimeKit {
 		/// <returns>A string representing the <see cref="ParameterList"/>.</returns>
 		public override string ToString ()
 		{
-			var values = new StringBuilder ();
+			var builder = new ValueStringBuilder (128);
 
-			foreach (var param in parameters) {
-				values.Append ("; ");
-				values.Append (param.ToString ());
-			}
+			WriteTo (ref builder);
 
-			return values.ToString ();
+			return builder.ToString ();
 		}
 
-		internal event EventHandler Changed;
+		internal event EventHandler? BoundaryChanged;
 
-		void OnParamChanged (object sender, EventArgs args)
+		void OnBoundaryChanged ()
 		{
+			BoundaryChanged?.Invoke (this, EventArgs.Empty);
+		}
+
+		internal event EventHandler? Changed;
+
+		void OnParamChanged (Parameter param, EventArgs args)
+		{
+			if (param.Name.Equals ("boundary", StringComparison.OrdinalIgnoreCase))
+				OnBoundaryChanged ();
+
 			OnChanged ();
 		}
 
 		void OnChanged ()
 		{
-			if (Changed != null)
-				Changed (this, EventArgs.Empty);
+			Changed?.Invoke (this, EventArgs.Empty);
 		}
 
 		static bool SkipParamName (byte[] text, ref int index, int endIndex)
@@ -675,16 +711,29 @@ namespace MimeKit {
 
 		class NameValuePair : IComparable<NameValuePair>
 		{
-			public int ValueLength;
-			public int ValueStart;
-			public bool Encoded;
-			public byte[] Value;
-			public string Name;
-			public int? Id;
+			public readonly int ValueLength;
+			public readonly int ValueStart;
+			public readonly bool Encoded;
+			public readonly byte[] Value;
+			public readonly string Name;
+			public readonly int? Id;
+
+			public NameValuePair (int valueLength, int valueStart, bool encoded, byte[] value, string name, int? id)
+			{
+				ValueLength = valueLength;
+				ValueStart = valueStart;
+				Encoded = encoded;
+				Value = value;
+				Name = name;
+				Id = id;
+			}
 
 			#region IComparable implementation
-			public int CompareTo (NameValuePair other)
+			public int CompareTo (NameValuePair? other)
 			{
+				if (other == null)
+					return 1;
+
 				if (!Id.HasValue)
 					return other.Id.HasValue ? -1 : 0;
 
@@ -696,7 +745,7 @@ namespace MimeKit {
 			#endregion
 		}
 
-		static bool TryParseNameValuePair (ParserOptions options, byte[] text, ref int index, int endIndex, bool throwOnError, out NameValuePair pair)
+		static bool TryParseNameValuePair (ParserOptions options, byte[] text, ref int index, int endIndex, bool throwOnError, [NotNullWhen (true)] out NameValuePair? pair)
 		{
 			int valueIndex, valueLength, startIndex;
 			bool encoded = false;
@@ -743,8 +792,7 @@ namespace MimeKit {
 					return false;
 				}
 
-				int identifier;
-				if (ParseUtils.TryParseInt32 (text, ref index, endIndex, out identifier)) {
+				if (ParseUtils.TryParseInt32 (text, ref index, endIndex, out int identifier)) {
 					if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
 						return false;
 
@@ -808,17 +856,17 @@ namespace MimeKit {
 				// Note: Google Docs, for example, does not always quote name/filename parameters
 				// with spaces in the name. See https://github.com/jstedfast/MimeKit/issues/106
 				// for details.
-				while (index < endIndex && text[index] != (byte) ';' && text[index] != (byte) '\r' && text[index] != (byte) '\n')
+				while (index < endIndex && text[index] != (byte) ';' && text[index] != (byte) '(' && text[index] != (byte) '\r' && text[index] != (byte) '\n')
 					index++;
 
 				valueLength = index - valueIndex;
 
-				if (index < endIndex && text[index] != (byte) ';') {
+				if (index < endIndex && (text[index] == (byte) '\r' || text[index] == (byte) '\n')) {
 					// Note: https://github.com/jstedfast/MimeKit/issues/159 adds to this suckage
 					// by having a multi-line unquoted value with spaces... don't you just love
 					// mail software written by people who have never heard of standards?
-					using (var memory = new MemoryStream ()) {
-						memory.Write (text, valueIndex, valueLength);
+					using (var buffer = new ByteArrayBuilder (256)) {
+						buffer.Append (text, valueIndex, valueLength);
 
 						do {
 							while (index < endIndex && (text[index] == (byte) '\r' || text[index] == (byte) '\n'))
@@ -826,13 +874,13 @@ namespace MimeKit {
 
 							valueIndex = index;
 
-							while (index < endIndex && text[index] != (byte) ';' && text[index] != (byte) '\r' && text[index] != (byte) '\n')
+							while (index < endIndex && text[index] != (byte) ';' && text[index] != (byte) '(' && text[index] != (byte) '\r' && text[index] != (byte) '\n')
 								index++;
 
-							memory.Write (text, valueIndex, index - valueIndex);
-						} while (index < endIndex && text[index] != ';');
+							buffer.Append (text, valueIndex, index - valueIndex);
+						} while (index < endIndex && text[index] != (byte) ';' && text[index] != (byte) '(');
 
-						value = memory.ToArray ();
+						value = buffer.ToArray ();
 						valueLength = value.Length;
 						valueIndex = 0;
 					}
@@ -840,23 +888,23 @@ namespace MimeKit {
 
 				// Trim trailing white space characters to work around issues such as the
 				// one described in https://github.com/jstedfast/MimeKit/issues/278
-				while (valueLength > valueIndex && value[valueLength - 1].IsWhitespace ())
+				while (valueLength > 0 && value[valueIndex + valueLength - 1].IsWhitespace ())
 					valueLength--;
 			}
 
-			pair = new NameValuePair {
-				ValueLength = valueLength,
-				ValueStart = valueIndex,
-				Encoded = encoded,
-				Value = value,
-				Name = name,
-				Id = id
-			};
+			pair = new NameValuePair (
+				valueLength: valueLength,
+				valueStart: valueIndex,
+				encoded: encoded,
+				value: value,
+				name: name,
+				id: id
+			);
 
 			return true;
 		}
 
-		static bool TryGetCharset (byte[] text, ref int index, int endIndex, out string charset)
+		static bool TryGetCharset (byte[] text, ref int index, int endIndex, [NotNullWhen (true)] out string? charset)
 		{
 			int startIndex = index;
 			int charsetEnd;
@@ -869,7 +917,7 @@ namespace MimeKit {
 					break;
 			}
 
-			if (i == startIndex || i == endIndex)
+			if (i == endIndex)
 				return false;
 
 			charsetEnd = i;
@@ -888,51 +936,60 @@ namespace MimeKit {
 			return true;
 		}
 
-		static string DecodeRfc2231 (out Encoding encoding, ref Decoder decoder, HexDecoder hex, byte[] text, int startIndex, int count, bool flush)
+		static string DecodeRfc2231 (out Encoding? encoding, ref Decoder? decoder, Rfc2231Decoder hex, byte[] text, int startIndex, int count, bool flush)
 		{
 			int endIndex = startIndex + count;
 			int index = startIndex;
-			string charset;
 
 			// Note: decoder is only null if this is the first segment
-			if (decoder == null) {
-				if (TryGetCharset (text, ref index, endIndex, out charset)) {
+			if (decoder is null) {
+				if (TryGetCharset (text, ref index, endIndex, out string? charset) && charset.Length > 0) {
 					try {
 						encoding = CharsetUtils.GetEncoding (charset, "?");
-						decoder = (Decoder) encoding.GetDecoder ();
+						decoder = encoding.GetDecoder ();
 					} catch (NotSupportedException) {
 						encoding = Encoding.GetEncoding (28591); // iso-8859-1
-						decoder = (Decoder) encoding.GetDecoder ();
+						decoder = encoding.GetDecoder ();
 					}
 				} else {
 					// When no charset is specified, it should be safe to assume US-ASCII...
 					// but we all know what assume means, right??
 					encoding = Encoding.GetEncoding (28591); // iso-8859-1
-					decoder = (Decoder) encoding.GetDecoder ();
+					decoder = encoding.GetDecoder ();
 				}
 			} else {
 				encoding = null;
 			}
 
 			int length = endIndex - index;
-			var decoded = new byte[hex.EstimateOutputLength (length)];
+			var decoded = ArrayPool<byte>.Shared.Rent (hex.EstimateOutputLength (length));
 
-			// hex decode...
-			length = hex.Decode (text, index, length, decoded);
+			try {
+				// hex decode...
+				length = flush ? hex.Flush (text, index, length, decoded) : hex.Decode (text, index, length, decoded);
 
-			int outLength = decoder.GetCharCount (decoded, 0, length, flush);
-			var output = new char[outLength];
+				int outLength = decoder.GetCharCount (decoded, 0, length, flush);
+				var output = ArrayPool<char>.Shared.Rent (outLength);
 
-			outLength = decoder.GetChars (decoded, 0, length, output, 0, flush);
+				try {
+					outLength = decoder.GetChars (decoded, 0, length, output, 0, flush);
 
-			return new string (output, 0, outLength);
+					var result = new string (output, 0, outLength);
+
+					return result;
+				} finally {
+					ArrayPool<char>.Shared.Return (output);
+				}
+			} finally {
+				ArrayPool<byte>.Shared.Return (decoded);
+			}
 		}
 
-		internal static bool TryParse (ParserOptions options, byte[] text, ref int index, int endIndex, bool throwOnError, out ParameterList paramList)
+		internal static bool TryParse (ParserOptions options, byte[] text, ref int index, int endIndex, bool throwOnError, [NotNullWhen (true)] out ParameterList? paramList)
 		{
 			var rfc2231 = new Dictionary<string, List<NameValuePair>> (MimeUtils.OrdinalIgnoreCase);
 			var @params = new List<NameValuePair> ();
-			List<NameValuePair> parts;
+			List<NameValuePair>? parts;
 
 			paramList = null;
 
@@ -949,8 +1006,7 @@ namespace MimeKit {
 					continue;
 				}
 
-				NameValuePair pair;
-				if (!TryParseNameValuePair (options, text, ref index, endIndex, throwOnError, out pair))
+				if (!TryParseNameValuePair (options, text, ref index, endIndex, throwOnError, out var pair))
 					return false;
 
 				if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
@@ -986,16 +1042,15 @@ namespace MimeKit {
 			} while (true);
 
 			paramList = new ParameterList ();
-			var hex = new HexDecoder ();
+			var hex = new Rfc2231Decoder ();
 
 			foreach (var param in @params) {
 				var method = ParameterEncodingMethod.Default;
 				int startIndex = param.ValueStart;
 				int length = param.ValueLength;
 				var buffer = param.Value;
-				Encoding encoding = null;
-				Decoder decoder = null;
-				Parameter parameter;
+				Encoding? encoding = null;
+				Decoder? decoder = null;
 				string value;
 
 				if (param.Id.HasValue) {
@@ -1003,7 +1058,12 @@ namespace MimeKit {
 					parts = rfc2231[param.Name];
 					parts.Sort ();
 
-					value = string.Empty;
+					int initialCapacity = 0;
+
+					foreach (var part in parts)
+						initialCapacity += part.ValueLength;
+
+					var builder = new ValueStringBuilder (initialCapacity);
 
 					for (int i = 0; i < parts.Count; i++) {
 						startIndex = parts[i].ValueStart;
@@ -1012,7 +1072,6 @@ namespace MimeKit {
 
 						if (parts[i].Encoded) {
 							bool flush = i + 1 >= parts.Count || !parts[i + 1].Encoded;
-							Encoding charset;
 
 							// Note: Some mail clients mistakenly quote encoded parameter values when they shouldn't
 							if (length >= 2 && buffer[startIndex] == (byte) '"' && buffer[startIndex + length - 1] == (byte) '"') {
@@ -1020,17 +1079,21 @@ namespace MimeKit {
 								length -= 2;
 							}
 
-							value += DecodeRfc2231 (out charset, ref decoder, hex, buffer, startIndex, length, flush);
-							encoding = encoding ?? charset;
+							var decoded = DecodeRfc2231 (out Encoding? charset, ref decoder, hex, buffer, startIndex, length, flush);
+							builder.Append (decoded);
+							encoding ??= charset;
 						} else if (length >= 2 && buffer[startIndex] == (byte) '"') {
-							var quoted = CharsetUtils.ConvertToUnicode (options,buffer, startIndex, length);
-							value += MimeUtils.Unquote (quoted);
+							var chars = CharsetUtils.ConvertToUnicode (options, buffer, startIndex, length, out int charCount);
+							MimeUtils.UnquoteTo (chars.AsSpan (0, charCount), false, ref builder);
 							hex.Reset ();
 						} else if (length > 0) {
-							value += CharsetUtils.ConvertToUnicode (options, buffer, startIndex, length);
+							var chars = CharsetUtils.ConvertToUnicode (options, buffer, startIndex, length, out int charCount);
+							builder.Append (chars.AsSpan (0, charCount));
 							hex.Reset ();
 						}
 					}
+
+					value = builder.ToString ();
 					hex.Reset ();
 				} else if (param.Encoded) {
 					// Note: param value is not supposed to be quoted, but issue #239 illustrates
@@ -1060,23 +1123,26 @@ namespace MimeKit {
 					int codepage = -1;
 
 					if (length >= 2 && text[startIndex] == (byte) '"') {
-						var quoted = Rfc2047.DecodeText (options, buffer, startIndex, length, out codepage);
-						value = MimeUtils.Unquote (quoted);
+						var unquoted = MimeUtils.Unquote (buffer, startIndex, length);
+						value = Rfc2047.DecodeText (options, unquoted, 0, unquoted.Length, out codepage);
 					} else if (length > 0) {
 						value = Rfc2047.DecodeText (options, buffer, startIndex, length, out codepage);
 					} else {
 						value = string.Empty;
 					}
 
-					if (codepage != -1 && codepage != 65001) {
-						encoding = CharsetUtils.GetEncoding (codepage);
+					if (codepage != -1) {
+						// Note: UTF-8 is the default charset, so there is no need to remember it, but the value still needs to
+						// be re-encoded using rfc2047 (otherwise the encoding method would change on each round trip).
+						if (codepage != 65001)
+							encoding = CharsetUtils.GetEncoding (codepage);
 						method = ParameterEncodingMethod.Rfc2047;
 					}
 				} else {
 					continue;
 				}
 
-				if (paramList.table.TryGetValue (param.Name, out parameter)) {
+				if (paramList.table.TryGetValue (param.Name, out var parameter)) {
 					parameter.Encoding = encoding;
 					parameter.Value = value;
 				} else if (encoding != null) {

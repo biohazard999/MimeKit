@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,34 +26,53 @@
 
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+
+using MimeKit.IO;
 
 namespace MimeKit.Tnef {
 	/// <summary>
-	/// A stream for reading raw values from a <see cref="TnefReader"/> or <see cref="TnefPropertyReader"/>.
+	/// A stream for reading a raw value from a <see cref="TnefReader"/> or <see cref="TnefPropertyReader"/>.
 	/// </summary>
 	/// <remarks>
-	/// A stream for reading raw values from a <see cref="TnefReader"/> or <see cref="TnefPropertyReader"/>.
+	/// <para>A forward-only, read-only stream over the value data of the current attribute or property.</para>
+	/// <para>The stream is only valid while the reader remains positioned on the value that it was opened for.
+	/// Once the reader moves on, any further use of the stream throws <see cref="InvalidOperationException"/>.</para>
 	/// </remarks>
-	class TnefReaderStream : Stream
+	sealed class TnefReaderStream : Stream, ICancellableStream
 	{
-		readonly int valueEndOffset, dataEndOffset;
+		readonly TnefPropertyTag propertyTag;
 		readonly TnefReader reader;
+		readonly int generation;
+		readonly long endOffset;
 		bool disposed;
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="TnefReaderStream"/> class.
 		/// </summary>
 		/// <remarks>
-		/// Creates a stream for reading a raw value from the <see cref="TnefReader"/>.
+		/// Creates a stream for reading the value data that the reader is currently positioned at.
 		/// </remarks>
-		/// <param name="tnefReader">The <see cref="TnefReader"/>.</param>
-		/// <param name="dataEndOffset">The end offset of the data.</param>
-		/// <param name="valueEndOffset">The end offset of the container value.</param>
-		public TnefReaderStream (TnefReader tnefReader, int dataEndOffset, int valueEndOffset)
+		/// <param name="reader">The <see cref="TnefReader"/>.</param>
+		/// <param name="endOffset">The end offset of the value data, relative to the reader's stream.</param>
+		/// <param name="propertyTag">The property tag of the value, used when reporting compliance issues.</param>
+		public TnefReaderStream (TnefReader reader, long endOffset, TnefPropertyTag propertyTag)
 		{
-			this.valueEndOffset = valueEndOffset;
-			this.dataEndOffset = dataEndOffset;
-			reader = tnefReader;
+			generation = reader.ValueGeneration;
+			this.propertyTag = propertyTag;
+			this.endOffset = endOffset;
+			this.reader = reader;
+		}
+
+		// The number of bytes of value data that have not yet been read.
+		internal long Remaining {
+			get { return Math.Max (endOffset - reader.LocalOffset, 0); }
+		}
+
+		internal bool CanAllocate (long count)
+		{
+			return reader.CanAllocate (count);
 		}
 
 		void CheckDisposed ()
@@ -62,41 +81,49 @@ namespace MimeKit.Tnef {
 				throw new ObjectDisposedException (nameof (TnefReaderStream));
 		}
 
+		void CheckValid ()
+		{
+			CheckDisposed ();
+
+			if (reader.ValueGeneration != generation)
+				throw new InvalidOperationException ("The reader has been advanced past the value that this stream was opened for.");
+		}
+
 		/// <summary>
-		/// Checks whether or not the stream supports reading.
+		/// Check whether the stream supports reading.
 		/// </summary>
 		/// <remarks>
 		/// The <see cref="TnefReaderStream"/> is always readable.
 		/// </remarks>
-		/// <value><c>true</c> if the stream supports reading; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the stream supports reading; otherwise, <see langword="false" />.</value>
 		public override bool CanRead {
 			get { return true; }
 		}
 
 		/// <summary>
-		/// Checks whether or not the stream supports writing.
+		/// Check whether the stream supports writing.
 		/// </summary>
 		/// <remarks>
 		/// Writing to a <see cref="TnefReaderStream"/> is not supported.
 		/// </remarks>
-		/// <value><c>true</c> if the stream supports writing; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the stream supports writing; otherwise, <see langword="false" />.</value>
 		public override bool CanWrite {
 			get { return false; }
 		}
 
 		/// <summary>
-		/// Checks whether or not the stream supports seeking.
+		/// Check whether the stream supports seeking.
 		/// </summary>
 		/// <remarks>
 		/// Seeking within a <see cref="TnefReaderStream"/> is not supported.
 		/// </remarks>
-		/// <value><c>true</c> if the stream supports seeking; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the stream supports seeking; otherwise, <see langword="false" />.</value>
 		public override bool CanSeek {
 			get { return false; }
 		}
 
 		/// <summary>
-		/// Gets the length of the stream, in bytes.
+		/// Get the length of the stream, in bytes.
 		/// </summary>
 		/// <remarks>
 		/// Getting the length of a <see cref="TnefReaderStream"/> is not supported.
@@ -110,7 +137,7 @@ namespace MimeKit.Tnef {
 		}
 
 		/// <summary>
-		/// Gets or sets the current position within the stream.
+		/// Get or sets the current position within the stream.
 		/// </summary>
 		/// <remarks>
 		/// Getting and setting the position of a <see cref="TnefReaderStream"/> is not supported.
@@ -126,7 +153,7 @@ namespace MimeKit.Tnef {
 
 		static void ValidateArguments (byte[] buffer, int offset, int count)
 		{
-			if (buffer == null)
+			if (buffer is null)
 				throw new ArgumentNullException (nameof (buffer));
 
 			if (offset < 0 || offset > buffer.Length)
@@ -136,8 +163,70 @@ namespace MimeKit.Tnef {
 				throw new ArgumentOutOfRangeException (nameof (count));
 		}
 
+		int GetReadLength (int count)
+		{
+			return (int) Math.Min (Remaining, count);
+		}
+
+		int EndRead (int requested, int nread)
+		{
+			// Note: The underlying stream ended before the value did.
+			if (nread == 0 && requested > 0)
+				reader.SetTruncated (propertyTag);
+
+			return nread;
+		}
+
 		/// <summary>
+		/// Read a sequence of bytes from the stream and advances the position
+		/// within the stream by the number of bytes read.
+		/// </summary>
+		/// <remarks>
 		/// Reads a sequence of bytes from the stream and advances the position
+		/// within the stream by the number of bytes read.
+		/// </remarks>
+		/// <returns>The total number of bytes read into the buffer. This can be less than the number of bytes requested if that many
+		/// bytes are not currently available, or zero (0) if the end of the stream has been reached.</returns>
+		/// <param name="buffer">The buffer to read data into.</param>
+		/// <param name="offset">The offset into the buffer to start reading data.</param>
+		/// <param name="count">The number of bytes to read.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="buffer"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <para><paramref name="offset"/> is less than zero or greater than the length of <paramref name="buffer"/>.</para>
+		/// <para>-or-</para>
+		/// <para>The <paramref name="buffer"/> is not large enough to contain <paramref name="count"/> bytes starting
+		/// at the specified <paramref name="offset"/>.</para>
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The stream has been disposed.
+		/// </exception>
+		/// <exception cref="System.InvalidOperationException">
+		/// The reader has been advanced past the value that this stream was opened for.
+		/// </exception>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		public int Read (byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+		{
+			ValidateArguments (buffer, offset, count);
+			CheckValid ();
+
+			int n = GetReadLength (count);
+
+			if (n == 0)
+				return 0;
+
+			return EndRead (n, reader.ReadValueData (buffer, offset, n, cancellationToken));
+		}
+
+		/// <summary>
+		/// Read a sequence of bytes from the stream and advances the position
 		/// within the stream by the number of bytes read.
 		/// </summary>
 		/// <remarks>
@@ -150,7 +239,7 @@ namespace MimeKit.Tnef {
 		/// <param name="offset">The offset into the buffer to start reading data.</param>
 		/// <param name="count">The number of bytes to read.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <para><paramref name="offset"/> is less than zero or greater than the length of <paramref name="buffer"/>.</para>
@@ -161,34 +250,86 @@ namespace MimeKit.Tnef {
 		/// <exception cref="System.ObjectDisposedException">
 		/// The stream has been disposed.
 		/// </exception>
+		/// <exception cref="System.InvalidOperationException">
+		/// The reader has been advanced past the value that this stream was opened for.
+		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
 		public override int Read (byte[] buffer, int offset, int count)
 		{
-			ValidateArguments (buffer, offset, count);
-
-			CheckDisposed ();
-
-			int dataLeft = dataEndOffset - reader.StreamOffset;
-			int n = Math.Min (dataLeft, count);
-
-			int nread = n > 0 ? reader.ReadAttributeRawValue (buffer, offset, n) : 0;
-
-			dataLeft -= nread;
-
-			if (dataLeft == 0 && valueEndOffset > reader.StreamOffset) {
-				int valueLeft = valueEndOffset - reader.StreamOffset;
-				var buf = new byte[valueLeft];
-
-				reader.ReadAttributeRawValue (buf, 0, valueLeft);
-			}
-
-			return nread;
+			return Read (buffer, offset, count, CancellationToken.None);
 		}
 
 		/// <summary>
-		/// Writes a sequence of bytes to the stream and advances the current
+		/// Asynchronously read a sequence of bytes from the stream and advances the position
+		/// within the stream by the number of bytes read.
+		/// </summary>
+		/// <remarks>
+		/// Asynchronously reads a sequence of bytes from the stream and advances the position
+		/// within the stream by the number of bytes read.
+		/// </remarks>
+		/// <returns>The total number of bytes read into the buffer. This can be less than the number of bytes requested if that many
+		/// bytes are not currently available, or zero (0) if the end of the stream has been reached.</returns>
+		/// <param name="buffer">The buffer to read data into.</param>
+		/// <param name="offset">The offset into the buffer to start reading data.</param>
+		/// <param name="count">The number of bytes to read.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="buffer"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <para><paramref name="offset"/> is less than zero or greater than the length of <paramref name="buffer"/>.</para>
+		/// <para>-or-</para>
+		/// <para>The <paramref name="buffer"/> is not large enough to contain <paramref name="count"/> bytes starting
+		/// at the specified <paramref name="offset"/>.</para>
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The stream has been disposed.
+		/// </exception>
+		/// <exception cref="System.InvalidOperationException">
+		/// The reader has been advanced past the value that this stream was opened for.
+		/// </exception>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		public override async Task<int> ReadAsync (byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+		{
+			ValidateArguments (buffer, offset, count);
+			CheckValid ();
+
+			int n = GetReadLength (count);
+
+			if (n == 0)
+				return 0;
+
+			return EndRead (n, await reader.ReadValueDataAsync (buffer, offset, n, cancellationToken).ConfigureAwait (false));
+		}
+
+		/// <summary>
+		/// Write a sequence of bytes to the stream and advances the current
+		/// position within this stream by the number of bytes written.
+		/// </summary>
+		/// <remarks>
+		/// The <see cref="TnefReaderStream"/> does not support writing.
+		/// </remarks>
+		/// <param name="buffer">The buffer to write.</param>
+		/// <param name="offset">The offset of the first byte to write.</param>
+		/// <param name="count">The number of bytes to write.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.NotSupportedException">
+		/// The stream does not support writing.
+		/// </exception>
+		public void Write (byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+		{
+			throw new NotSupportedException ("The stream does not support writing.");
+		}
+
+		/// <summary>
+		/// Write a sequence of bytes to the stream and advances the current
 		/// position within this stream by the number of bytes written.
 		/// </summary>
 		/// <remarks>
@@ -206,7 +347,7 @@ namespace MimeKit.Tnef {
 		}
 
 		/// <summary>
-		/// Sets the position within the current stream.
+		/// Set the position within the current stream.
 		/// </summary>
 		/// <remarks>
 		/// The <see cref="TnefReaderStream"/> does not support seeking.
@@ -223,22 +364,30 @@ namespace MimeKit.Tnef {
 		}
 
 		/// <summary>
-		/// Clears all buffers for this stream and causes any buffered data to be written
+		/// Clear all buffers for this stream and causes any buffered data to be written
 		/// to the underlying device.
 		/// </summary>
 		/// <remarks>
-		/// The <see cref="TnefReaderStream"/> does not support writing.
+		/// Since the <see cref="TnefReaderStream"/> is read-only, there is nothing to flush.
 		/// </remarks>
-		/// <exception cref="System.NotSupportedException">
-		/// The stream does not support writing.
-		/// </exception>
-		public override void Flush ()
+		/// <param name="cancellationToken">The cancellation token.</param>
+		public void Flush (CancellationToken cancellationToken)
 		{
-			throw new NotSupportedException ("The stream does not support writing.");
 		}
 
 		/// <summary>
-		/// Sets the length of the stream.
+		/// Clear all buffers for this stream and causes any buffered data to be written
+		/// to the underlying device.
+		/// </summary>
+		/// <remarks>
+		/// Since the <see cref="TnefReaderStream"/> is read-only, there is nothing to flush.
+		/// </remarks>
+		public override void Flush ()
+		{
+		}
+
+		/// <summary>
+		/// Set the length of the stream.
 		/// </summary>
 		/// <remarks>
 		/// The <see cref="TnefReaderStream"/> does not support setting the length.
@@ -253,18 +402,19 @@ namespace MimeKit.Tnef {
 		}
 
 		/// <summary>
-		/// Releases the unmanaged resources used by the <see cref="TnefReaderStream"/> and
+		/// Release the unmanaged resources used by the <see cref="TnefReaderStream"/> and
 		/// optionally releases the managed resources.
 		/// </summary>
 		/// <remarks>
-		/// The underlying <see cref="TnefReader"/> is not disposed.
+		/// Releases the unmanaged resources used by the <see cref="TnefReaderStream"/> and
+		/// optionally releases the managed resources.
 		/// </remarks>
-		/// <param name="disposing"><c>true</c> to release both managed and unmanaged resources;
-		/// <c>false</c> to release only the unmanaged resources.</param>
+		/// <param name="disposing"><see langword="true" /> to release both managed and unmanaged resources;
+		/// <see langword="false" /> to release only the unmanaged resources.</param>
 		protected override void Dispose (bool disposing)
 		{
-			base.Dispose (disposing);
 			disposed = true;
+			base.Dispose (disposing);
 		}
 	}
 }

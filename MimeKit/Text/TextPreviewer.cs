@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -98,17 +98,20 @@ namespace MimeKit.Text {
 		/// <remarks>
 		/// Gets a text preview of the text part.
 		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\TextConverterExamples.cs" region="GetPreviewText"/>
+		/// </example>
 		/// <param name="body">The text part.</param>
 		/// <returns>A string representing a shortened preview of the original text.</returns>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="body"/> is <c>null</c>.
+		/// <paramref name="body"/> is <see langword="null"/>.
 		/// </exception>
 		public static string GetPreviewText (TextPart body)
 		{
-			if (body == null)
+			if (body is null)
 				throw new ArgumentNullException (nameof (body));
 
-			if (body.Content == null)
+			if (body.Content is null)
 				return string.Empty;
 
 			var encoding = body.ContentType.CharsetEncoding;
@@ -126,7 +129,7 @@ namespace MimeKit.Text {
 				} while (nread < buffer.Length);
 			}
 
-			if (encoding == null) {
+			if (encoding is null) {
 				if (!CharsetUtils.TryGetBomEncoding (buffer, nread, out encoding))
 					encoding = CharsetUtils.UTF8;
 			}
@@ -153,11 +156,11 @@ namespace MimeKit.Text {
 		/// <param name="text">The original text.</param>
 		/// <returns>A string representing a shortened preview of the original text.</returns>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
 		public virtual string GetPreviewText (string text)
 		{
-			if (text == null)
+			if (text is null)
 				throw new ArgumentNullException (nameof (text));
 
 			using (var reader = new StringReader (text))
@@ -174,22 +177,22 @@ namespace MimeKit.Text {
 		/// <param name="charset">The charset encoding of the stream.</param>
 		/// <returns>A string representing a shortened preview of the original text.</returns>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
+		/// <para><paramref name="stream"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="charset"/> is <c>null</c>.</para>
+		/// <para><paramref name="charset"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public virtual string GetPreviewText (Stream stream, string charset)
 		{
-			if (stream == null)
+			if (stream is null)
 				throw new ArgumentNullException (nameof (stream));
 
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
 			Encoding encoding;
 
 			try {
-				encoding = CharsetUtils.GetEncoding (charset);
+				encoding = CharsetUtils.GetEncoding (charset, string.Empty);
 			} catch (NotSupportedException) {
 				encoding = CharsetUtils.UTF8;
 			}
@@ -207,16 +210,16 @@ namespace MimeKit.Text {
 		/// <param name="encoding">The encoding of the stream.</param>
 		/// <returns>A string representing a shortened preview of the original text.</returns>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
+		/// <para><paramref name="stream"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="encoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="encoding"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public virtual string GetPreviewText (Stream stream, Encoding encoding)
 		{
-			if (stream == null)
+			if (stream is null)
 				throw new ArgumentNullException (nameof (stream));
 
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
 			using (var reader = new StreamReader (stream, encoding, false, 4096, true))
@@ -232,7 +235,7 @@ namespace MimeKit.Text {
 		/// <param name="reader">The original text stream.</param>
 		/// <returns>A string representing a shortened preview of the original text.</returns>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="reader"/> is <c>null</c>.
+		/// <paramref name="reader"/> is <see langword="null"/>.
 		/// </exception>
 		public abstract string GetPreviewText (TextReader reader);
 	}

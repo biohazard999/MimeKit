@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,9 @@ namespace MimeKit.Text {
 	/// <remarks>
 	/// A text previewer for HTML content.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\TextConverterExamples.cs" region="GetPreviewText"/>
+	/// </example>
 	public class HtmlTextPreviewer : TextPreviewer
 	{
 		/// <summary>
@@ -110,15 +113,90 @@ namespace MimeKit.Text {
 			public bool SuppressInnerContent {
 				get; set;
 			}
+
+			// Links in the document-order list of open elements.
+			public HtmlTagContext? Outer, Inner;
+
+			// The next (outer) open element with the same TagId.
+			public HtmlTagContext? OuterSameId;
+
+			// Monotonically increasing push order, used to determine which of two elements is innermost.
+			public long Sequence;
 		}
 
-		static void Pop (IList<HtmlTagContext> stack, HtmlTagId id)
+		/// <summary>
+		/// The set of currently-open elements.
+		/// </summary>
+		/// <remarks>
+		/// <para>Every operation is O(1). A flat list is not used because closing an element by tag id and
+		/// locating the innermost list element would each require an O(depth) scan, which allows a small,
+		/// maliciously-crafted document (e.g. many unclosed tags followed by many unmatched end tags or
+		/// <c>&lt;li&gt;</c> tags) to consume an amount of CPU time that is quadratic in its size.</para>
+		/// <para>Open elements are kept in a doubly-linked list (so that an element can be removed from the
+		/// middle) and are also chained by <see cref="HtmlTagId"/> (so that the innermost element with a given
+		/// id can be found without scanning).</para>
+		/// </remarks>
+		sealed class OpenElementStack
 		{
-			for (int i = stack.Count; i > 0; i--) {
-				if (stack[i - 1].TagId == id) {
-					stack.RemoveAt (i - 1);
-					break;
-				}
+			readonly Dictionary<HtmlTagId, HtmlTagContext> innermostById = new Dictionary<HtmlTagId, HtmlTagContext> ();
+			HtmlTagContext? innermost;
+			long sequence;
+
+			public bool SuppressContent {
+				get { return innermost != null && innermost.SuppressInnerContent; }
+			}
+
+			public void Push (HtmlTagContext ctx)
+			{
+				innermostById.TryGetValue (ctx.TagId, out ctx.OuterSameId);
+				innermostById[ctx.TagId] = ctx;
+				ctx.Sequence = sequence++;
+
+				ctx.Outer = innermost;
+				if (innermost != null)
+					innermost.Inner = ctx;
+				innermost = ctx;
+			}
+
+			public void Pop (HtmlTagId id)
+			{
+				if (!innermostById.TryGetValue (id, out var ctx))
+					return;
+
+				if (ctx.OuterSameId != null)
+					innermostById[id] = ctx.OuterSameId;
+				else
+					innermostById.Remove (id);
+
+				if (ctx.Inner != null)
+					ctx.Inner.Outer = ctx.Outer;
+				else
+					innermost = ctx.Outer;
+
+				if (ctx.Outer != null)
+					ctx.Outer.Inner = ctx.Inner;
+
+				ctx.Outer = ctx.Inner = ctx.OuterSameId = null;
+			}
+
+			public HtmlTagContext? GetListItemContext ()
+			{
+				innermostById.TryGetValue (HtmlTagId.OL, out var ol);
+				innermostById.TryGetValue (HtmlTagId.UL, out var ul);
+
+				if (ol is null)
+					return ul;
+
+				if (ul is null)
+					return ol;
+
+				return ol.Sequence > ul.Sequence ? ol : ul;
+			}
+
+			public void Clear ()
+			{
+				innermostById.Clear ();
+				innermost = null;
 			}
 		}
 
@@ -139,25 +217,6 @@ namespace MimeKit.Text {
 			}
 		}
 
-		static bool SuppressContent (IList<HtmlTagContext> stack)
-		{
-			int lastIndex = stack.Count - 1;
-
-			return lastIndex >= 0 && stack[lastIndex].SuppressInnerContent;
-		}
-
-		HtmlTagContext GetListItemContext (IList<HtmlTagContext> stack)
-		{
-			for (int i = stack.Count; i > 0; i--) {
-				var ctx = stack[i - 1];
-
-				if (ctx.TagId == HtmlTagId.OL || ctx.TagId == HtmlTagId.UL)
-					return ctx;
-			}
-
-			return null;
-		}
-
 		/// <summary>
 		/// Get a text preview of a stream of text.
 		/// </summary>
@@ -167,26 +226,25 @@ namespace MimeKit.Text {
 		/// <param name="reader">The original text stream.</param>
 		/// <returns>A string representing a shortened preview of the original text.</returns>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="reader"/> is <c>null</c>.
+		/// <paramref name="reader"/> is <see langword="null"/>.
 		/// </exception>
 		public override string GetPreviewText (TextReader reader)
 		{
-			if (reader == null)
+			if (reader is null)
 				throw new ArgumentNullException (nameof (reader));
 
 			var tokenizer = new HtmlTokenizer (reader) { IgnoreTruncatedTags = true };
 			var preview = new char[MaximumPreviewLength];
-			var stack = new List<HtmlTagContext> ();
+			var stack = new OpenElementStack ();
 			var prefix = string.Empty;
 			int previewLength = 0;
-			HtmlTagContext ctx;
-			HtmlAttribute attr;
+			HtmlTagContext? ctx;
+			HtmlAttribute? attr;
 			bool body = false;
 			bool full = false;
 			bool lwsp = true;
-			HtmlToken token;
 
-			while (!full && tokenizer.ReadNextToken (out token)) {
+			while (!full && tokenizer.ReadNextToken (out var token)) {
 				switch (token.Kind) {
 				case HtmlTokenKind.Tag:
 					var tag = (HtmlTagToken) token;
@@ -201,7 +259,7 @@ namespace MimeKit.Text {
 								}
 								break;
 							case HtmlTagId.LI:
-								if ((ctx = GetListItemContext (stack)) != null) {
+								if ((ctx = stack.GetListItemContext ()) != null) {
 									if (ctx.TagId == HtmlTagId.OL) {
 										full = Append (preview, ref previewLength, $" {++ctx.ListIndex}. ", ref lwsp);
 										prefix = string.Empty;
@@ -217,11 +275,11 @@ namespace MimeKit.Text {
 								break;
 							}
 
-							if (!tag.IsEmptyElement) {
+							if (!tag.IsEmptyElement || tokenizer.TokenizerState != HtmlTokenizerState.Data) {
 								ctx = new HtmlTagContext (tag.Id) {
 									SuppressInnerContent = ShouldSuppressInnerContent (tag.Id)
 								};
-								stack.Add (ctx);
+								stack.Push (ctx);
 							}
 						} else if (tag.Id == HtmlTagId.Body && !tag.IsEmptyElement) {
 							body = true;
@@ -230,11 +288,11 @@ namespace MimeKit.Text {
 						stack.Clear ();
 						body = false;
 					} else {
-						Pop (stack, tag.Id);
+						stack.Pop (tag.Id);
 					}
 					break;
 				case HtmlTokenKind.Data:
-					if (body && !SuppressContent (stack)) {
+					if (body && !stack.SuppressContent) {
 						var data = (HtmlDataToken) token;
 
 						full = Append (preview, ref previewLength, prefix + data.Data, ref lwsp);

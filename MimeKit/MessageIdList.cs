@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Clones the <see cref="MessageIdList"/>.
+		/// Clone the <see cref="MessageIdList"/>.
 		/// </summary>
 		/// <remarks>
 		/// Creates an exact copy of the <see cref="MessageIdList"/>.
@@ -81,26 +81,31 @@ namespace MimeKit {
 		/// <returns>The index of the requested Message-Id; otherwise <value>-1</value>.</returns>
 		/// <param name="messageId">The Message-Id.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="messageId"/> is <c>null</c>.
+		/// <paramref name="messageId"/> is <see langword="null"/>.
 		/// </exception>
 		public int IndexOf (string messageId)
 		{
-			if (messageId == null)
+			if (messageId is null)
 				throw new ArgumentNullException (nameof (messageId));
 
 			return references.IndexOf (messageId);
 		}
 
-		static string ValidateMessageId (string messageId)
+		static string ValidateMessageId (string messageId, string paramName)
 		{
-			if (messageId.Length < 2 || messageId[0] != '<' || messageId[messageId.Length - 1] != '>')
-				return messageId;
+			if (!ParseUtils.TryParseMsgIdValue (messageId, out var msgid))
+				throw new ArgumentException ("Invalid Message-Id format.", paramName);
 
-			return messageId.Substring (1, messageId.Length - 2);
+			return msgid;
+		}
+
+		internal void AddParsed (string messageId)
+		{
+			references.Add (messageId);
 		}
 
 		/// <summary>
-		/// Insert the Message-Id at the specified index.
+		/// Insert a Message-Id at the specified index.
 		/// </summary>
 		/// <remarks>
 		/// Inserts the Message-Id at the specified index in the list.
@@ -108,17 +113,20 @@ namespace MimeKit {
 		/// <param name="index">The index to insert the Message-Id.</param>
 		/// <param name="messageId">The Message-Id to insert.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="messageId"/> is <c>null</c>.
+		/// <paramref name="messageId"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="messageId"/> is not a valid Message-Id.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
 		/// </exception>
 		public void Insert (int index, string messageId)
 		{
-			if (messageId == null)
+			if (messageId is null)
 				throw new ArgumentNullException (nameof (messageId));
 
-			references.Insert (index, ValidateMessageId (messageId));
+			references.Insert (index, ValidateMessageId (messageId, nameof (messageId)));
 			OnChanged ();
 		}
 
@@ -147,7 +155,10 @@ namespace MimeKit {
 		/// <value>The Message-Id at the specified index.</value>
 		/// <param name="index">The index.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="value"/> is not a valid Message-Id.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
@@ -155,13 +166,18 @@ namespace MimeKit {
 		public string this [int index] {
 			get { return references[index]; }
 			set {
-				if (value == null)
+				if (value is null)
 					throw new ArgumentNullException (nameof (value));
 
 				if (references[index] == value)
 					return;
 
-				references[index] = ValidateMessageId (value);
+				var msgid = ValidateMessageId (value, nameof (value));
+
+				if (references[index] == msgid)
+					return;
+
+				references[index] = msgid;
 				OnChanged ();
 			}
 		}
@@ -171,41 +187,55 @@ namespace MimeKit {
 		#region ICollection implementation
 
 		/// <summary>
-		/// Add the specified Message-Id.
+		/// Add a Message-Id.
 		/// </summary>
 		/// <remarks>
 		/// Adds the specified Message-Id to the end of the list.
 		/// </remarks>
 		/// <param name="messageId">The Message-Id.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="messageId"/> is <c>null</c>.
+		/// <paramref name="messageId"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="messageId"/> is not a valid Message-Id.
 		/// </exception>
 		public void Add (string messageId)
 		{
-			if (messageId == null)
+			if (messageId is null)
 				throw new ArgumentNullException (nameof (messageId));
 
-			references.Add (ValidateMessageId (messageId));
+			references.Add (ValidateMessageId (messageId, nameof (messageId)));
 			OnChanged ();
 		}
 
 		/// <summary>
-		/// Add a collection of Message-Id items.
+		/// Add a collection of Message-Ids.
 		/// </summary>
 		/// <remarks>
 		/// Adds a collection of Message-Id items to append to the list.
 		/// </remarks>
 		/// <param name="items">The Message-Id items to add.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="items"/> is <c>null</c>.
+		/// <paramref name="items"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="items"/> contains a <see langword="null"/> or invalid Message-Id.
 		/// </exception>
 		public void AddRange (IEnumerable<string> items)
 		{
-			if (items == null)
+			if (items is null)
 				throw new ArgumentNullException (nameof (items));
 
-			foreach (var msgid in items)
-				references.Add (ValidateMessageId (msgid));
+			var msgids = new List<string> ();
+
+			foreach (var msgid in items) {
+				if (msgid is null)
+					throw new ArgumentException ("The collection contains a null Message-Id.", nameof (items));
+
+				msgids.Add (ValidateMessageId (msgid, nameof (items)));
+			}
+
+			references.AddRange (msgids);
 
 			OnChanged ();
 		}
@@ -214,7 +244,7 @@ namespace MimeKit {
 		/// Clear the Message-Id list.
 		/// </summary>
 		/// <remarks>
-		/// Removes all of the Message-Ids in the list.
+		/// Removes all the Message-Ids in the list.
 		/// </remarks>
 		public void Clear ()
 		{
@@ -226,17 +256,17 @@ namespace MimeKit {
 		/// Check if the <see cref="MessageIdList"/> contains the specified Message-Id.
 		/// </summary>
 		/// <remarks>
-		/// Determines whether or not the list contains the specified Message-Id.
+		/// Determines whether the list contains the specified Message-Id.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified Message-Id is contained;
-		/// otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the specified Message-Id is contained;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="messageId">The Message-Id.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="messageId"/> is <c>null</c>.
+		/// <paramref name="messageId"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Contains (string messageId)
 		{
-			if (messageId == null)
+			if (messageId is null)
 				throw new ArgumentNullException (nameof (messageId));
 
 			return references.Contains (messageId);
@@ -252,7 +282,7 @@ namespace MimeKit {
 		/// <param name="array">The array to copy the Message-Ids to.</param>
 		/// <param name="arrayIndex">The index into the array.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="array"/> is <c>null</c>.
+		/// <paramref name="array"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="arrayIndex"/> is out of range.
@@ -268,15 +298,15 @@ namespace MimeKit {
 		/// <remarks>
 		/// Removes the first instance of the specified Message-Id from the list if it exists.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified Message-Id was removed;
-		/// otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the specified Message-Id was removed;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="messageId">The Message-Id.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="messageId"/> is <c>null</c>.
+		/// <paramref name="messageId"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Remove (string messageId)
 		{
-			if (messageId == null)
+			if (messageId is null)
 				throw new ArgumentNullException (nameof (messageId));
 
 			if (references.Remove (messageId)) {
@@ -304,7 +334,7 @@ namespace MimeKit {
 		/// <remarks>
 		/// A <see cref="MessageIdList"/> is never read-only.
 		/// </remarks>
-		/// <value><c>true</c> if this instance is read only; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if this instance is read only; otherwise, <see langword="false" />.</value>
 		public bool IsReadOnly {
 			get { return false; }
 		}
@@ -353,7 +383,7 @@ namespace MimeKit {
 		/// <returns>A string representing the <see cref="MessageIdList"/>.</returns>
 		public override string ToString ()
 		{
-			var builder = new StringBuilder ();
+			using var builder = new ValueStringBuilder (128);
 
 			for (int i = 0; i < references.Count; i++) {
 				if (builder.Length > 0)
@@ -367,12 +397,11 @@ namespace MimeKit {
 			return builder.ToString ();
 		}
 
-		internal event EventHandler Changed;
+		internal event EventHandler? Changed;
 
 		void OnChanged ()
 		{
-			if (Changed != null)
-				Changed (this, EventArgs.Empty);
+			Changed?.Invoke (this, EventArgs.Empty);
 		}
 	}
 }

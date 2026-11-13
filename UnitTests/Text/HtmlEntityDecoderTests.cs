@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,17 +24,22 @@
 // THE SOFTWARE.
 //
 
-using System.IO;
-
-using NUnit.Framework;
-
 using Newtonsoft.Json;
+
 using MimeKit.Text;
 
 namespace UnitTests.Text {
 	[TestFixture]
 	public class HtmlEntityDecoderTests
 	{
+		[Test]
+		public void TestArgumentExceptions ()
+		{
+			var decoder = new HtmlEntityDecoder ();
+
+			Assert.Throws<ArgumentOutOfRangeException> (() => decoder.Push ('a'));
+		}
+
 		[Test]
 		public void TestDecodeNamedEntities ()
 		{
@@ -79,9 +84,9 @@ namespace UnitTests.Text {
 						break;
 
 					for (int i = 0; i < name.Length; i++)
-						Assert.IsTrue (decoder.Push (name[i]), "Failed to push char #{0} of \"{1}\".", i, name);
+						Assert.That (decoder.Push (name[i]), Is.True, $"Failed to push char #{i} of \"{name}\".");
 
-					Assert.AreEqual (value, decoder.GetValue (), "Decoded entity did not match for \"{0}\".", name);
+					Assert.That (decoder.GetValue (), Is.EqualTo (value), $"Decoded entity did not match for \"{name}\".");
 
 					decoder.Reset ();
 				}
@@ -93,9 +98,9 @@ namespace UnitTests.Text {
 			var decoder = new HtmlEntityDecoder ();
 
 			for (int i = 0; i < text.Length; i++)
-				Assert.IsTrue (decoder.Push (text[i]), "Failed to push char #{0} of \"{1}\".", i, text);
+				Assert.That (decoder.Push (text[i]), Is.True, $"Failed to push char #{i} of \"{text}\".");
 
-			Assert.AreEqual (expected, decoder.GetValue (), "Decoded entity did not match for \"{0}\".", text);
+			Assert.That (decoder.GetValue (), Is.EqualTo (expected), $"Decoded entity did not match for \"{text}\".");
 		}
 
 		[Test]
@@ -130,15 +135,71 @@ namespace UnitTests.Text {
 			TestDecodeNumericEntity ("&#x9E;", "\u017E"); // LATIN SMALL LETTER Z WITH CARON (ž)
 			TestDecodeNumericEntity ("&#x9F;", "\u0178"); // LATIN CAPITAL LETTER Y WITH DIAERESIS (Ÿ)
 
-			// parse error
-			TestDecodeNumericEntity ("&#X10FFFF;", "&#X10FFFF;");
+			// noncharacters are a parse error, but the code point is still emitted
+			TestDecodeNumericEntity ("&#X10FFFF;", "\uDBFF\uDFFF");
+			TestDecodeNumericEntity ("&#xFDD0;", "\uFDD0");
 
 			TestDecodeNumericEntity ("&#xD800;", "\uFFFD");
 
-			TestDecodeNumericEntity ("&#1;", "&#1;");
+			// control characters are a parse error, but the code point is still emitted
+			TestDecodeNumericEntity ("&#1;", "\u0001");
+			TestDecodeNumericEntity ("&#x7F;", "\u007F");
+
+			// values beyond U+10FFFF are replaced with U+FFFD
+			TestDecodeNumericEntity ("&#x110000;", "\uFFFD");
+			TestDecodeNumericEntity ("&#xFFFFFFFF;", "\uFFFD");
+			TestDecodeNumericEntity ("&#x7FFFFFFF0", "\uFFFD");
+			TestDecodeNumericEntity ($"&#{int.MaxValue / 10}{(int.MaxValue % 10) + 1}", "\uFFFD");
+			TestDecodeNumericEntity ("&#99999999999999999999999999999999999999999999;", "\uFFFD");
+
+			// leading zeros are unbounded
+			TestDecodeNumericEntity ("&#x00000000000000000000000000000000000000000041;", "A");
+
+			// the trailing semicolon is optional
+			TestDecodeNumericEntity ("&#65", "A");
+			TestDecodeNumericEntity ("&#x41", "A");
 
 			TestDecodeNumericEntity ("&#32;", " ");
 			TestDecodeNumericEntity ("&#x7a;", "z");
+		}
+
+		static void TestPushInvalidNumericEntity (string text)
+		{
+			var decoder = new HtmlEntityDecoder ();
+
+			for (int i = 0; i < text.Length; i++) {
+				if (i + 1 == text.Length)
+					Assert.That (decoder.Push (text[i]), Is.False, $"Should have failed to push char #{i} of \"{text}\".");
+				else
+					Assert.That (decoder.Push (text[i]), Is.True, $"Failed to push char #{i} of \"{text}\".");
+			}
+		}
+
+		[Test]
+		public void TestPushInvalidNumericEntities ()
+		{
+			TestPushInvalidNumericEntity ("&#a");
+			TestPushInvalidNumericEntity ("&#/");
+			TestPushInvalidNumericEntity ("&#x@");
+			TestPushInvalidNumericEntity ("&#xG");
+			TestPushInvalidNumericEntity ("&#xg");
+			TestPushInvalidNumericEntity ("&#;");
+			TestPushInvalidNumericEntity ("&#x;");
+		}
+
+		[Test]
+		public void TestIncompleteNumericEntity ()
+		{
+			var decoder = new HtmlEntityDecoder ();
+
+			Assert.That (decoder.Push ('&'), Is.True);
+			Assert.That (decoder.Push ('#'), Is.True);
+			Assert.That (decoder.Push ('x'), Is.True);
+			Assert.That (decoder.Push ('9'), Is.True);
+			Assert.That (decoder.Push ('5'), Is.True);
+
+			var value = decoder.GetValue ();
+			Assert.That (value, Is.EqualTo ("\u2022"));
 		}
 	}
 }

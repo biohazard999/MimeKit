@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,34 +31,6 @@ using MimeKit.IO.Filters;
 
 namespace MimeKit {
 	/// <summary>
-	/// A New-Line format.
-	/// </summary>
-	/// <remarks>
-	/// There are two commonly used line-endings used by modern Operating Systems.
-	/// Unix-based systems such as Linux and Mac OS use a single character (<c>'\n'</c> aka LF)
-	/// to represent the end of line where-as Windows (or DOS) uses a sequence of two
-	/// characters (<c>"\r\n"</c> aka CRLF). Most text-based network protocols such as SMTP,
-	/// POP3, and IMAP use the CRLF sequence as well.
-	/// </remarks>
-	public enum NewLineFormat : byte {
-		/// <summary>
-		/// The Unix New-Line format (<c>"\n"</c>).
-		/// </summary>
-		Unix,
-
-		/// <summary>
-		/// The DOS New-Line format (<c>"\r\n"</c>).
-		/// </summary>
-		Dos,
-
-		/// <summary>
-		/// A mixed New-Line format where some lines use Unix-based line endings and
-		/// other lines use DOS-based line endings.
-		/// </summary>
-		Mixed,
-	}
-
-	/// <summary>
 	/// Format options for serializing various MimeKit objects.
 	/// </summary>
 	/// <remarks>
@@ -80,7 +52,6 @@ namespace MimeKit {
 		bool alwaysQuoteParameterValues;
 		bool allowMixedHeaderCharsets;
 		NewLineFormat newLineFormat;
-		bool verifyingSignature;
 		bool ensureNewLine;
 		bool international;
 		int maxLineLength;
@@ -96,7 +67,7 @@ namespace MimeKit {
 		public static readonly FormatOptions Default;
 
 		/// <summary>
-		/// Gets or sets the maximum line length used by the encoders. The encoders
+		/// Get or set the maximum line length used by the encoders. The encoders
 		/// use this value to determine where to place line breaks.
 		/// </summary>
 		/// <remarks>
@@ -142,7 +113,7 @@ namespace MimeKit {
 				if (this == Default)
 					throw new InvalidOperationException ("The default formatting options cannot be changed.");
 
-				switch (newLineFormat) {
+				switch (value) {
 				case NewLineFormat.Unix:
 				case NewLineFormat.Dos:
 					newLineFormat = value;
@@ -161,10 +132,10 @@ namespace MimeKit {
 		/// maintain byte-for-byte compatibility with the original stream that the message was parsed from.
 		/// This means that if the ogirinal message stream did not end with a new-line sequence, then the
 		/// output of writing the message back to a stream will also not end with a new-line sequence.</para>
-		/// <para>To override this behavior, you can set this property to <c>true</c> in order to ensure
+		/// <para>To override this behavior, you can set this property to <see langword="true" /> in order to ensure
 		/// that writing the message back to a stream will always end with a new-line sequence.</para>
 		/// </remarks>
-		/// <value><c>true</c> in order to ensure that the message will end with a new-line sequence; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> in order to ensure that the message will end with a new-line sequence; otherwise, <see langword="false" />.</value>
 		/// <exception cref="System.InvalidOperationException">
 		/// <see cref="Default"/> cannot be changed.
 		/// </exception>
@@ -196,11 +167,6 @@ namespace MimeKit {
 			get { return NewLineFormats[(int) NewLineFormat]; }
 		}
 
-		internal bool VerifyingSignature {
-			get { return verifyingSignature; }
-			set { verifyingSignature = value; }
-		}
-
 		/// <summary>
 		/// Get the message headers that should be hidden.
 		/// </summary>
@@ -228,7 +194,7 @@ namespace MimeKit {
 		/// or when appending messages to an IMAP folder via UTF8 APPEND
 		/// (<a href="https://tools.ietf.org/html/rfc6855">rfc6855</a>).</para>
 		/// </remarks>
-		/// <value><c>true</c> if the new internationalized formatting should be used; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the new internationalized formatting should be used; otherwise, <see langword="false" />.</value>
 		/// <exception cref="System.InvalidOperationException">
 		/// <see cref="Default"/> cannot be changed.
 		/// </exception>
@@ -257,7 +223,7 @@ namespace MimeKit {
 		/// <a href="https://bugzilla.mozilla.org/show_bug.cgi?id=317263">
 		/// https://bugzilla.mozilla.org/show_bug.cgi?id=317263</a>.</para>
 		/// </remarks>
-		/// <value><c>true</c> if the formatter should be allowed to use us-ascii and/or iso-8859-1 when encoding headers; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the formatter should be allowed to use us-ascii and/or iso-8859-1 when encoding headers; otherwise, <see langword="false" />.</value>
 		public bool AllowMixedHeaderCharsets {
 			get { return allowMixedHeaderCharsets; }
 			set {
@@ -312,6 +278,7 @@ namespace MimeKit {
 		/// adhere to the MIME specifications, this property can be used to force MimeKit to quote parameter values that would normally
 		/// not require quoting.</para>
 		/// </remarks>
+		/// <value><see langword="true" /> if Content-Type and Content-Disposition parameters should always be quoted; otherwise, <see langword="false" />.</value>
 		public bool AlwaysQuoteParameterValues {
 			get { return alwaysQuoteParameterValues; }
 			set {
@@ -351,7 +318,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Clones an instance of <see cref="FormatOptions"/>.
+		/// Clone an instance of <see cref="FormatOptions"/>.
 		/// </summary>
 		/// <remarks>
 		/// Clones the formatting options.
@@ -359,31 +326,16 @@ namespace MimeKit {
 		/// <returns>An exact copy of the <see cref="FormatOptions"/>.</returns>
 		public FormatOptions Clone ()
 		{
-			var options = new FormatOptions ();
-			options.maxLineLength = maxLineLength;
-			options.newLineFormat = newLineFormat;
-			options.ensureNewLine = ensureNewLine;
-			options.HiddenHeaders = new HashSet<HeaderId> (HiddenHeaders);
-			options.allowMixedHeaderCharsets = allowMixedHeaderCharsets;
-			options.parameterEncodingMethod = parameterEncodingMethod;
-			options.alwaysQuoteParameterValues = alwaysQuoteParameterValues;
-			options.verifyingSignature = verifyingSignature;
-			options.international = international;
-			return options;
-		}
-
-		/// <summary>
-		/// Get the default formatting options in a thread-safe way.
-		/// </summary>
-		/// <remarks>
-		/// Gets the default formatting options in a thread-safe way.
-		/// </remarks>
-		/// <returns>The default formatting options.</returns>
-		internal static FormatOptions CloneDefault ()
-		{
-			lock (Default) {
-				return Default.Clone ();
-			}
+			return new FormatOptions {
+				maxLineLength = maxLineLength,
+				newLineFormat = newLineFormat,
+				ensureNewLine = ensureNewLine,
+				HiddenHeaders = new HashSet<HeaderId> (HiddenHeaders),
+				allowMixedHeaderCharsets = allowMixedHeaderCharsets,
+				parameterEncodingMethod = parameterEncodingMethod,
+				alwaysQuoteParameterValues = alwaysQuoteParameterValues,
+				international = international
+			};
 		}
 	}
 }

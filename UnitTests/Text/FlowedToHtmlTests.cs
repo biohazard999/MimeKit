@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,9 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
 using System.Text;
 
 using MimeKit.Text;
-
-using NUnit.Framework;
 
 namespace UnitTests.Text {
 	[TestFixture]
@@ -39,9 +35,9 @@ namespace UnitTests.Text {
 		[Test]
 		public void TestArgumentExceptions ()
 		{
+			using var reader = new StringReader ("");
+			using var writer = new StringWriter ();
 			var converter = new FlowedToHtml ();
-			var reader = new StringReader ("");
-			var writer = new StringWriter ();
 
 			Assert.Throws<ArgumentNullException> (() => converter.InputEncoding = null);
 			Assert.Throws<ArgumentNullException> (() => converter.OutputEncoding = null);
@@ -56,9 +52,9 @@ namespace UnitTests.Text {
 			Assert.Throws<ArgumentNullException> (() => converter.Convert (Stream.Null, (TextWriter) null));
 			Assert.Throws<ArgumentNullException> (() => converter.Convert ((TextReader) null, writer));
 			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (TextWriter) null));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert (new StreamReader (Stream.Null), (Stream) null));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, new StreamWriter (Stream.Null)));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert (new StreamReader (Stream.Null), (TextWriter) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (Stream) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, writer));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (TextWriter) null));
 		}
 
 		[Test]
@@ -66,20 +62,20 @@ namespace UnitTests.Text {
 		{
 			var converter = new FlowedToHtml ();
 
-			Assert.IsFalse (converter.DeleteSpace, "DeleteSpace");
-			Assert.IsFalse (converter.DetectEncodingFromByteOrderMark, "DetectEncodingFromByteOrderMark");
-			Assert.IsNull (converter.Footer, "Footer");
-			Assert.AreEqual (HeaderFooterFormat.Text, converter.FooterFormat, "FooterFormat");
-			Assert.IsNull (converter.Header, "Header");
-			Assert.AreEqual (HeaderFooterFormat.Text, converter.HeaderFormat, "HeaderFormat");
-			Assert.IsNull (converter.HtmlTagCallback, "HtmlTagCallback");
-			Assert.AreEqual (Encoding.UTF8, converter.InputEncoding, "InputEncoding");
-			Assert.AreEqual (TextFormat.Flowed, converter.InputFormat, "InputFormat");
-			Assert.AreEqual (4096, converter.InputStreamBufferSize, "InputStreamBufferSize");
-			Assert.AreEqual (Encoding.UTF8, converter.OutputEncoding, "OutputEncoding");
-			Assert.AreEqual (TextFormat.Html, converter.OutputFormat, "OutputFormat");
-			Assert.IsFalse (converter.OutputHtmlFragment, "OutputHtmlFragment");
-			Assert.AreEqual (4096, converter.OutputStreamBufferSize, "OutputStreamBufferSize");
+			Assert.That (converter.DeleteSpace, Is.False, "DeleteSpace");
+			Assert.That (converter.DetectEncodingFromByteOrderMark, Is.False, "DetectEncodingFromByteOrderMark");
+			Assert.That (converter.Footer, Is.Null, "Footer");
+			Assert.That (converter.FooterFormat, Is.EqualTo (HeaderFooterFormat.Text), "FooterFormat");
+			Assert.That (converter.Header, Is.Null, "Header");
+			Assert.That (converter.HeaderFormat, Is.EqualTo (HeaderFooterFormat.Text), "HeaderFormat");
+			Assert.That (converter.HtmlTagCallback, Is.Null, "HtmlTagCallback");
+			Assert.That (converter.InputEncoding, Is.EqualTo (Encoding.UTF8), "InputEncoding");
+			Assert.That (converter.InputFormat, Is.EqualTo (TextFormat.Flowed), "InputFormat");
+			Assert.That (converter.InputStreamBufferSize, Is.EqualTo (4096), "InputStreamBufferSize");
+			Assert.That (converter.OutputEncoding, Is.EqualTo (Encoding.UTF8), "OutputEncoding");
+			Assert.That (converter.OutputFormat, Is.EqualTo (TextFormat.Html), "OutputFormat");
+			Assert.That (converter.OutputHtmlFragment, Is.False, "OutputHtmlFragment");
+			Assert.That (converter.OutputStreamBufferSize, Is.EqualTo (4096), "OutputStreamBufferSize");
 		}
 
 		[Test]
@@ -104,7 +100,7 @@ namespace UnitTests.Text {
 			var converter = new FlowedToHtml { OutputHtmlFragment = true };
 			var result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -131,7 +127,7 @@ namespace UnitTests.Text {
 			var converter = new FlowedToHtml { OutputHtmlFragment = true };
 			var result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -158,7 +154,7 @@ namespace UnitTests.Text {
 			var converter = new FlowedToHtml { OutputHtmlFragment = true };
 			var result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -186,7 +182,7 @@ namespace UnitTests.Text {
 			var converter = new FlowedToHtml { OutputHtmlFragment = true };
 			var result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -219,7 +215,7 @@ namespace UnitTests.Text {
 			};
 			var result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -230,7 +226,93 @@ namespace UnitTests.Text {
 			var converter = new FlowedToHtml { Header = null, Footer = null, OutputHtmlFragment = true };
 			var result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[TestCaseSource (typeof (UrlScannerTests), nameof (UrlScannerTests.UrlRenderingCases))]
+		public void TestUrlScannerFixesToHtml (string text, string expected)
+		{
+			var converter = new FlowedToHtml { OutputHtmlFragment = true };
+
+			Assert.That (converter.Convert (text + "\n"), Is.EqualTo ("<p>" + expected + "</p>" + Environment.NewLine));
+			Assert.That (converter.Convert ("> " + text + "\nnext\n"),
+				Is.EqualTo ("<blockquote><p>" + expected + "</p>" + Environment.NewLine +
+					"</blockquote><p>next</p>" + Environment.NewLine));
+		}
+
+		// Tests fix for issue #1130
+		[Test]
+		public void TestFlowedTextEndingWithSpace ()
+		{
+			string expected = "<p>We should have access, and apparently did a few months ago, but now there isa &quot;You do not currently have access to this content.&quot; at the bottom of therecord</p>" + Environment.NewLine +
+				"<br/>" + Environment.NewLine +
+				"<p>The URL in question URL:</p>" + Environment.NewLine +
+				"<p><a href=\"https://example.com/\">https://example.com/</a></p>" + Environment.NewLine;
+			string text = "We should have access, and apparently did a few months ago, but now there is " + Environment.NewLine +
+				"a \"You do not currently have access to this content.\" at the bottom of the " + Environment.NewLine +
+				"record" + Environment.NewLine +
+				Environment.NewLine +
+				"The URL in question URL:" + Environment.NewLine +
+				"https://example.com/ ";
+			var converter = new FlowedToHtml { DeleteSpace = true, OutputHtmlFragment = true };
+			var result = converter.Convert (text);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		// The end tags of the blockquotes that were still open at the end of the text used to be written even if
+		// the HtmlTagCallback deleted them.
+		[Test]
+		public void TestDeleteBlockQuoteEndTagsAtEndOfText ()
+		{
+			string expected = "<p>a</p>" + Environment.NewLine + "<p>b</p>" + Environment.NewLine;
+			string text = "> a" + Environment.NewLine + ">> b";
+			var converter = new FlowedToHtml {
+				OutputHtmlFragment = true,
+				HtmlTagCallback = (ctx, htmlWriter) => {
+					if (ctx.TagId == HtmlTagId.BlockQuote) {
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+						return;
+					}
+
+					ctx.WriteTag (htmlWriter, true);
+				}
+			};
+			var result = converter.Convert (text);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		// The HtmlTagCallback used to be invoked for (and write) the blockquotes nested inside of a blockquote
+		// whose inner content was suppressed.
+		[TestCase (true)]
+		[TestCase (false)]
+		public void TestSuppressBlockQuoteInnerContent (bool closeQuotes)
+		{
+			string expected = "<blockquote></blockquote><p>c</p>" + Environment.NewLine + "<blockquote></blockquote>";
+			string text = "> a" + Environment.NewLine +
+				">> b" + Environment.NewLine +
+				">>> b" + Environment.NewLine +
+				"c" + Environment.NewLine +
+				">> d" + Environment.NewLine +
+				">>> e" + (closeQuotes ? Environment.NewLine + "f" : string.Empty);
+			int invoked = 0;
+			var converter = new FlowedToHtml {
+				OutputHtmlFragment = true,
+				HtmlTagCallback = (ctx, htmlWriter) => {
+					if (ctx.TagId == HtmlTagId.BlockQuote && !ctx.IsEndTag) {
+						ctx.SuppressInnerContent = true;
+						invoked++;
+					}
+
+					ctx.WriteTag (htmlWriter, true);
+				}
+			};
+			var result = converter.Convert (text);
+
+			Assert.That (result, Is.EqualTo (closeQuotes ? expected + "<p>f</p>" + Environment.NewLine : expected));
+			Assert.That (invoked, Is.EqualTo (2));
 		}
 	}
 }

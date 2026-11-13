@@ -1,9 +1,9 @@
-﻿//
+//
 // ArgumentExceptionTests.cs
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,22 +24,405 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
 using System.Reflection;
-
-using NUnit.Framework;
 
 using MimeKit;
 using MimeKit.IO;
+using MimeKit.Text;
+using MimeKit.Tnef;
 using MimeKit.Utils;
+using MimeKit.Encodings;
 using MimeKit.IO.Filters;
 using MimeKit.Cryptography;
+
+using UnitTests.IO;
 
 namespace UnitTests {
 	[TestFixture]
 	public class ArgumentExceptionTests
 	{
+		[TestCase ("")]
+		[TestCase (" text")]
+		[TestCase ("text ")]
+		[TestCase ("text/plain")]
+		[TestCase ("plain; charset=utf-8")]
+		[TestCase ("\"plain\"")]
+		[TestCase ("pl\u00e4in")]
+		[TestCase ("plain\r\nX-Injected: yes")]
+		[TestCase ("\u0100")]
+		public void TestContentTypeTokenArguments (string invalid)
+		{
+			var contentType = new ContentType ("text", "plain");
+			int changed = 0;
+			contentType.Changed += (sender, args) => changed++;
+
+			Assert.That (Assert.Throws<ArgumentException> (() => new ContentType (invalid, "plain")).ParamName, Is.EqualTo ("mediaType"));
+			Assert.That (Assert.Throws<ArgumentException> (() => new ContentType ("text", invalid)).ParamName, Is.EqualTo ("mediaSubtype"));
+			Assert.That (Assert.Throws<ArgumentException> (() => contentType.MediaType = invalid).ParamName, Is.EqualTo ("value"));
+			Assert.That (Assert.Throws<ArgumentException> (() => contentType.MediaSubtype = invalid).ParamName, Is.EqualTo ("value"));
+			Assert.That (contentType.MimeType, Is.EqualTo ("text/plain"));
+			Assert.That (changed, Is.Zero);
+		}
+
+		[Test]
+		public void TestContentTypeNullArguments ()
+		{
+			Assert.That (Assert.Throws<ArgumentNullException> (() => new ContentType (null, "plain")).ParamName, Is.EqualTo ("mediaType"));
+			Assert.That (Assert.Throws<ArgumentNullException> (() => new ContentType ("text", null)).ParamName, Is.EqualTo ("mediaSubtype"));
+		}
+
+		[TestCase ("")]
+		[TestCase (" \t")]
+		[TestCase (" example.com")]
+		[TestCase ("example.com ")]
+		[TestCase ("example..com")]
+		[TestCase (".example.com")]
+		[TestCase ("example.com.")]
+		[TestCase ("@example.com")]
+		[TestCase ("user@example.com")]
+		[TestCase ("example.com,other.example")]
+		[TestCase ("example.com:")]
+		[TestCase ("example(comment).com")]
+		[TestCase ("[127.0.0.1")]
+		[TestCase ("[127.0.0.1]extra")]
+		[TestCase ("[a\\b]")]
+		[TestCase ("[a b]")]
+		[TestCase ("[a[b]]")]
+		[TestCase ("exam\u2008ple.com")]
+		[TestCase ("example.com\r\nX-Injected: yes")]
+		[TestCase ("a\0b")]
+		[TestCase ("a\u007fb")]
+		[TestCase ("a\u0085b")]
+		public void TestDomainListSyntaxArguments (string invalid)
+		{
+			var list = new DomainList (new[] { "example.com" });
+			int changed = 0;
+			list.Changed += (sender, args) => changed++;
+
+			Assert.That (Assert.Throws<ArgumentException> (() => new DomainList (new[] { "example.com", invalid })).ParamName, Is.EqualTo ("domains"));
+			Assert.That (Assert.Throws<ArgumentException> (() => list.Add (invalid)).ParamName, Is.EqualTo ("domain"));
+			Assert.That (Assert.Throws<ArgumentException> (() => list.Insert (0, invalid)).ParamName, Is.EqualTo ("domain"));
+			Assert.That (Assert.Throws<ArgumentException> (() => list[0] = invalid).ParamName, Is.EqualTo ("value"));
+			Assert.That (list.ToArray (), Is.EqualTo (new[] { "example.com" }));
+			Assert.That (changed, Is.Zero);
+			Assert.That (list.Contains (invalid), Is.False);
+			Assert.That (list.IndexOf (invalid), Is.EqualTo (-1));
+			Assert.That (list.Remove (invalid), Is.False);
+		}
+
+		[TestCase (0xd800)]
+		[TestCase (0xdc00)]
+		public void TestDomainListUnpairedSurrogate (int surrogate)
+		{
+			TestDomainListSyntaxArguments ("a" + (char) surrogate + "b");
+		}
+
+		[Test]
+		public void TestDomainListNullElement ()
+		{
+			Assert.That (Assert.Throws<ArgumentException> (() => new DomainList (new string[] { "example.com", null })).ParamName, Is.EqualTo ("domains"));
+		}
+
+		[Test]
+		public void TestMimeDecoderFlushArguments ()
+		{
+			var decoders = new IMimeDecoder[] { new Base64Decoder (), new QuotedPrintableDecoder (),
+				new QuotedPrintableDecoder (true), new Rfc2231Decoder (), new UUDecoder (), new UUDecoder (true),
+				new YEncDecoder (), new YEncDecoder (true), new PassThroughDecoder (ContentEncoding.Unspecified) };
+			var input = new byte[4];
+			var output = new byte[16];
+
+			foreach (var decoder in decoders) {
+				Assert.Throws<ArgumentNullException> (() => decoder.Flush (null, 0, 0, output));
+				Assert.Throws<ArgumentNullException> (() => decoder.Flush (input, 0, input.Length, null));
+				Assert.Throws<ArgumentOutOfRangeException> (() => decoder.Flush (input, -1, 0, output));
+				Assert.Throws<ArgumentOutOfRangeException> (() => decoder.Flush (input, input.Length + 1, 0, output));
+				Assert.Throws<ArgumentOutOfRangeException> (() => decoder.Flush (input, 0, -1, output));
+				Assert.Throws<ArgumentOutOfRangeException> (() => decoder.Flush (input, 1, input.Length, output));
+				Assert.Throws<ArgumentException> (() => decoder.Flush (input, 0, input.Length, Array.Empty<byte> ()));
+			}
+		}
+
+		static IMimeParser CreateStorageParser (int overload, ParserOptions options, Stream stream, MimeContentStorage storage)
+		{
+			switch (overload) {
+			case 0: return new MimeParser (stream, storage);
+			case 1: return new MimeParser (stream, MimeFormat.Entity, storage);
+			case 2: return new MimeParser (options, stream, storage);
+			default: return new MimeParser (options, stream, MimeFormat.Entity, storage);
+			}
+		}
+
+		[Test]
+		public void TestContentStorageParserArguments ([Values (0, 1, 2, 3)] int overload)
+		{
+			using var memory = new MemoryStream ();
+			using var nonseekable = new NonSeekableStream (memory);
+			var options = ParserOptions.Default;
+			var parser = CreateStorageParser (overload, options, memory, MimeContentStorage.Memory);
+
+			foreach (var storage in new[] { (MimeContentStorage) (-1), (MimeContentStorage) 2, (MimeContentStorage) int.MaxValue }) {
+				Assert.That (Assert.Throws<ArgumentOutOfRangeException> (() => CreateStorageParser (overload, options, memory, storage)).ParamName, Is.EqualTo ("storage"));
+				Assert.That (Assert.Throws<ArgumentOutOfRangeException> (() => parser.SetStream (memory, storage)).ParamName, Is.EqualTo ("storage"));
+				Assert.That (Assert.Throws<ArgumentOutOfRangeException> (() => parser.SetStream (memory, MimeFormat.Mbox, storage)).ParamName, Is.EqualTo ("storage"));
+			}
+
+			Assert.That (Assert.Throws<ArgumentException> (() => CreateStorageParser (overload, options, nonseekable, MimeContentStorage.Source)).ParamName, Is.EqualTo ("stream"));
+			Assert.That (Assert.Throws<ArgumentException> (() => parser.SetStream (nonseekable, MimeContentStorage.Source)).ParamName, Is.EqualTo ("stream"));
+			Assert.That (Assert.Throws<ArgumentException> (() => parser.SetStream (nonseekable, MimeFormat.Mbox, MimeContentStorage.Source)).ParamName, Is.EqualTo ("stream"));
+			Assert.DoesNotThrow (() => CreateStorageParser (overload, options, nonseekable, MimeContentStorage.Memory));
+			Assert.DoesNotThrow (() => parser.SetStream (nonseekable, MimeContentStorage.Memory));
+
+			foreach (var storage in new[] { MimeContentStorage.Memory, MimeContentStorage.Source }) {
+				Assert.Throws<ArgumentNullException> (() => CreateStorageParser (overload, options, null, storage));
+				Assert.Throws<ArgumentNullException> (() => parser.SetStream (null, storage));
+				Assert.Throws<ArgumentNullException> (() => parser.SetStream (null, MimeFormat.Mbox, storage));
+				if (overload >= 2)
+					Assert.Throws<ArgumentNullException> (() => CreateStorageParser (overload, null, memory, storage));
+			}
+
+			Assert.Throws<ArgumentOutOfRangeException> (() => parser.SetStream (memory, (MimeFormat) 255));
+			Assert.Throws<ArgumentOutOfRangeException> (() => parser.SetStream (memory, (MimeFormat) 255, MimeContentStorage.Memory));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new MimeParser (memory, (MimeFormat) 255));
+		}
+
+		[Test]
+		public void TestContentStorageLoadArguments ()
+		{
+			using var memory = new MemoryStream ();
+			using var nonseekable = new NonSeekableStream (memory);
+			var options = ParserOptions.Default;
+
+			foreach (var storage in new[] { (MimeContentStorage) (-1), (MimeContentStorage) 2, (MimeContentStorage) int.MaxValue }) {
+				Assert.Throws<ArgumentOutOfRangeException> (() => MimeMessage.Load (memory, storage));
+				Assert.Throws<ArgumentOutOfRangeException> (() => MimeMessage.Load (options, memory, storage));
+				Assert.Throws<ArgumentOutOfRangeException> (() => MimeEntity.Load (memory, storage));
+				Assert.Throws<ArgumentOutOfRangeException> (() => MimeEntity.Load (options, memory, storage));
+			}
+
+			Assert.Throws<ArgumentException> (() => MimeMessage.Load (nonseekable, MimeContentStorage.Source));
+			Assert.Throws<ArgumentException> (() => MimeMessage.Load (options, nonseekable, MimeContentStorage.Source));
+			Assert.Throws<ArgumentException> (() => MimeEntity.Load (nonseekable, MimeContentStorage.Source));
+			Assert.Throws<ArgumentException> (() => MimeEntity.Load (options, nonseekable, MimeContentStorage.Source));
+		}
+
+		[Test]
+		public void TestContentStorageLoadArgumentsAsync ()
+		{
+			using var memory = new MemoryStream ();
+			using var nonseekable = new NonSeekableStream (memory);
+			var options = ParserOptions.Default;
+
+			foreach (var storage in new[] { (MimeContentStorage) (-1), (MimeContentStorage) 2, (MimeContentStorage) int.MaxValue }) {
+				Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await MimeMessage.LoadAsync (memory, storage));
+				Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await MimeMessage.LoadAsync (options, memory, storage));
+				Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await MimeEntity.LoadAsync (memory, storage));
+				Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await MimeEntity.LoadAsync (options, memory, storage));
+			}
+
+			Assert.ThrowsAsync<ArgumentException> (async () => await MimeMessage.LoadAsync (nonseekable, MimeContentStorage.Source));
+			Assert.ThrowsAsync<ArgumentException> (async () => await MimeMessage.LoadAsync (options, nonseekable, MimeContentStorage.Source));
+			Assert.ThrowsAsync<ArgumentException> (async () => await MimeEntity.LoadAsync (nonseekable, MimeContentStorage.Source));
+			Assert.ThrowsAsync<ArgumentException> (async () => await MimeEntity.LoadAsync (options, nonseekable, MimeContentStorage.Source));
+		}
+
+		[Test]
+		public void TestEnrichedToHtmlArguments ()
+		{
+			var converter = new EnrichedToHtml ();
+			using var reader = new StringReader ("");
+			using var writer = new StringWriter ();
+
+			foreach (int value in new[] { 0, -1 }) {
+				Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxElementDepth = value);
+				Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxParameterLength = value);
+				Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxInputLength = value);
+				Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxOutputLength = value);
+			}
+			Assert.Throws<ArgumentNullException> (() => converter.InputEncoding = null);
+			Assert.Throws<ArgumentNullException> (() => converter.OutputEncoding = null);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.InputStreamBufferSize = 0);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.OutputStreamBufferSize = 0);
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, Stream.Null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (Stream.Null, (Stream) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((TextReader) null, Stream.Null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (Stream) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, writer));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (Stream.Null, (TextWriter) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((TextReader) null, writer));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (TextWriter) null));
+		}
+
+		[Test]
+		public void TestHtmlToTextArguments ()
+		{
+			var converter = new HtmlToText ();
+			using var reader = new StringReader ("");
+			using var writer = new StringWriter ();
+
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxElementDepth = 0);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxElementDepth = -1);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxInputLength = 0);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxInputLength = -1);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxOutputLength = 0);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxOutputLength = -1);
+			Assert.Throws<ArgumentNullException> (() => converter.InputEncoding = null);
+			Assert.Throws<ArgumentNullException> (() => converter.OutputEncoding = null);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.InputStreamBufferSize = 0);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.OutputStreamBufferSize = 0);
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, Stream.Null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (Stream.Null, (Stream) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((TextReader) null, Stream.Null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (Stream) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, writer));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (Stream.Null, (TextWriter) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((TextReader) null, writer));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (TextWriter) null));
+		}
+
+		[Test]
+		public void TestYEncOptionsArguments ()
+		{
+			var options = new YEncOptions ();
+			Assert.That (options.MaxLineLength, Is.EqualTo (16384));
+			Assert.That (options.MaxDecodedSize, Is.EqualTo (1024L * 1024 * 1024));
+			Assert.That (options.NewLineFormat, Is.EqualTo (NewLineFormat.Dos));
+			Assert.That (options.FileNameEncoding.CodePage, Is.EqualTo (28591));
+			Assert.Throws<ArgumentNullException> (() => options.FileNameEncoding = null);
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.MaxLineLength = 0);
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.MaxLineLength = int.MaxValue - 1);
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.MaxDecodedSize = -1);
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.NewLineFormat = NewLineFormat.Mixed);
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.NewLineFormat = (NewLineFormat) 255);
+		}
+
+		[Test]
+		public void TestYEncHeaderArguments ()
+		{
+			Assert.Throws<ArgumentNullException> (() => new YEncHeader (null, 0));
+			foreach (var name in new[] { "", " x", "x ", "x\0y", "x\ny", "x\ry" })
+				Assert.Throws<ArgumentException> (() => new YEncHeader (name, 0));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", -1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 0, lineLength: 0));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 0, lineLength: int.MaxValue - 1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 0, partNumber: -1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 0, totalParts: -1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 0, totalParts: 1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 1, partNumber: 2, totalParts: 1, begin: 1, end: 1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 1, begin: 1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 1, end: 1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 1, partNumber: 1, begin: 0, end: 1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 1, partNumber: 1, begin: 2, end: 2));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 2, partNumber: 1, begin: 2, end: 1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncHeader ("x", 1, partNumber: 1, begin: 1, end: 2));
+			Assert.That (new YEncHeader ("x", long.MaxValue, partNumber: 1, begin: 1, end: long.MaxValue).DecodedSize, Is.EqualTo (long.MaxValue));
+		}
+
+		[Test]
+		public void TestYEncReaderArguments ()
+		{
+			using var closed = new MemoryStream ();
+			closed.Dispose ();
+			Assert.Throws<ArgumentNullException> (() => new YEncReader (null));
+			Assert.Throws<ArgumentException> (() => new YEncReader (closed));
+			using var input = new MemoryStream ();
+			using var readOnly = new MemoryStream (Array.Empty<byte> (), false);
+			using var reader = new YEncReader (input);
+			Assert.Throws<ArgumentNullException> (() => reader.DecodeTo (null));
+			Assert.Throws<ArgumentException> (() => reader.DecodeTo (readOnly));
+			Assert.Throws<ArgumentException> (() => reader.DecodeTo (input));
+		}
+
+		[Test]
+		public void TestYEncReaderArgumentsAsync ()
+		{
+			using var input = new MemoryStream ();
+			using var readOnly = new MemoryStream (Array.Empty<byte> (), false);
+			using var reader = new YEncReader (input);
+			Assert.ThrowsAsync<ArgumentNullException> (() => reader.DecodeToAsync (null));
+			Assert.ThrowsAsync<ArgumentException> (() => reader.DecodeToAsync (readOnly));
+			Assert.ThrowsAsync<ArgumentException> (() => reader.DecodeToAsync (input));
+		}
+
+		[Test]
+		public void TestYEncWriterArguments ()
+		{
+			using var closed = new MemoryStream ();
+			closed.Dispose ();
+			using var readOnly = new MemoryStream (Array.Empty<byte> (), false);
+			Assert.Throws<ArgumentNullException> (() => new YEncWriter (null));
+			Assert.Throws<ArgumentException> (() => new YEncWriter (readOnly));
+			using var output = new MemoryStream ();
+			using var writer = new YEncWriter (output, new YEncOptions { MaxLineLength = 128, MaxDecodedSize = 9 });
+			var header = new YEncHeader ("x", 0, 60);
+			Assert.Throws<ArgumentNullException> (() => writer.Write (null, readOnly));
+			Assert.Throws<ArgumentNullException> (() => writer.Write (header, null));
+			Assert.Throws<ArgumentException> (() => writer.Write (header, closed));
+			Assert.Throws<ArgumentException> (() => writer.Write (header, output));
+			foreach (int width in new[] { 59, 999, 128 })
+				Assert.Throws<ArgumentOutOfRangeException> (() => writer.Write (new YEncHeader ("x", 0, width), readOnly));
+			Assert.Throws<ArgumentOutOfRangeException> (() => writer.Write (new YEncHeader ("x", 10, 60), readOnly));
+			Assert.Throws<ArgumentException> (() => writer.Write (new YEncHeader (new string ('x', 128), 0, 60), readOnly));
+			Assert.Throws<System.Text.EncoderFallbackException> (() => writer.Write (new YEncHeader ("\u65e5", 0, 60), readOnly));
+			Assert.That (output.Length, Is.Zero);
+			Assert.That (writer.Write (header, readOnly), Is.Zero);
+		}
+
+		[Test]
+		public async Task TestYEncWriterArgumentsAsync ()
+		{
+			using var closed = new MemoryStream ();
+			closed.Dispose ();
+			using var input = new MemoryStream ();
+			using var output = new MemoryStream ();
+			using var writer = new YEncWriter (output, new YEncOptions { MaxLineLength = 128, MaxDecodedSize = 9 });
+			var header = new YEncHeader ("x", 0, 60);
+			Assert.ThrowsAsync<ArgumentNullException> (() => writer.WriteAsync (null, input));
+			Assert.ThrowsAsync<ArgumentNullException> (() => writer.WriteAsync (header, null));
+			Assert.ThrowsAsync<ArgumentException> (() => writer.WriteAsync (header, closed));
+			Assert.ThrowsAsync<ArgumentException> (() => writer.WriteAsync (header, output));
+			foreach (int width in new[] { 59, 999, 128 })
+				Assert.ThrowsAsync<ArgumentOutOfRangeException> (() => writer.WriteAsync (new YEncHeader ("x", 0, width), input));
+			Assert.ThrowsAsync<ArgumentOutOfRangeException> (() => writer.WriteAsync (new YEncHeader ("x", 10, 60), input));
+			Assert.ThrowsAsync<ArgumentException> (() => writer.WriteAsync (new YEncHeader (new string ('x', 128), 0, 60), input));
+			Assert.ThrowsAsync<System.Text.EncoderFallbackException> (() => writer.WriteAsync (new YEncHeader ("\u65e5", 0, 60), input));
+			Assert.That (output.Length, Is.Zero);
+			Assert.That (await writer.WriteAsync (header, input), Is.Zero);
+		}
+
+		[Test]
+		public void TestTnefWriterTemporaryStreamFactoryArguments ()
+		{
+			using var output = new MemoryStream ();
+			using var writer = new TnefWriter (output);
+
+			var exception = Assert.Throws<ArgumentNullException> (() => writer.TemporaryStreamFactory = null);
+			Assert.That (exception.ParamName, Is.EqualTo ("value"));
+		}
+
+		[Test]
+		public void TestTemporarySecureMimeContextTrustArguments ()
+		{
+			using var ctx = new TemporarySecureMimeContext ();
+			Assert.Throws<ArgumentNullException> (() => ctx.Import ((Org.BouncyCastle.X509.X509Certificate) null, true));
+			Assert.ThrowsAsync<ArgumentNullException> (() => ctx.ImportAsync ((Org.BouncyCastle.X509.X509Certificate) null, true));
+			using var canceled = new CancellationTokenSource ();
+			canceled.Cancel ();
+			var root = Cryptography.SecureMimeTestsBase.RootCertificate;
+			Assert.Throws<OperationCanceledException> (() => ctx.Import (root, true, canceled.Token));
+			Assert.ThrowsAsync<OperationCanceledException> (() => ctx.ImportAsync (root, true, canceled.Token));
+		}
+
+		[Test]
+		public void TestMaxDecompressedSizeArguments ()
+		{
+			using var ctx = new TemporarySecureMimeContext ();
+			Assert.Throws<ArgumentOutOfRangeException> (() => ctx.MaxDecompressedSize = 0);
+			Assert.Throws<ArgumentOutOfRangeException> (() => ctx.MaxDecompressedSize = -1);
+		}
+
 		static void AssertFilterArguments (IMimeFilter filter)
 		{
 			int outputIndex, outputLength;
@@ -52,19 +435,19 @@ namespace UnitTests {
 
 			ex = Assert.Throws<ArgumentOutOfRangeException> (() => filter.Filter (input, -1, 0, out outputIndex, out outputLength),
 				"{0}.Filter did not throw ArgumentOutOfRangeException when startIndex was -1.", filter.GetType ().Name);
-			Assert.AreEqual ("startIndex", ex.ParamName);
+			Assert.That (ex.ParamName, Is.EqualTo ("startIndex"));
 
 			ex = Assert.Throws<ArgumentOutOfRangeException> (() => filter.Filter (input, 0, -1, out outputIndex, out outputLength),
 				"{0}.Filter did not throw ArgumentOutOfRangeException when length was -1.", filter.GetType ().Name);
-			Assert.AreEqual ("length", ex.ParamName);
+			Assert.That (ex.ParamName, Is.EqualTo ("length"));
 
 			ex = Assert.Throws<ArgumentOutOfRangeException> (() => filter.Filter (input, 1025, 0, out outputIndex, out outputLength),
 				"{0}.Filter did not throw ArgumentOutOfRangeException when startIndex was > 1024.", filter.GetType ().Name);
-			Assert.AreEqual ("startIndex", ex.ParamName);
+			Assert.That (ex.ParamName, Is.EqualTo ("startIndex"));
 
 			ex = Assert.Throws<ArgumentOutOfRangeException> (() => filter.Filter (input, 0, 1025, out outputIndex, out outputLength),
 				"{0}.Filter did not throw ArgumentOutOfRangeException when length was > 1024.", filter.GetType ().Name);
-			Assert.AreEqual ("length", ex.ParamName);
+			Assert.That (ex.ParamName, Is.EqualTo ("length"));
 
 			// Flush
 			Assert.Throws<ArgumentNullException> (() => filter.Flush (null, 0, 0, out outputIndex, out outputLength),
@@ -72,21 +455,47 @@ namespace UnitTests {
 
 			ex = Assert.Throws<ArgumentOutOfRangeException> (() => filter.Flush (input, -1, 0, out outputIndex, out outputLength),
 				"{0}.Filter did not throw ArgumentOutOfRangeException when startIndex was -1.", filter.GetType ().Name);
-			Assert.AreEqual ("startIndex", ex.ParamName);
+			Assert.That (ex.ParamName, Is.EqualTo ("startIndex"));
 
 			ex = Assert.Throws<ArgumentOutOfRangeException> (() => filter.Flush (input, 0, -1, out outputIndex, out outputLength),
 				"{0}.Filter did not throw ArgumentOutOfRangeException when length was -1.", filter.GetType ().Name);
-			Assert.AreEqual ("length", ex.ParamName);
+			Assert.That (ex.ParamName, Is.EqualTo ("length"));
 
 			ex = Assert.Throws<ArgumentOutOfRangeException> (() => filter.Flush (input, 1025, 0, out outputIndex, out outputLength),
 				"{0}.Filter did not throw ArgumentOutOfRangeException when startIndex was > 1024.", filter.GetType ().Name);
-			Assert.AreEqual ("startIndex", ex.ParamName);
+			Assert.That (ex.ParamName, Is.EqualTo ("startIndex"));
 
 			ex = Assert.Throws<ArgumentOutOfRangeException> (() => filter.Flush (input, 0, 1025, out outputIndex, out outputLength),
 				"{0}.Filter did not throw ArgumentOutOfRangeException when length was > 1024.", filter.GetType ().Name);
-			Assert.AreEqual ("length", ex.ParamName);
+			Assert.That (ex.ParamName, Is.EqualTo ("length"));
 
 			filter.Reset ();
+		}
+
+		[Test]
+		public void TestEncoderNewLineFormatArguments ()
+		{
+			foreach (var format in new[] { NewLineFormat.Mixed, (NewLineFormat) 255, (NewLineFormat) 99 }) {
+				Assert.Throws<ArgumentOutOfRangeException> (() => new Base64Encoder (format));
+				Assert.Throws<ArgumentOutOfRangeException> (() => new QuotedPrintableEncoder (format));
+				Assert.Throws<ArgumentOutOfRangeException> (() => new UUEncoder (format));
+				Assert.Throws<ArgumentOutOfRangeException> (() => new YEncEncoder (format));
+				Assert.Throws<ArgumentOutOfRangeException> (() => EncoderFilter.Create (ContentEncoding.Base64, format));
+				Assert.Throws<ArgumentOutOfRangeException> (() => EncoderFilter.Create ("base64", format));
+				Assert.Throws<ArgumentOutOfRangeException> (() => EncoderFilter.Create (ContentEncoding.Binary, format));
+				Assert.Throws<ArgumentOutOfRangeException> (() => EncoderFilter.Create ("unknown", format));
+			}
+
+			foreach (var format in new[] { NewLineFormat.Dos, NewLineFormat.Unix }) {
+				Assert.Throws<ArgumentNullException> (() => EncoderFilter.Create (null, format));
+				foreach (int maxLineLength in new[] { 59, 999 }) {
+					Assert.Throws<ArgumentOutOfRangeException> (() => new Base64Encoder (format, maxLineLength));
+					Assert.Throws<ArgumentOutOfRangeException> (() => new QuotedPrintableEncoder (format, maxLineLength));
+					Assert.Throws<ArgumentOutOfRangeException> (() => new YEncEncoder (format, maxLineLength));
+					Assert.Throws<ArgumentOutOfRangeException> (() => EncoderFilter.Create (ContentEncoding.Base64, format, maxLineLength));
+					Assert.Throws<ArgumentOutOfRangeException> (() => EncoderFilter.Create ("quoted-printable", format, maxLineLength));
+				}
+			}
 		}
 
 		[Test]
@@ -97,6 +506,7 @@ namespace UnitTests {
 
 			AssertFilterArguments (new Dos2UnixFilter ());
 			AssertFilterArguments (new Unix2DosFilter ());
+			AssertFilterArguments (new MboxFromFilter ());
 			AssertFilterArguments (new ArmoredFromFilter ());
 			AssertFilterArguments (new BestEncodingFilter ());
 			AssertFilterArguments (new CharsetFilter ("iso-8859-1", "utf-8"));
@@ -118,7 +528,7 @@ namespace UnitTests {
 			var buffer = new byte[1024];
 
 			foreach (var method in type.GetMethods (BindingFlags.Public | BindingFlags.Static)) {
-				if (method.Name != "Parse" && method.Name != "TryParse")
+				if (method.Name != "Parse")
 					continue;
 
 				var parameters = method.GetParameters ();
@@ -155,9 +565,9 @@ namespace UnitTests {
 				if (bufferIndex == 1) {
 					tie = Assert.Throws<TargetInvocationException> (() => method.Invoke (null, args),
 						"{0}.{1} did not throw an exception when options was null.", type.Name, method.Name);
-					Assert.IsInstanceOf<ArgumentNullException> (tie.InnerException);
+					Assert.That (tie.InnerException, Is.InstanceOf<ArgumentNullException> ());
 					ex = (ArgumentException) tie.InnerException;
-					Assert.AreEqual ("options", ex.ParamName);
+					Assert.That (ex.ParamName, Is.EqualTo ("options"));
 
 					args[0] = options;
 				}
@@ -166,9 +576,9 @@ namespace UnitTests {
 				args[bufferIndex] = null;
 				tie = Assert.Throws<TargetInvocationException> (() => method.Invoke (null, args),
 					"{0}.{1} did not throw an exception when {2} was null.", type.Name, method.Name, parameters[bufferIndex].Name);
-				Assert.IsInstanceOf<ArgumentNullException> (tie.InnerException);
+				Assert.That (tie.InnerException, Is.InstanceOf<ArgumentNullException> ());
 				ex = (ArgumentException) tie.InnerException;
-				Assert.AreEqual (parameters[bufferIndex].Name, ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo (parameters[bufferIndex].Name));
 				args[bufferIndex] = buf;
 
 				idx = bufferIndex + 1;
@@ -178,17 +588,17 @@ namespace UnitTests {
 
 					tie = Assert.Throws<TargetInvocationException> (() => method.Invoke (null, args),
 						"{0}.{1} did not throw ArgumentOutOfRangeException when {2} was -1.", type.Name, method.Name, parameters[idx].Name);
-					Assert.IsInstanceOf<ArgumentOutOfRangeException> (tie.InnerException);
+					Assert.That (tie.InnerException, Is.InstanceOf<ArgumentOutOfRangeException> ());
 					ex = (ArgumentException) tie.InnerException;
-					Assert.AreEqual (parameters[idx].Name, ex.ParamName);
+					Assert.That (ex.ParamName, Is.EqualTo (parameters[idx].Name));
 
 					args[idx] = length + 1;
 
 					tie = Assert.Throws<TargetInvocationException> (() => method.Invoke (null, args),
 						"{0}.{1} did not throw an exception when {2} was > length.", type.Name, method.Name, parameters[idx].Name);
-					Assert.IsInstanceOf<ArgumentOutOfRangeException> (tie.InnerException);
+					Assert.That(tie.InnerException, Is.InstanceOf<ArgumentOutOfRangeException>());
 					ex = (ArgumentException) tie.InnerException;
-					Assert.AreEqual (parameters[idx].Name, ex.ParamName);
+					Assert.That (ex.ParamName, Is.EqualTo (parameters[idx].Name));
 
 					args[idx++] = 0;
 				}
@@ -199,17 +609,17 @@ namespace UnitTests {
 
 					tie = Assert.Throws<TargetInvocationException> (() => method.Invoke (null, args),
 						"{0}.{1} did not throw an exception when {2} was -1.", type.Name, method.Name, parameters[idx].Name);
-					Assert.IsInstanceOf<ArgumentOutOfRangeException> (tie.InnerException);
+					Assert.That(tie.InnerException, Is.InstanceOf<ArgumentOutOfRangeException>());
 					ex = (ArgumentException) tie.InnerException;
-					Assert.AreEqual (parameters[idx].Name, ex.ParamName);
+					Assert.That (ex.ParamName, Is.EqualTo (parameters[idx].Name));
 
 					args[idx] = length + 1;
 
 					tie = Assert.Throws<TargetInvocationException> (() => method.Invoke (null, args),
 						"{0}.{1} did not throw an exception when {2} was > length.", type.Name, method.Name, parameters[idx].Name);
-					Assert.IsInstanceOf<ArgumentOutOfRangeException> (tie.InnerException);
+					Assert.That(tie.InnerException, Is.InstanceOf<ArgumentOutOfRangeException>());
 					ex = (ArgumentException) tie.InnerException;
-					Assert.AreEqual (parameters[idx].Name, ex.ParamName);
+					Assert.That (ex.ParamName, Is.EqualTo (parameters[idx].Name));
 
 					idx++;
 				}
@@ -231,6 +641,112 @@ namespace UnitTests {
 
 			AssertParseArguments (typeof (DateUtils));
 			AssertParseArguments (typeof (MimeUtils));
+
+			AssertParseArguments (typeof (DmarcRecord));
+		}
+
+		static void AssertTryParseArguments (Type type)
+		{
+			const string text = "this is a dummy text buffer";
+			var options = ParserOptions.Default;
+			var buffer = new byte[1024];
+
+			foreach (var method in type.GetMethods (BindingFlags.Public | BindingFlags.Static)) {
+				if (method.Name != "TryParse")
+					continue;
+
+				var parameters = method.GetParameters ();
+				var args = new object[parameters.Length];
+				int bufferIndex = 0;
+				bool retval;
+				int idx = 0;
+				int length;
+
+				if (parameters[idx].ParameterType == typeof (ParserOptions))
+					args[idx++] = null;
+
+				// this is either a byte[] or string buffer
+				bufferIndex = idx;
+				if (parameters[idx].ParameterType == typeof (byte[])) {
+					length = buffer.Length;
+					args[idx++] = buffer;
+				} else {
+					length = text.Length;
+					args[idx++] = text;
+				}
+
+				if (idx < parameters.Length && parameters[idx].ParameterType == typeof (int)) {
+					// startIndex
+					args[idx++] = 0;
+				}
+
+				if (idx < parameters.Length && parameters[idx].ParameterType == typeof (int)) {
+					// length
+					args[idx++] = length;
+				}
+
+				if (bufferIndex == 1) {
+					retval = (bool) method.Invoke (null, args);
+					Assert.That (retval, Is.False, $"{type.Name}.{method.Name} did not return false when options was null.");
+					args[0] = options;
+				}
+
+				var buf = args[bufferIndex];
+				args[bufferIndex] = null;
+				retval = (bool) method.Invoke (null, args);
+				Assert.That (retval, Is.False, $"{type.Name}.{method.Name} did not return false when {parameters[bufferIndex].Name} was null.");
+				args[bufferIndex] = buf;
+
+				idx = bufferIndex + 1;
+				if (idx < parameters.Length && parameters[idx].ParameterType == typeof (int)) {
+					// startIndex
+					args[idx] = -1;
+
+					retval = (bool) method.Invoke (null, args);
+					Assert.That (retval, Is.False, $"{type.Name}.{method.Name} did not return false when {parameters[idx].Name} was -1.");
+
+					args[idx] = length + 1;
+
+					retval = (bool) method.Invoke (null, args);
+					Assert.That (retval, Is.False, $"{type.Name}.{method.Name} did not return false when {parameters[idx].Name} was > length.");
+
+					args[idx++] = 0;
+				}
+
+				if (idx < parameters.Length && parameters[idx].ParameterType == typeof (int)) {
+					// length
+					args[idx] = -1;
+
+					retval = (bool) method.Invoke (null, args);
+					Assert.That (retval, Is.False, $"{type.Name}.{method.Name} did not return false when {parameters[idx].Name} was -1.");
+
+					args[idx] = length + 1;
+
+					retval = (bool) method.Invoke (null, args);
+					Assert.That (retval, Is.False, $"{type.Name}.{method.Name} did not return false when {parameters[idx].Name} was > length.");
+
+					idx++;
+				}
+			}
+		}
+
+		[Test]
+		public void TestTryParseArguments ()
+		{
+			AssertTryParseArguments (typeof (GroupAddress));
+			AssertTryParseArguments (typeof (MailboxAddress));
+			AssertTryParseArguments (typeof (InternetAddress));
+			AssertTryParseArguments (typeof (InternetAddressList));
+
+			AssertTryParseArguments (typeof (ContentDisposition));
+			AssertTryParseArguments (typeof (ContentType));
+			AssertTryParseArguments (typeof (DomainList));
+			AssertTryParseArguments (typeof (Header));
+
+			AssertTryParseArguments (typeof (DateUtils));
+			AssertTryParseArguments (typeof (MimeUtils));
+
+			AssertTryParseArguments (typeof (DmarcRecord));
 		}
 
 		[Test]
@@ -252,43 +768,43 @@ namespace UnitTests {
 			if (stream.CanRead) {
 				ex = Assert.Throws<ArgumentNullException> (() => stream.Read (null, 0, 0),
 					"{0}.Read() does not throw an ArgumentNullException when buffer is null.", stream.GetType ().Name);
-				Assert.AreEqual ("buffer", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
 
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Read (buffer, -1, 0),
 					"{0}.Read() does not throw an ArgumentOutOfRangeException when offset is -1.", stream.GetType ().Name);
-				Assert.AreEqual ("offset", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("offset"));
 
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Read (buffer, buffer.Length + 1, 0),
 					"{0}.Read() does not throw an ArgumentOutOfRangeException when offset > buffer length.", stream.GetType ().Name);
-				Assert.AreEqual ("offset", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("offset"));
 
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Read (buffer, 0, -1),
 					"{0}.Read() does not throw an ArgumentOutOfRangeException when count is -1.", stream.GetType ().Name);
-				Assert.AreEqual ("count", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("count"));
 
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Read (buffer, 0, buffer.Length + 1),
 					"{0}.Read() does not throw an ArgumentOutOfRangeException when count > buffer length.", stream.GetType ().Name);
-				Assert.AreEqual ("count", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("count"));
 
 				ex = Assert.ThrowsAsync<ArgumentNullException> (async () => await stream.ReadAsync (null, 0, 0),
 					"{0}.ReadAsync() does not throw an ArgumentNullException when buffer is null.", stream.GetType ().Name);
-				Assert.AreEqual ("buffer", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
 
 				ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await stream.ReadAsync (buffer, -1, 0),
 					"{0}.ReadAsync() does not throw an ArgumentOutOfRangeException when offset is -1.", stream.GetType ().Name);
-				Assert.AreEqual ("offset", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("offset"));
 
 				ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await stream.ReadAsync (buffer, buffer.Length + 1, 0),
 					"{0}.ReadAsync() does not throw an ArgumentOutOfRangeException when offset > buffer length.", stream.GetType ().Name);
-				Assert.AreEqual ("offset", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("offset"));
 
 				ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await stream.ReadAsync (buffer, 0, -1),
 					"{0}.ReadAsync() does not throw an ArgumentOutOfRangeException when count is -1.", stream.GetType ().Name);
-				Assert.AreEqual ("count", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("count"));
 
 				ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await stream.ReadAsync (buffer, 0, buffer.Length + 1),
 					"{0}.ReadAsync() does not throw an ArgumentOutOfRangeException when count > buffer length.", stream.GetType ().Name);
-				Assert.AreEqual ("count", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("count"));
 			} else {
 				Assert.Throws<NotSupportedException> (() => stream.Read (buffer, 0, buffer.Length),
 					"{0}.Read() does not throw a NotSupportedException when CanRead is false.", stream.GetType ().Name);
@@ -300,43 +816,43 @@ namespace UnitTests {
 			if (stream.CanWrite) {
 				ex = Assert.Throws<ArgumentNullException> (() => stream.Write (null, 0, 0),
 					"{0}.Write() does not throw an ArgumentNullException when buffer is null.", stream.GetType ().Name);
-				Assert.AreEqual ("buffer", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
 
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Write (buffer, -1, 0),
 					"{0}.Write() does not throw an ArgumentOutOfRangeException when offset is -1.", stream.GetType ().Name);
-				Assert.AreEqual ("offset", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("offset"));
 
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Write (buffer, buffer.Length + 1, 0),
 					"{0}.Write() does not throw an ArgumentOutOfRangeException when offset > buffer length.", stream.GetType ().Name);
-				Assert.AreEqual ("offset", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("offset"));
 
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Write (buffer, 0, -1),
 					"{0}.Write() does not throw an ArgumentOutOfRangeException when count is -1.", stream.GetType ().Name);
-				Assert.AreEqual ("count", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("count"));
 
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Write (buffer, 0, buffer.Length + 1),
 					"{0}.Write() does not throw an ArgumentOutOfRangeException when count > buffer length.", stream.GetType ().Name);
-				Assert.AreEqual ("count", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("count"));
 
 				ex = Assert.ThrowsAsync<ArgumentNullException> (async () => await stream.WriteAsync (null, 0, 0),
 					"{0}.WriteAsync() does not throw an ArgumentNullException when buffer is null.", stream.GetType ().Name);
-				Assert.AreEqual ("buffer", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
 
 				ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await stream.WriteAsync (buffer, -1, 0),
 					"{0}.WriteAsync() does not throw an ArgumentOutOfRangeException when offset is -1.", stream.GetType ().Name);
-				Assert.AreEqual ("offset", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("offset"));
 
 				ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await stream.WriteAsync (buffer, buffer.Length + 1, 0),
 					"{0}.WriteAsync() does not throw an ArgumentOutOfRangeException when offset > buffer length.", stream.GetType ().Name);
-				Assert.AreEqual ("offset", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("offset"));
 
 				ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await stream.WriteAsync (buffer, 0, -1),
 					"{0}.WriteAsync() does not throw an ArgumentOutOfRangeException when count is -1.", stream.GetType ().Name);
-				Assert.AreEqual ("count", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("count"));
 
 				ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (async () => await stream.WriteAsync (buffer, 0, buffer.Length + 1),
 					"{0}.WriteAsync() does not throw an ArgumentOutOfRangeException when count > buffer length.", stream.GetType ().Name);
-				Assert.AreEqual ("count", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("count"));
 			} else {
 				Assert.Throws<NotSupportedException> (() => stream.Write (buffer, 0, buffer.Length),
 					"{0}.Write() does not throw a NotSupportedException when CanWrite is false.", stream.GetType ().Name);
@@ -348,7 +864,7 @@ namespace UnitTests {
 			if (stream.CanSeek) {
 				ex = Assert.Throws<ArgumentOutOfRangeException> (() => stream.Seek (0, (SeekOrigin) 255),
 					"{0}.Seek() does not throw an ArgumentOutOfRangeException when origin is invalid.", stream.GetType ().Name);
-				Assert.AreEqual ("origin", ex.ParamName);
+				Assert.That (ex.ParamName, Is.EqualTo ("origin"));
 			} else {
 				Assert.Throws<NotSupportedException> (() => stream.Seek (0, SeekOrigin.Begin),
 					"{0}.Seek() does not throw a NotSupportedException when CanSeek is false.", stream.GetType ().Name);
@@ -372,11 +888,11 @@ namespace UnitTests {
 			}
 
 			using (var memory = new MemoryStream ()) {
-				Assert.Throws<ArgumentNullException> (() => new BoundStream (null, 0, 10, true));
-				Assert.Throws<ArgumentOutOfRangeException> (() => new BoundStream (memory, -1, 10, true));
-				Assert.Throws<ArgumentOutOfRangeException> (() => new BoundStream (memory, 5, 1, true));
+				Assert.Throws<ArgumentNullException> (() => new BoundedStream (null, 0, 10, true));
+				Assert.Throws<ArgumentOutOfRangeException> (() => new BoundedStream (memory, -1, 10, true));
+				Assert.Throws<ArgumentOutOfRangeException> (() => new BoundedStream (memory, 5, 1, true));
 
-				using (var stream = new BoundStream (memory, 0, -1, true))
+				using (var stream = new BoundedStream (memory, 0, -1, true))
 					AssertStreamArguments (stream);
 			}
 
@@ -388,6 +904,83 @@ namespace UnitTests {
 
 					AssertStreamArguments (stream);
 				}
+			}
+		}
+
+		[Test]
+		public void TestTnefWriterArguments ()
+		{
+			using var memory = new MemoryStream ();
+			ArgumentException ex;
+
+			ex = Assert.Throws<ArgumentNullException> (() => new TnefWriter (null));
+			Assert.That (ex.ParamName, Is.EqualTo ("stream"));
+			ex = Assert.Throws<ArgumentOutOfRangeException> (() => new TnefWriter (memory, -1));
+			Assert.That (ex.ParamName, Is.EqualTo ("codepage"));
+
+			using var writer = new TnefWriter (memory, 1252, 0, true);
+			var buffer = new byte[16];
+
+			ex = Assert.Throws<ArgumentNullException> (() => writer.WriteAttribute (TnefAttributeTag.Subject, (string) null));
+			Assert.That (ex.ParamName, Is.EqualTo ("value"));
+			ex = Assert.Throws<ArgumentNullException> (() => writer.WriteAttribute (TnefAttributeTag.AttachData, (byte[]) null));
+			Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
+			ex = Assert.Throws<ArgumentNullException> (() => writer.WriteAttribute (TnefAttributeTag.AttachData, null, 0, 0));
+			Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
+			ex = Assert.Throws<ArgumentOutOfRangeException> (() => writer.WriteAttribute (TnefAttributeTag.AttachData, buffer, -1, 0));
+			Assert.That (ex.ParamName, Is.EqualTo ("startIndex"));
+			ex = Assert.Throws<ArgumentOutOfRangeException> (() => writer.WriteAttribute (TnefAttributeTag.AttachData, buffer, 0, buffer.Length + 1));
+			Assert.That (ex.ParamName, Is.EqualTo ("length"));
+			ex = Assert.Throws<ArgumentException> (() => writer.WriteAttribute (TnefAttributeTag.Null, buffer));
+			Assert.That (ex.ParamName, Is.EqualTo ("tag"));
+			ex = Assert.Throws<ArgumentException> (() => writer.OpenAttributeStream (TnefAttributeTag.Null));
+			Assert.That (ex.ParamName, Is.EqualTo ("tag"));
+			ex = Assert.Throws<ArgumentException> (() => writer.OpenPropertyWriter (TnefAttributeTag.Subject));
+			Assert.That (ex.ParamName, Is.EqualTo ("tag"));
+
+			ex = Assert.ThrowsAsync<ArgumentNullException> (() => writer.WriteAttributeAsync (TnefAttributeTag.Subject, (string) null));
+			Assert.That (ex.ParamName, Is.EqualTo ("value"));
+			ex = Assert.ThrowsAsync<ArgumentNullException> (() => writer.WriteAttributeAsync (TnefAttributeTag.AttachData, (byte[]) null));
+			Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
+			ex = Assert.ThrowsAsync<ArgumentNullException> (() => writer.WriteAttributeAsync (TnefAttributeTag.AttachData, null, 0, 0));
+			Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
+			ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (() => writer.WriteAttributeAsync (TnefAttributeTag.AttachData, buffer, -1, 0));
+			Assert.That (ex.ParamName, Is.EqualTo ("startIndex"));
+			ex = Assert.ThrowsAsync<ArgumentOutOfRangeException> (() => writer.WriteAttributeAsync (TnefAttributeTag.AttachData, buffer, 0, buffer.Length + 1));
+			Assert.That (ex.ParamName, Is.EqualTo ("length"));
+
+			using (var stream = writer.OpenAttributeStream (TnefAttributeTag.Body))
+				AssertStreamArguments (stream);
+
+			using (var properties = writer.OpenPropertyWriter (TnefAttributeTag.MapiProperties)) {
+				ex = Assert.Throws<ArgumentException> (() => properties.WritePropertyTag (new TnefPropertyTag (TnefPropertyId.Body, TnefPropertyType.Unspecified)));
+				Assert.That (ex.ParamName, Is.EqualTo ("tag"));
+				ex = Assert.Throws<ArgumentException> (() => properties.WritePropertyTag (new TnefNameId (Guid.Empty, 1), TnefPropertyType.Unspecified));
+				Assert.That (ex.ParamName, Is.EqualTo ("type"));
+				ex = Assert.Throws<ArgumentException> (() => properties.WriteProperty (default));
+				Assert.That (ex.ParamName, Is.EqualTo ("property"));
+
+				properties.WritePropertyTag (TnefPropertyTag.SubjectW);
+				ex = Assert.Throws<ArgumentNullException> (() => properties.WriteValue ((string) null));
+				Assert.That (ex.ParamName, Is.EqualTo ("value"));
+
+				properties.WriteValue ("Subject");
+				properties.WritePropertyTag (new TnefPropertyTag (TnefPropertyId.Body, TnefPropertyType.Binary));
+				ex = Assert.Throws<ArgumentNullException> (() => properties.WriteValue ((byte[]) null));
+				Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
+				ex = Assert.Throws<ArgumentNullException> (() => properties.WriteValue (null, 0, 0));
+				Assert.That (ex.ParamName, Is.EqualTo ("buffer"));
+				ex = Assert.Throws<ArgumentOutOfRangeException> (() => properties.WriteValue (buffer, -1, 0));
+				Assert.That (ex.ParamName, Is.EqualTo ("startIndex"));
+				ex = Assert.Throws<ArgumentOutOfRangeException> (() => properties.WriteValue (buffer, 0, buffer.Length + 1));
+				Assert.That (ex.ParamName, Is.EqualTo ("length"));
+
+				using (var stream = properties.OpenValueStream ())
+					AssertStreamArguments (stream);
+
+				properties.WritePropertyTag (TnefPropertyTag.RtfCompressed);
+				using (var stream = properties.OpenRtfCompressedStream ())
+					AssertStreamArguments (stream);
 			}
 		}
 
@@ -406,25 +999,6 @@ namespace UnitTests {
 			Assert.Throws<ArgumentNullException> (() => crc32.Update (null, 0, 0));
 			Assert.Throws<ArgumentOutOfRangeException> (() => crc32.Update (buffer, -1, 0));
 			Assert.Throws<ArgumentOutOfRangeException> (() => crc32.Update (buffer, 0, 20));
-		}
-
-		[Test]
-		public void TestHeaderListCollectionArguments ()
-		{
-			var collection = new HeaderListCollection ();
-			var array = new HeaderList[10];
-
-			Assert.Throws<ArgumentNullException> (() => collection.Add (null));
-			Assert.Throws<ArgumentNullException> (() => collection.Contains (null));
-			Assert.Throws<ArgumentNullException> (() => collection.CopyTo (null, 0));
-			Assert.Throws<ArgumentOutOfRangeException> (() => collection.CopyTo (array, -1));
-			Assert.Throws<ArgumentNullException> (() => collection.Remove (null));
-			Assert.Throws<ArgumentOutOfRangeException> (() => { var x = collection[0]; });
-			Assert.Throws<ArgumentOutOfRangeException> (() => collection[0] = new HeaderList ());
-
-			collection.Add (new HeaderList ());
-			Assert.Throws<ArgumentNullException> (() => collection[0] = null);
-			Assert.DoesNotThrow (() => collection[0] = new HeaderList ());
 		}
 
 		[Test]
@@ -457,6 +1031,32 @@ namespace UnitTests {
 			Assert.Throws<ArgumentNullException> (() => new MimeEntityEndEventArgs (null));
 			Assert.Throws<ArgumentNullException> (() => new MimeEntityEndEventArgs (null, new Multipart ()));
 			Assert.Throws<ArgumentNullException> (() => new MimeEntityEndEventArgs (new MimePart (), null));
+		}
+
+		[Test]
+		public void TestSmtpUtf8AddressValidatorArguments ()
+		{
+			Assert.Throws<ArgumentNullException> (() => SmtpUtf8AddressValidator.IsValid ((string) null));
+			Assert.Throws<ArgumentNullException> (() => SmtpUtf8AddressValidator.IsValid ((MailboxAddress) null));
+			Assert.Throws<ArgumentNullException> (() => SmtpUtf8AddressValidator.TryValidate ((string) null, out _));
+			Assert.Throws<ArgumentNullException> (() => SmtpUtf8AddressValidator.TryValidate ((MailboxAddress) null, out _));
+			Assert.Throws<ArgumentNullException> (() => SmtpUtf8AddressValidator.IsValid ((string) null, SmtpUtf8AddressValidationOptions.DecodeIdn));
+			Assert.Throws<ArgumentNullException> (() => SmtpUtf8AddressValidator.IsValid ((MailboxAddress) null, SmtpUtf8AddressValidationOptions.DecodeIdn));
+			Assert.Throws<ArgumentNullException> (() => SmtpUtf8AddressValidator.TryValidate ((string) null, SmtpUtf8AddressValidationOptions.DecodeIdn, out _));
+			Assert.Throws<ArgumentNullException> (() => SmtpUtf8AddressValidator.TryValidate ((MailboxAddress) null, SmtpUtf8AddressValidationOptions.DecodeIdn, out _));
+		}
+
+		[Test]
+		public void TestSmtpAddressValidatorArguments ()
+		{
+			Assert.Throws<ArgumentNullException> (() => SmtpAddressValidator.IsValid ((string) null));
+			Assert.Throws<ArgumentNullException> (() => SmtpAddressValidator.IsValid ((MailboxAddress) null));
+			Assert.Throws<ArgumentNullException> (() => SmtpAddressValidator.TryValidate ((string) null, out _));
+			Assert.Throws<ArgumentNullException> (() => SmtpAddressValidator.TryValidate ((MailboxAddress) null, out _));
+			Assert.Throws<ArgumentNullException> (() => SmtpAddressValidator.IsValid ((string) null, SmtpAddressValidationOptions.AllowIso2022JpLocalPart));
+			Assert.Throws<ArgumentNullException> (() => SmtpAddressValidator.IsValid ((MailboxAddress) null, SmtpAddressValidationOptions.AllowIso2022JpLocalPart));
+			Assert.Throws<ArgumentNullException> (() => SmtpAddressValidator.TryValidate ((string) null, SmtpAddressValidationOptions.AllowIso2022JpLocalPart, out _));
+			Assert.Throws<ArgumentNullException> (() => SmtpAddressValidator.TryValidate ((MailboxAddress) null, SmtpAddressValidationOptions.AllowIso2022JpLocalPart, out _));
 		}
 	}
 }

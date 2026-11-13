@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,12 +24,10 @@
 // THE SOFTWARE.
 //
 
-using System;
 using System.Text;
 
-using NUnit.Framework;
-
 using MimeKit;
+using MimeKit.Utils;
 
 namespace UnitTests {
 	[TestFixture]
@@ -54,6 +52,28 @@ namespace UnitTests {
 			Assert.Throws<ArgumentException> (() => new Parameter (string.Empty, "value"));
 			Assert.Throws<ArgumentException> (() => new Parameter (invalid, "value"));
 			Assert.Throws<ArgumentNullException> (() => new Parameter ("name", null));
+
+			var parameter = new Parameter ("name", "value");
+			Assert.Throws<ArgumentNullException> (() => parameter.Value = null);
+			Assert.Throws<ArgumentOutOfRangeException> (() => parameter.EncodingMethod = (ParameterEncodingMethod) 512);
+
+			// Check default value
+			Assert.That (parameter.Encoding.CodePage, Is.EqualTo (Encoding.UTF8.CodePage));
+			parameter.Encoding = Encoding.UTF8;
+			Assert.That (parameter.Encoding, Is.EqualTo (Encoding.UTF8));
+			parameter.Encoding = Encoding.UTF8;
+			Assert.That (parameter.Encoding, Is.EqualTo (Encoding.UTF8));
+
+			// Check default value
+			Assert.That (parameter.AlwaysQuote, Is.False);
+
+			// Set it to true 2x so that we can check that it doesn't change
+			parameter.AlwaysQuote = true;
+			Assert.That (parameter.AlwaysQuote, Is.True);
+			parameter.AlwaysQuote = true;
+			Assert.That (parameter.AlwaysQuote, Is.True);
+			parameter.AlwaysQuote = false;
+			Assert.That (parameter.AlwaysQuote, Is.False);
 		}
 
 		[Test]
@@ -61,18 +81,19 @@ namespace UnitTests {
 		{
 			var param = new Parameter ("name", "value");
 
-			Assert.AreEqual (Encoding.UTF8.HeaderName, param.Encoding.HeaderName);
-			Assert.AreEqual (ParameterEncodingMethod.Default, param.EncodingMethod);
-			Assert.IsFalse (param.AlwaysQuote);
-			Assert.AreEqual ("name", param.Name);
-			Assert.AreEqual ("value", param.Value);
-			Assert.AreEqual ("name=\"value\"", param.ToString ());
+			Assert.That (param.Encoding.HeaderName, Is.EqualTo (Encoding.UTF8.HeaderName));
+			Assert.That (param.EncodingMethod, Is.EqualTo (ParameterEncodingMethod.Default));
+			Assert.That (param.AlwaysQuote, Is.False);
+			Assert.That (param.Name, Is.EqualTo ("name"));
+			Assert.That (param.Value, Is.EqualTo ("value"));
+			Assert.That (param.ToString (), Is.EqualTo ("name=\"value\""));
 		}
 
 		[Test]
 		public void TestEncode ()
 		{
-			var builder = new StringBuilder ("Content-Disposition: attachment");
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment"); 
 			var param = new Parameter ("filename", "tps-report.doc");
 			var options = FormatOptions.Default.Clone ();
 			int lineLength = builder.Length;
@@ -80,15 +101,143 @@ namespace UnitTests {
 			options.AlwaysQuoteParameterValues = false;
 			options.NewLineFormat = NewLineFormat.Dos;
 
-			param.Encode (options, builder, ref lineLength, Encoding.UTF8);
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
 
-			Assert.AreEqual ("Content-Disposition: attachment; filename=tps-report.doc", builder.ToString ());
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename=tps-report.doc"));
+		}
+
+		[Test]
+		public void TestEncodeEmptyValue ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Type: multipart/mixed");
+			var param = new Parameter ("boundary", string.Empty);
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.AlwaysQuoteParameterValues = false;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Is.EqualTo ("Content-Type: multipart/mixed; boundary=\"\""));
+
+			var contentType = ContentType.Parse (encoded.Substring ("Content-Type:".Length));
+
+			Assert.That (contentType.Parameters["boundary"], Is.EqualTo (string.Empty));
+		}
+
+		[TestCase (ParameterEncodingMethod.Default)]
+		[TestCase (ParameterEncodingMethod.Rfc2231)]
+		[TestCase (ParameterEncodingMethod.Rfc2047)]
+		public void TestEncodeEmptyValueWithLongParameterName (ParameterEncodingMethod method)
+		{
+			var name = "boundary" + new string ('x', 80);
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Type: multipart/mixed");
+			var param = new Parameter (name, string.Empty) { EncodingMethod = method };
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.AlwaysQuoteParameterValues = false;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Is.EqualTo ("Content-Type: multipart/mixed;\r\n\t" + name + "=\"\""));
+
+			Assert.That (ContentType.TryParse (encoded.Substring ("Content-Type:".Length), out var contentType), Is.True, "TryParse");
+			Assert.That (contentType.Parameters[name], Is.EqualTo (string.Empty));
+		}
+
+		[TestCase (ParameterEncodingMethod.Default, "X-ingF=?iso-8859-1?q?QJg-V2?=.2")]
+		[TestCase (ParameterEncodingMethod.Rfc2231, "X-ingF=?iso-8859-1?q?QJg-V2?=.2")]
+		[TestCase (ParameterEncodingMethod.Rfc2047, "X-ingF=?iso-8859-1?q?QJg-V2?=.2")]
+		[TestCase (ParameterEncodingMethod.Default, "=?utf-8?q?caf=C3=A9?=")]
+		[TestCase (ParameterEncodingMethod.Rfc2231, "start-info=\"=?utf-8?q?caf=C3=A9?=\"")]
+		[TestCase (ParameterEncodingMethod.Rfc2047, "=?utf-8?q?caf=C3=A9?= au lait")]
+		public void TestEncodeValueThatLooksLikeEncodedWord (ParameterEncodingMethod method, string value)
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Type: text/plain");
+			var param = new Parameter ("name", value) { EncodingMethod = method };
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Does.Not.Contain (value), "Encoded");
+
+			foreach (var mode in new[] { RfcComplianceMode.Strict, RfcComplianceMode.Loose }) {
+				var parserOptions = ParserOptions.Default.Clone ();
+				parserOptions.ParameterComplianceMode = mode;
+				parserOptions.Rfc2047ComplianceMode = mode;
+
+				Assert.That (ContentType.TryParse (parserOptions, encoded.Substring ("Content-Type:".Length), out var contentType), Is.True, $"TryParse ({mode})");
+				Assert.That (contentType.Parameters["name"], Is.EqualTo (value), $"Value ({mode})");
+			}
+		}
+
+		[TestCase ("=?utf-8?q?caf=C3=A9?=", 65001)]
+		[TestCase ("=?iso-8859-1?q?caf=E9?=", 28591)]
+		public void TestParseRfc2047EncodedValuePreservesEncodingMethod (string encodedWord, int codepage)
+		{
+			var text = $" text/plain; name=\"{encodedWord}\"";
+
+			Assert.That (ContentType.TryParse (text, out var contentType), Is.True);
+
+			var param = contentType.Parameters.First (p => p.Name == "name");
+
+			Assert.That (param.Value, Is.EqualTo ("café"));
+			Assert.That (param.EncodingMethod, Is.EqualTo (ParameterEncodingMethod.Rfc2047));
+			Assert.That (param.Encoding.CodePage, Is.EqualTo (codepage));
+
+			// Re-encoding the value should produce the same output each time (and not alternate between rfc2047 and rfc2231)
+			var options = FormatOptions.Default.Clone ();
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			var encoded = contentType.ToString (options, Encoding.UTF8, true);
+
+			Assert.That (encoded, Does.Contain ("=?"), "Encoded");
+			Assert.That (ContentType.TryParse (encoded.Substring ("Content-Type:".Length), out var reparsed), Is.True, encoded);
+			Assert.That (reparsed.Parameters["name"], Is.EqualTo ("café"));
+			Assert.That (reparsed.ToString (options, Encoding.UTF8, true), Is.EqualTo (encoded));
+		}
+
+		[Test]
+		public void TestEncodeRfc2047ValueNotRepresentableInCharset ()
+		{
+			// Note: The value is long enough to require multiple encoded-words and only part of it can be represented in iso-8859-1.
+			var value = "LA\u07ACingFQCont60 +1\u00FFe  Fri 6 \u00F6Fe 14:33:60 +0100 caf\u00E9 au lait avec des croissants";
+			var param = new Parameter (Encoding.GetEncoding (28591), "name", value) { EncodingMethod = ParameterEncodingMethod.Rfc2047 };
+			var contentType = new ContentType ("text", "plain");
+			var options = FormatOptions.Default.Clone ();
+
+			options.NewLineFormat = NewLineFormat.Dos;
+			contentType.Parameters.Add (param);
+
+			var encoded = contentType.ToString (options, Encoding.UTF8, true);
+
+			Assert.That (encoded, Does.Not.Contain ("iso-8859-1"), "Encoded");
+
+			Assert.That (ContentType.TryParse (encoded.Substring ("Content-Type:".Length), out var reparsed), Is.True, encoded);
+			Assert.That (reparsed.Parameters["name"], Is.EqualTo (value), "Value");
+			Assert.That (reparsed.ToString (options, Encoding.UTF8, true), Is.EqualTo (encoded), "Round trip");
 		}
 
 		[Test]
 		public void TestEncodeAlwaysQuote ()
 		{
-			var builder = new StringBuilder ("Content-Disposition: attachment");
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment"); 
 			var param = new Parameter ("filename", "tps-report.doc");
 			var options = FormatOptions.Default.Clone ();
 			int lineLength = builder.Length;
@@ -96,15 +245,16 @@ namespace UnitTests {
 			param.AlwaysQuote = true;
 			options.NewLineFormat = NewLineFormat.Dos;
 
-			param.Encode (options, builder, ref lineLength, Encoding.UTF8);
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
 
-			Assert.AreEqual ("Content-Disposition: attachment; filename=\"tps-report.doc\"", builder.ToString ());
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename=\"tps-report.doc\""));
 		}
 
 		[Test]
 		public void TestEncodeFormatOptionsAlwaysQuote ()
 		{
-			var builder = new StringBuilder ("Content-Disposition: attachment");
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment"); 
 			var param = new Parameter ("filename", "tps-report.doc");
 			var options = FormatOptions.Default.Clone ();
 			int lineLength = builder.Length;
@@ -112,15 +262,58 @@ namespace UnitTests {
 			options.AlwaysQuoteParameterValues = true;
 			options.NewLineFormat = NewLineFormat.Dos;
 
-			param.Encode (options, builder, ref lineLength, Encoding.UTF8);
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
 
-			Assert.AreEqual ("Content-Disposition: attachment; filename=\"tps-report.doc\"", builder.ToString ());
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename=\"tps-report.doc\""));
+		}
+
+		[Test]
+		public void TestEncodeControlCharacter ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("filename", "control\u0001character.txt");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment;\r\n\tfilename*=iso-8859-1''control%01character.txt"));
+		}
+
+		[Test]
+		public void TestEncodeRfc2231ResizesBuffers ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("filename", new string ('☃', 40));
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+			var encoded = builder.ToString ();
+
+			const string snowman = "%E2%98%83";
+			var expected = "Content-Disposition: attachment;\r\n" +
+				"\tfilename*0*=utf-8''" + string.Concat (Enumerable.Repeat (snowman, 6)) + ";\r\n" +
+				"\tfilename*1*=" + string.Concat (Enumerable.Repeat (snowman, 7)) + ";\r\n" +
+				"\tfilename*2*=" + string.Concat (Enumerable.Repeat (snowman, 7)) + ";\r\n" +
+				"\tfilename*3*=" + string.Concat (Enumerable.Repeat (snowman, 7)) + ";\r\n" +
+				"\tfilename*4*=" + string.Concat (Enumerable.Repeat (snowman, 7)) + ";\r\n" +
+				"\tfilename*5*=" + string.Concat (Enumerable.Repeat (snowman, 6));
+
+			Assert.That (encoded, Is.EqualTo (expected));
 		}
 
 		[Test]
 		public void TestEncodeRfc2047 ()
 		{
-			var builder = new StringBuilder ("Content-Disposition: attachment");
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
 			var param = new Parameter ("filename", "测试文本.doc");
 			var options = FormatOptions.Default.Clone ();
 			int lineLength = builder.Length;
@@ -128,15 +321,187 @@ namespace UnitTests {
 			param.EncodingMethod = ParameterEncodingMethod.Rfc2047;
 			options.NewLineFormat = NewLineFormat.Dos;
 
-			param.Encode (options, builder, ref lineLength, Encoding.UTF8);
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
 
-			Assert.AreEqual ("Content-Disposition: attachment; filename=\"=?utf-8?b?5rWL6K+V5paH5pysLmRv?=\r\n\t=?utf-8?q?c?=\"", builder.ToString ());
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename=\"=?utf-8?b?5rWL6K+V5paH5pysLmRv?=\r\n\t=?utf-8?q?c?=\""));
+		}
+
+		[Test]
+		public void TestEncodeRfc2047WithBackslash ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("filename", "dir\\fichier-é.txt");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			param.EncodingMethod = ParameterEncodingMethod.Rfc2047;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Does.Not.Contain ("\\"));
+			Assert.That (encoded, Does.Contain ("=5C"));
+			Assert.That (ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length)).FileName, Is.EqualTo ("dir\\fichier-é.txt"));
+		}
+
+		[Test]
+		public void TestEncodeRfc2231DoesNotSplitSurrogatePairs ()
+		{
+			var options = FormatOptions.Default.Clone ();
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			foreach (var suffix in new[] { "\U00021861", "\U0001F600\U0001F600\U0001F600\U0001F600\U0001F600\U0001F600\U0001F600\U0001F600" }) {
+				for (int prefixLength = 0; prefixLength < 160; prefixLength++) {
+					var value = new string ('?', prefixLength) + suffix + new string ('x', 80);
+					var contentType = new ContentType ("text", "plain");
+
+					contentType.Parameters.Add (new Parameter ("name", value) { EncodingMethod = ParameterEncodingMethod.Rfc2231 });
+
+					var encoded = contentType.ToString (options, Encoding.UTF8, true);
+
+					Assert.That (ContentType.TryParse (encoded.Substring ("Content-Type:".Length), out var reparsed), Is.True, encoded);
+					Assert.That (reparsed.Parameters["name"], Is.EqualTo (value), encoded);
+				}
+			}
+		}
+
+		[Test]
+		public void TestEncodeRfc2047WithEncoderExceptionFallback ()
+		{
+			var encoding = Encoding.GetEncoding ("us-ascii", EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter (encoding, "filename", "snowman-☃.txt");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			param.EncodingMethod = ParameterEncodingMethod.Rfc2047;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+			var encoded = builder.ToString ();
+
+			// Note: The charset cannot represent the value, so the entire value is encoded using UTF-8.
+			Assert.That (encoded, Is.EqualTo ("Content-Disposition: attachment; filename=\"=?utf-8?b?c25vd21hbi3imIMudHh0?=\""));
+			Assert.That (ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length)).FileName, Is.EqualTo ("snowman-☃.txt"));
+		}
+
+		[TestCase (ParameterEncodingMethod.Rfc2231, true)]
+		[TestCase (ParameterEncodingMethod.Rfc2231, false)]
+		[TestCase (ParameterEncodingMethod.Rfc2047, true)]
+		[TestCase (ParameterEncodingMethod.Rfc2047, false)]
+		public void TestEncodeCharactersNotRepresentableInParameterEncoding (ParameterEncodingMethod method, bool exceptionFallback)
+		{
+			var encoding = exceptionFallback
+				? Encoding.GetEncoding ("iso-8859-1", EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback)
+				: Encoding.GetEncoding ("iso-8859-1");
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter (encoding, "filename", "café-☃.txt");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			param.EncodingMethod = method;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+			var encoded = builder.ToString ();
+
+			if (method == ParameterEncodingMethod.Rfc2231)
+				Assert.That (encoded, Does.Contain ("filename*=utf-8''"));
+			else
+				Assert.That (encoded, Does.Contain ("=?utf-8?"));
+			Assert.That (encoded, Does.Not.Contain ("=3F").And.Not.Contain ("%3F"));
+			Assert.That (ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length)).FileName, Is.EqualTo ("café-☃.txt"));
+		}
+
+		[Test]
+		public void TestReencodeMixedCharsetRfc2047Value ()
+		{
+			const string value = " attachment; filename=\"=?iso-8859-1?q?caf=E9_au_lait?= =?iso-8859-1?q?_et_cr=E8me?= =?utf-8?b?4piD?=.txt\"";
+			var disposition = ContentDisposition.Parse (value);
+
+			Assert.That (disposition.FileName, Is.EqualTo ("café au lait et crème☃.txt"));
+
+			var encoded = disposition.ToString (FormatOptions.Default, Encoding.UTF8, true);
+			var reparsed = ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length));
+
+			Assert.That (reparsed.FileName, Is.EqualTo ("café au lait et crème☃.txt"));
+		}
+
+		[Test]
+		public void TestEncodeRfc2047WithSurrogatePairs ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("filename", "I ❤️‍🔥 emojis.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			param.EncodingMethod = ParameterEncodingMethod.Rfc2047;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Is.EqualTo ("Content-Disposition: attachment; filename=\"=?utf-8?b?SSDinaTvuI/igI3wn5Sl?=\r\n\t=?utf-8?q?_emojis=2Edoc?=\""));
+
+			// verify that parsing this gets us back our original value
+			var contentDisposition = ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length));
+
+			Assert.That (contentDisposition.Parameters.Count, Is.EqualTo (1));
+			Assert.That (contentDisposition.Parameters[param.Name], Is.EqualTo (param.Value));
+		}
+
+		[Test]
+		public void TestEncodeRfc2047WithQuotes ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("filename", "Some \"测试文本\" characters.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			param.EncodingMethod = ParameterEncodingMethod.Rfc2047;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Is.EqualTo ("Content-Disposition: attachment; filename=\"=?utf-8?b?U29tZSAi5rWL6K+V5paH?=\r\n\t=?utf-8?q?=E6=9C=AC=22_characters=2Edoc?=\""));
+
+			// verify that parsing this gets us back our original value
+			var contentDisposition = ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length));
+
+			Assert.That (contentDisposition.Parameters.Count, Is.EqualTo (1));
+			Assert.That (contentDisposition.Parameters[param.Name], Is.EqualTo (param.Value));
+		}
+
+		[Test]
+		public void TestEncodeRfc2047WithGB18030 ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("GB18030", "filename", "测试文本.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			param.EncodingMethod = ParameterEncodingMethod.Rfc2047;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename=\"=?gb18030?b?suLK1M7Esb4uZG9j?=\""));
 		}
 
 		[Test]
 		public void TestEncodeFormatOptionsRfc2047 ()
 		{
-			var builder = new StringBuilder ("Content-Disposition: attachment");
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
 			var param = new Parameter ("filename", "测试文本.doc");
 			var options = FormatOptions.Default.Clone ();
 			int lineLength = builder.Length;
@@ -144,15 +509,33 @@ namespace UnitTests {
 			options.ParameterEncodingMethod = ParameterEncodingMethod.Rfc2047;
 			options.NewLineFormat = NewLineFormat.Dos;
 
-			param.Encode (options, builder, ref lineLength, Encoding.UTF8);
-			
-			Assert.AreEqual ("Content-Disposition: attachment; filename=\"=?utf-8?b?5rWL6K+V5paH5pysLmRv?=\r\n\t=?utf-8?q?c?=\"", builder.ToString ());
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename=\"=?utf-8?b?5rWL6K+V5paH5pysLmRv?=\r\n\t=?utf-8?q?c?=\""));
+		}
+
+		[Test]
+		public void TestEncodeFormatOptionsRfc2047WithGB18030 ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("GB18030", "filename", "测试文本.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.ParameterEncodingMethod = ParameterEncodingMethod.Rfc2047;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename=\"=?gb18030?b?suLK1M7Esb4uZG9j?=\""));
 		}
 
 		[Test]
 		public void TestEncodeRfc2231 ()
 		{
-			var builder = new StringBuilder ("Content-Disposition: attachment");
+			var builder = new ValueStringBuilder (256);
+			builder.Append("Content-Disposition: attachment");
 			var param = new Parameter ("filename", "测试文本.doc");
 			var options = FormatOptions.Default.Clone ();
 			int lineLength = builder.Length;
@@ -160,15 +543,33 @@ namespace UnitTests {
 			param.EncodingMethod = ParameterEncodingMethod.Rfc2231;
 			options.NewLineFormat = NewLineFormat.Dos;
 
-			param.Encode (options, builder, ref lineLength, Encoding.UTF8);
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
 
-			Assert.AreEqual ("Content-Disposition: attachment;\r\n\tfilename*=utf-8''%E6%B5%8B%E8%AF%95%E6%96%87%E6%9C%AC.doc", builder.ToString ());
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment;\r\n\tfilename*=utf-8''%E6%B5%8B%E8%AF%95%E6%96%87%E6%9C%AC.doc"));
+		}
+
+		[Test]
+		public void TestEncodeRfc2231WithGB18030 ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("GB18030", "filename", "测试文本.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			param.EncodingMethod = ParameterEncodingMethod.Rfc2231;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment;\r\n\tfilename*=gb18030''%B2%E2%CA%D4%CE%C4%B1%BE.doc"));
 		}
 
 		[Test]
 		public void TestEncodeFormatOptionsRfc2231 ()
 		{
-			var builder = new StringBuilder ("Content-Disposition: attachment");
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment"); 
 			var param = new Parameter ("filename", "测试文本.doc");
 			var options = FormatOptions.Default.Clone ();
 			int lineLength = builder.Length;
@@ -176,9 +577,155 @@ namespace UnitTests {
 			options.ParameterEncodingMethod = ParameterEncodingMethod.Rfc2231;
 			options.NewLineFormat = NewLineFormat.Dos;
 
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment;\r\n\tfilename*=utf-8''%E6%B5%8B%E8%AF%95%E6%96%87%E6%9C%AC.doc"));
+		}
+
+		[Test]
+		public void TestEncodeFormatOptionsRfc2231WithGB18030 ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("GB18030", "filename", "测试文本.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.ParameterEncodingMethod = ParameterEncodingMethod.Rfc2231;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment;\r\n\tfilename*=gb18030''%B2%E2%CA%D4%CE%C4%B1%BE.doc"));
+		}
+
+		[Test]
+		public void TestEncodeControlCharacters ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("filename", "tps\a-\breport.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.AlwaysQuoteParameterValues = false;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename*=iso-8859-1''tps%07-%08report.doc"));
+		}
+
+		[Test]
+		public void TestEncodeLongParameterName ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "value");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.AlwaysQuoteParameterValues = false;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Is.EqualTo ("Content-Disposition: attachment;\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*0=val;\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*1=ue"));
+
+			// verify that parsing this gets us back our original value
+			var contentDisposition = ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length));
+
+			Assert.That (contentDisposition.Parameters.Count, Is.EqualTo (1));
+			Assert.That (contentDisposition.Parameters[param.Name], Is.EqualTo (param.Value));
+		}
+
+		[Test]
+		public void TestEncodeLongParameterNameWithRfc2231Value ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment");
+			var param = new Parameter ("GB18030", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "测试文本.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.AlwaysQuoteParameterValues = false;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Is.EqualTo ("Content-Disposition: attachment;\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*0*=gb18030'';\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*1*=%B2%E2;\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*2*=%CA%D4;\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*3*=%CE%C4;\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*4*=%B1%BE;\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*5=.do;\r\n\tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA*6=c"));
+
+			// verify that parsing this gets us back our original value
+			var contentDisposition = ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length));
+
+			Assert.That (contentDisposition.Parameters.Count, Is.EqualTo (1));
+			Assert.That (contentDisposition.Parameters[param.Name], Is.EqualTo (param.Value));
+		}
+
+#if false
+		[Test]
+		public void TestEncodeLongValueWithControlCharacters ()
+		{
+			const string expected = "Content-Disposition: attachment;\r\n\tfilename*0*=utf-8''%07%08ig-%08um%08le-%08ee-flew-over-the-kitty%27s-he%07d-;\r\n\tfilename*1*=%07nd-then-l%07nded-on-the-pretty-flower.doc";
+			var builder = new StringBuilder ("Content-Disposition: attachment");
+			var param = new Parameter ("filename", "\a\big-\bum\ble-\bee-flew-over-the-kitty's-he\ad-\and-then-l\anded-on-the-pretty-flower.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.International = true;
+			options.AlwaysQuoteParameterValues = false;
+			options.NewLineFormat = NewLineFormat.Dos;
+
 			param.Encode (options, builder, ref lineLength, Encoding.UTF8);
 
-			Assert.AreEqual ("Content-Disposition: attachment;\r\n\tfilename*=utf-8''%E6%B5%8B%E8%AF%95%E6%96%87%E6%9C%AC.doc", builder.ToString ());
+			Assert.That (builder.ToString (), Is.EqualTo (expected));
+		}
+#endif
+
+		[Test]
+		public void TestEncodeInternational ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment"); 
+			var param = new Parameter ("filename", "测试文本.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.International = true;
+			options.AlwaysQuoteParameterValues = false;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			Assert.That (builder.ToString (), Is.EqualTo ("Content-Disposition: attachment; filename=\"测试文本.doc\""));
+		}
+
+		[Test]
+		public void TestEncodeLongInternational ()
+		{
+			var builder = new ValueStringBuilder (256);
+			builder.Append ("Content-Disposition: attachment"); 
+			var param = new Parameter ("filename", "测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本测试文本.doc");
+			var options = FormatOptions.Default.Clone ();
+			int lineLength = builder.Length;
+
+			options.International = true;
+			options.AlwaysQuoteParameterValues = false;
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			param.Encode (options, ref builder, ref lineLength, Encoding.UTF8);
+
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Is.EqualTo ("Content-Disposition: attachment;\r\n\tfilename*0=\"测试文本测试文本测试文本测试文本测试文本测\";\r\n\tfilename*1=\"试文本测试文本测试文本测试文本测试文本测试\";\r\n\tfilename*2=\"文本测试文本测试文本测试文本测试文本测试文\";\r\n\tfilename*3=\"本.doc\""));
+
+			// verify that parsing this gets us back our original value
+			var contentDisposition = ContentDisposition.Parse (encoded.Substring ("Content-Disposition:".Length));
+
+			Assert.That (contentDisposition.Parameters.Count, Is.EqualTo (1));
+			Assert.That (contentDisposition.Parameters[param.Name], Is.EqualTo (param.Value));
 		}
 	}
 }

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 //
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace MimeKit.IO.Filters {
 	/// <summary>
@@ -36,9 +37,8 @@ namespace MimeKit.IO.Filters {
     public abstract class MimeFilterBase : IMimeFilter
     {
 		int preloadLength;
-		byte[] preload;
-		byte[] output;
-		byte[] inbuf;
+		byte[]? preload;
+		byte[]? inbuf;
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="MimeFilterBase"/> class.
@@ -51,14 +51,14 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Gets the output buffer.
+		/// Get the output buffer.
 		/// </summary>
 		/// <remarks>
 		/// Gets the output buffer.
 		/// </remarks>
 		/// <value>The output buffer.</value>
-		protected byte[] OutputBuffer {
-			get { return output; }
+		protected byte[]? OutputBuffer {
+			get; private set;
 		}
 
 		/// <summary>
@@ -74,7 +74,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="length">The length of the input buffer, starting at <paramref name="startIndex"/>.</param>
 		/// <param name="outputIndex">The output index.</param>
 		/// <param name="outputLength">The output length.</param>
-		/// <param name="flush">If set to <c>true</c>, all internally buffered data should be flushed to the output buffer.</param>
+		/// <param name="flush">If set to <see langword="true" />, all internally buffered data should be flushed to the output buffer.</param>
 		protected abstract byte[] Filter (byte[] input, int startIndex, int length, out int outputIndex, out int outputLength, bool flush);
 
 		static int GetIdealBufferSize (int need)
@@ -91,13 +91,13 @@ namespace MimeKit.IO.Filters {
 			// the input buffer, so make sure that we have room...
 			int totalLength = length + preloadLength;
 
-			if (inbuf == null || inbuf.Length < totalLength) {
+			if (inbuf is null || inbuf.Length < totalLength) {
 				// NOTE: Array.Resize() copies data, we don't need that (slower)
 				inbuf = new byte[GetIdealBufferSize (totalLength)];
 			}
 
 			// Copy our preload data into our internal input buffer
-			Buffer.BlockCopy (preload, 0, inbuf, 0, preloadLength);
+			Buffer.BlockCopy (preload!, 0, inbuf, 0, preloadLength);
 
 			// Copy our input to the end of our internal input buffer
 			Buffer.BlockCopy (input, startIndex, inbuf, preloadLength, length);
@@ -111,7 +111,7 @@ namespace MimeKit.IO.Filters {
 
 		static void ValidateArguments (byte[] input, int startIndex, int length)
 		{
-			if (input == null)
+			if (input is null)
 				throw new ArgumentNullException (nameof (input));
 
 			if (startIndex < 0 || startIndex > input.Length)
@@ -122,7 +122,7 @@ namespace MimeKit.IO.Filters {
 		}
 		
 		/// <summary>
-		/// Filters the specified input.
+		/// Filter the specified input.
 		/// </summary>
 		/// <remarks>
 		/// Filters the specified input buffer starting at the given index,
@@ -135,7 +135,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="outputIndex">The starting index of the output in the returned buffer.</param>
 		/// <param name="outputLength">The length of the output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="input"/> is <c>null</c>.
+		/// <paramref name="input"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -151,7 +151,7 @@ namespace MimeKit.IO.Filters {
 		}
 		
 		/// <summary>
-		/// Filters the specified input, flushing all internally buffered data to the output.
+		/// Filter the specified input, flushing all internally buffered data to the output.
 		/// </summary>
 		/// <remarks>
 		/// Filters the specified input buffer starting at the given index,
@@ -164,7 +164,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="outputIndex">The starting index of the output in the returned buffer.</param>
 		/// <param name="outputLength">The length of the output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="input"/> is <c>null</c>.
+		/// <paramref name="input"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -180,7 +180,7 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Resets the filter.
+		/// Reset the filter.
 		/// </summary>
 		/// <remarks>
 		/// Resets the filter.
@@ -191,7 +191,7 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Saves the remaining input for the next round of processing.
+		/// Save the remaining input for the next round of processing.
 		/// </summary>
 		/// <remarks>
 		/// Saves the remaining input for the next round of processing.
@@ -204,7 +204,7 @@ namespace MimeKit.IO.Filters {
 			if (length == 0)
 				return;
 
-			if (preload == null || preload.Length < length)
+			if (preload is null || preload.Length < length)
 				preload = new byte[GetIdealBufferSize (length)];
 
 			Buffer.BlockCopy (input, startIndex, preload, 0, length);
@@ -212,24 +212,28 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Ensures that the output buffer is greater than or equal to the specified size.
+		/// Ensure that the output buffer is greater than or equal to the specified size.
 		/// </summary>
 		/// <remarks>
 		/// Ensures that the output buffer is greater than or equal to the specified size.
 		/// </remarks>
 		/// <param name="size">The minimum size needed.</param>
-		/// <param name="keep">If set to <c>true</c>, the current output should be preserved.</param>
+		/// <param name="keep">If set to <see langword="true" />, the current output should be preserved.</param>
+		[MemberNotNull (nameof (OutputBuffer))]
 		protected void EnsureOutputSize (int size, bool keep)
 		{
-			int outputSize = output != null ? output.Length : -1;
+			int outputSize = OutputBuffer != null ? OutputBuffer.Length : -1;
 
-			if (outputSize >= size)
+			if (outputSize >= size && OutputBuffer != null)
 				return;
 
-			if (keep && output != null)
+			if (keep && OutputBuffer != null) {
+				byte[] output = OutputBuffer;
 				Array.Resize<byte> (ref output, GetIdealBufferSize (size));
-			else
-				output = new byte[GetIdealBufferSize (size)];
+				OutputBuffer = output;
+			} else {
+				OutputBuffer = new byte[GetIdealBufferSize (size)];
+			}
 		}
 	}
 }

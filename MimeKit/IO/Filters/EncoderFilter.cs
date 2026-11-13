@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,10 +36,15 @@ namespace MimeKit.IO.Filters {
 	/// <remarks>
 	/// Uses a <see cref="IMimeEncoder"/> to incrementally encode data.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\FilterExamples.cs" region="EncodeFile"/>
+	/// </example>
 	public class EncoderFilter : MimeFilterBase
 	{
+		internal bool HasOutput { get; private set; }
+
 		/// <summary>
-		/// Gets the encoder used by this filter.
+		/// Get the encoder used by this filter.
 		/// </summary>
 		/// <remarks>
 		/// Gets the encoder used by this filter.
@@ -50,7 +55,7 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Gets the encoding.
+		/// Get the encoding.
 		/// </summary>
 		/// <remarks>
 		/// Gets the encoding that the encoder supports.
@@ -68,11 +73,11 @@ namespace MimeKit.IO.Filters {
 		/// </remarks>
 		/// <param name="encoder">A specific encoder for the filter to use.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="encoder"/> is <c>null</c>.
+		/// <paramref name="encoder"/> is <see langword="null"/>.
 		/// </exception>
 		public EncoderFilter (IMimeEncoder encoder)
 		{
-			if (encoder == null)
+			if (encoder is null)
 				throw new ArgumentNullException (nameof (encoder));
 
 			Encoder = encoder;
@@ -82,16 +87,42 @@ namespace MimeKit.IO.Filters {
 		/// Create a filter that will encode using specified encoding.
 		/// </summary>
 		/// <remarks>
-		/// Creates a new <see cref="IMimeFilter"/> for the specified encoding.
+		/// Creates a new <see cref="IMimeFilter"/> for the specified encoding using CRLF line endings.
 		/// </remarks>
 		/// <returns>A new encoder filter.</returns>
 		/// <param name="encoding">The encoding to create a filter for.</param>
-		public static IMimeFilter Create (ContentEncoding encoding)
+		/// <param name="maxLineLength">The maximum number of octets allowed per line (not counting the CRLF). Must be between <c>60</c> and <c>998</c> (inclusive).</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="maxLineLength"/> is not between <c>60</c> and <c>998</c> (inclusive).
+		/// </exception>
+		public static IMimeFilter Create (ContentEncoding encoding, int maxLineLength = 78)
 		{
+			return Create (encoding, NewLineFormat.Dos, maxLineLength);
+		}
+
+		/// <summary>
+		/// Create a filter that will encode using the specified encoding and line endings.
+		/// </summary>
+		/// <remarks>
+		/// Creates an encoder filter for base64, quoted-printable or uuencode. Other encodings pass through unchanged.
+		/// </remarks>
+		/// <returns>A new encoder filter.</returns>
+		/// <param name="encoding">The encoding to create a filter for.</param>
+		/// <param name="newLineFormat">The line ending format.</param>
+		/// <param name="maxLineLength">The maximum line length, excluding line endings, between 60 and 998 (inclusive).</param>
+		/// <exception cref="ArgumentOutOfRangeException">
+		/// <paramref name="newLineFormat"/> is not <see cref="NewLineFormat.Dos"/> or <see cref="NewLineFormat.Unix"/>,
+		/// or <paramref name="maxLineLength"/> is out of range for the selected encoder.
+		/// </exception>
+		public static IMimeFilter Create (ContentEncoding encoding, NewLineFormat newLineFormat, int maxLineLength = 78)
+		{
+			if (newLineFormat != NewLineFormat.Dos && newLineFormat != NewLineFormat.Unix)
+				throw new ArgumentOutOfRangeException (nameof (newLineFormat));
+
 			switch (encoding) {
-			case ContentEncoding.Base64: return new EncoderFilter (new Base64Encoder ());
-			case ContentEncoding.QuotedPrintable: return new EncoderFilter (new QuotedPrintableEncoder ());
-			case ContentEncoding.UUEncode: return new EncoderFilter (new UUEncoder ());
+			case ContentEncoding.Base64: return new EncoderFilter (new Base64Encoder (newLineFormat, maxLineLength));
+			case ContentEncoding.QuotedPrintable: return new EncoderFilter (new QuotedPrintableEncoder (newLineFormat, maxLineLength));
+			case ContentEncoding.UUEncode: return new EncoderFilter (new UUEncoder (newLineFormat));
 			default: return new PassThroughFilter ();
 			}
 		}
@@ -100,24 +131,48 @@ namespace MimeKit.IO.Filters {
 		/// Create a filter that will encode using specified encoding.
 		/// </summary>
 		/// <remarks>
-		/// Creates a new <see cref="EncoderFilter"/> for the specified encoding.
+		/// Creates a new <see cref="EncoderFilter"/> for the specified encoding using CRLF line endings.
 		/// </remarks>
 		/// <returns>A new encoder filter.</returns>
 		/// <param name="name">The name of the encoding to create a filter for.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <param name="maxLineLength">The maximum number of octets allowed per line (not counting the CRLF). Must be between <c>60</c> and <c>998</c> (inclusive).</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="maxLineLength"/> is not between <c>60</c> and <c>998</c> (inclusive).
 		/// </exception>
-		public static IMimeFilter Create (string name)
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="name"/> is <see langword="null"/>.
+		/// </exception>
+		public static IMimeFilter Create (string name, int maxLineLength = 78)
 		{
-			ContentEncoding encoding;
+			return Create (name, NewLineFormat.Dos, maxLineLength);
+		}
 
-			if (name == null)
+		/// <summary>
+		/// Create a filter that will encode using the specified encoding and line endings.
+		/// </summary>
+		/// <remarks>
+		/// Creates an encoder filter for base64, quoted-printable or uuencode. Other encodings pass through unchanged.
+		/// </remarks>
+		/// <returns>A new encoder filter.</returns>
+		/// <param name="name">The name of the encoding to create a filter for.</param>
+		/// <param name="newLineFormat">The line ending format.</param>
+		/// <param name="maxLineLength">The maximum line length, excluding line endings, between 60 and 998 (inclusive).</param>
+		/// <exception cref="ArgumentNullException">
+		/// <paramref name="name"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="ArgumentOutOfRangeException">
+		/// <paramref name="newLineFormat"/> is not <see cref="NewLineFormat.Dos"/> or <see cref="NewLineFormat.Unix"/>,
+		/// or <paramref name="maxLineLength"/> is out of range for the selected encoder.
+		/// </exception>
+		public static IMimeFilter Create (string name, NewLineFormat newLineFormat, int maxLineLength = 78)
+		{
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
-			if (!MimeUtils.TryParse (name, out encoding))
-				encoding = ContentEncoding.Default;
+			if (!MimeUtils.TryParse (name, out ContentEncoding encoding))
+				encoding = ContentEncoding.Unspecified;
 
-			return Create (encoding);
+			return Create (encoding, newLineFormat, maxLineLength);
 		}
 
 		/// <summary>
@@ -133,7 +188,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="length">The length of the input buffer, starting at <paramref name="startIndex"/>.</param>
 		/// <param name="outputIndex">The output index.</param>
 		/// <param name="outputLength">The output length.</param>
-		/// <param name="flush">If set to <c>true</c>, all internally buffered data should be flushed to the output buffer.</param>
+		/// <param name="flush">If set to <see langword="true" />, all internally buffered data should be flushed to the output buffer.</param>
 		protected override byte[] Filter (byte[] input, int startIndex, int length, out int outputIndex, out int outputLength, bool flush)
 		{
 			EnsureOutputSize (Encoder.EstimateOutputLength (length), false);
@@ -144,18 +199,20 @@ namespace MimeKit.IO.Filters {
 				outputLength = Encoder.Encode (input, startIndex, length, OutputBuffer);
 
 			outputIndex = 0;
+			HasOutput |= outputLength > 0;
 
 			return OutputBuffer;
 		}
 
 		/// <summary>
-		/// Resets the filter.
+		/// Reset the filter.
 		/// </summary>
 		/// <remarks>
 		/// Resets the filter.
 		/// </remarks>
 		public override void Reset ()
 		{
+			HasOutput = false;
 			Encoder.Reset ();
 			base.Reset ();
 		}

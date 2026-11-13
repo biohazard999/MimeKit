@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,10 +36,13 @@ namespace MimeKit.IO.Filters {
 	/// <remarks>
 	/// Uses a <see cref="IMimeDecoder"/> to incrementally decode data.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\FilterExamples.cs" region="DecodeFile"/>
+	/// </example>
 	public class DecoderFilter : MimeFilterBase
 	{
 		/// <summary>
-		/// Gets the decoder used by this filter.
+		/// Get the decoder used by this filter.
 		/// </summary>
 		/// <remarks>
 		/// Gets the decoder used by this filter.
@@ -50,7 +53,7 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Gets the encoding.
+		/// Get the encoding.
 		/// </summary>
 		/// <remarks>
 		/// Gets the encoding that the decoder supports.
@@ -68,11 +71,11 @@ namespace MimeKit.IO.Filters {
 		/// </remarks>
 		/// <param name="decoder">A specific decoder for the filter to use.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="decoder"/> is <c>null</c>.
+		/// <paramref name="decoder"/> is <see langword="null"/>.
 		/// </exception>
 		public DecoderFilter (IMimeDecoder decoder)
 		{
-			if (decoder == null)
+			if (decoder is null)
 				throw new ArgumentNullException (nameof (decoder));
 
 			Decoder = decoder;
@@ -105,17 +108,15 @@ namespace MimeKit.IO.Filters {
 		/// <returns>A new decoder filter.</returns>
 		/// <param name="name">The name of the encoding to create a filter for.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <paramref name="name"/> is <see langword="null"/>.
 		/// </exception>
 		public static IMimeFilter Create (string name)
 		{
-			ContentEncoding encoding;
-
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
-			if (!MimeUtils.TryParse (name, out encoding))
-				encoding = ContentEncoding.Default;
+			if (!MimeUtils.TryParse (name, out ContentEncoding encoding))
+				encoding = ContentEncoding.Unspecified;
 
 			return Create (encoding);
 		}
@@ -133,19 +134,22 @@ namespace MimeKit.IO.Filters {
 		/// <param name="length">The length of the input buffer, starting at <paramref name="startIndex"/>.</param>
 		/// <param name="outputIndex">The output index.</param>
 		/// <param name="outputLength">The output length.</param>
-		/// <param name="flush">If set to <c>true</c>, all internally buffered data should be flushed to the output buffer.</param>
+		/// <param name="flush">If set to <see langword="true" />, all internally buffered data should be flushed to the output buffer.</param>
 		protected override byte[] Filter (byte[] input, int startIndex, int length, out int outputIndex, out int outputLength, bool flush)
 		{
 			EnsureOutputSize (Decoder.EstimateOutputLength (length), false);
 
-			outputLength = Decoder.Decode (input, startIndex, length, OutputBuffer);
+			if (flush)
+				outputLength = Decoder.Flush (input, startIndex, length, OutputBuffer);
+			else
+				outputLength = Decoder.Decode (input, startIndex, length, OutputBuffer);
 			outputIndex = 0;
 
 			return OutputBuffer;
 		}
 
 		/// <summary>
-		/// Resets the filter.
+		/// Reset the filter.
 		/// </summary>
 		/// <remarks>
 		/// Resets the filter.

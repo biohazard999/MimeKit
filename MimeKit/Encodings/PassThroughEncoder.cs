@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,8 @@ namespace MimeKit.Encodings {
 	/// </remarks>
 	public class PassThroughEncoder : IMimeEncoder
 	{
+		readonly ContentEncoding encoding;
+
 		/// <summary>
 		/// Initialize a new instance of the <see cref="PassThroughEncoder"/> class.
 		/// </summary>
@@ -44,7 +46,7 @@ namespace MimeKit.Encodings {
 		/// </remarks>
 		public PassThroughEncoder (ContentEncoding encoding)
 		{
-			Encoding = encoding;
+			this.encoding = encoding;
 		}
 
 		/// <summary>
@@ -60,18 +62,18 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Gets the encoding.
+		/// Get the encoding.
 		/// </summary>
 		/// <remarks>
 		/// Gets the encoding that the encoder supports.
 		/// </remarks>
 		/// <value>The encoding.</value>
 		public ContentEncoding Encoding {
-			get; private set;
+			get { return encoding; }
 		}
 
 		/// <summary>
-		/// Estimates the length of the output.
+		/// Estimate the length of the output.
 		/// </summary>
 		/// <remarks>
 		/// Estimates the number of bytes needed to encode the specified number of input bytes.
@@ -85,7 +87,7 @@ namespace MimeKit.Encodings {
 
 		void ValidateArguments (byte[] input, int startIndex, int length, byte[] output)
 		{
-			if (input == null)
+			if (input is null)
 				throw new ArgumentNullException (nameof (input));
 
 			if (startIndex < 0 || startIndex > input.Length)
@@ -94,7 +96,7 @@ namespace MimeKit.Encodings {
 			if (length < 0 || length > (input.Length - startIndex))
 				throw new ArgumentOutOfRangeException (nameof (length));
 
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
 			if (output.Length < EstimateOutputLength (length))
@@ -102,7 +104,7 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Encodes the specified input into the output buffer.
+		/// Encode the specified input into the output buffer.
 		/// </summary>
 		/// <remarks>
 		/// Copies the input buffer into the output buffer, verbatim.
@@ -113,9 +115,9 @@ namespace MimeKit.Encodings {
 		/// <param name="length">The length of the input buffer.</param>
 		/// <param name="output">The output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="input"/> is <c>null</c>.</para>
+		/// <para><paramref name="input"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="output"/> is <c>null</c>.</para>
+		/// <para><paramref name="output"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -130,13 +132,17 @@ namespace MimeKit.Encodings {
 		{
 			ValidateArguments (input, startIndex, length, output);
 
+#if NET6_0_OR_GREATER
+			input.AsSpan (startIndex, length).CopyTo (output.AsSpan ());
+#else
 			Buffer.BlockCopy (input, startIndex, output, 0, length);
+#endif
 
 			return length;
 		}
 
 		/// <summary>
-		/// Encodes the specified input into the output buffer, flushing any internal buffer state as well.
+		/// Encode the specified input into the output buffer, flushing any internal buffer state as well.
 		/// </summary>
 		/// <remarks>
 		/// Copies the input buffer into the output buffer, verbatim.
@@ -147,9 +153,9 @@ namespace MimeKit.Encodings {
 		/// <param name="length">The length of the input buffer.</param>
 		/// <param name="output">The output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="input"/> is <c>null</c>.</para>
+		/// <para><paramref name="input"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="output"/> is <c>null</c>.</para>
+		/// <para><paramref name="output"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -166,7 +172,7 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Resets the encoder.
+		/// Reset the encoder.
 		/// </summary>
 		/// <remarks>
 		/// Resets the state of the encoder.

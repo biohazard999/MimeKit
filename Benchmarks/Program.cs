@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,16 +24,42 @@
 // THE SOFTWARE.
 //
 
-using System.Reflection;
+using System;
 
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Running;
+using BenchmarkDotNet.Filters;
+using BenchmarkDotNet.Exporters;
 
 namespace Benchmarks {
 	public class Program
 	{
 		public static void Main (string[] args)
 		{
-			var summary = BenchmarkRunner.Run (typeof (Program).Assembly);
+#if DEBUG
+			var config = new DebugInProcessConfig ()
+				.WithOptions (ConfigOptions.DisableOptimizationsValidator)
+				.AddExporter (MarkdownExporter.GitHub);
+#else
+			var config = ManualConfig.CreateMinimumViable ();
+				//.AddExporter (MarkdownExporter.GitHub);
+#endif
+
+#if false
+			// Only run benchmarks for the MimeParser, LegacyMimeParser, and MimeReader classes
+			config.AddFilter (new DisjunctionFilter (
+				new NameFilter (name => name.StartsWith ("LegacyMimeParser_", StringComparison.Ordinal)),
+				new NameFilter (name => name.StartsWith ("MimeParser_", StringComparison.Ordinal)),
+				new NameFilter (name => name.StartsWith ("MimeReader_", StringComparison.Ordinal))
+			));
+#endif
+
+			// Supports the standard BenchmarkDotNet command-line arguments (e.g. --filter "*HtmlToHtml*", --list flat).
+			// Without arguments, run every benchmark rather than prompting interactively.
+			if (args.Length == 0)
+				args = new[] { "--filter", "*" };
+
+			BenchmarkSwitcher.FromAssembly (typeof (Program).Assembly).Run (args, config);
 		}
 	}
 }

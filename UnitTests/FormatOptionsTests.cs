@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,6 @@
 // THE SOFTWARE.
 //
 
-using System;
-
-using NUnit.Framework;
-
 using MimeKit;
 
 namespace UnitTests {
@@ -44,6 +40,7 @@ namespace UnitTests {
 			Assert.Throws<ArgumentOutOfRangeException> (() => format.MaxLineLength = 59, "MaxLineLength too small");
 
 			Assert.DoesNotThrow (() => format.MaxLineLength = 72);
+			Assert.Throws<ArgumentOutOfRangeException> (() => format.NewLineFormat = (NewLineFormat) 100, "NewLineFormat");
 		}
 
 		[Test]

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,10 +28,10 @@ using System;
 
 namespace MimeKit {
 	/// <summary>
-	/// Event args emitted by the <see cref="MimeParser"/> when a <see cref="MimeEntity"/> is parsed.
+	/// Event args emitted by the <see cref="LegacyMimeParser"/> when a <see cref="MimeEntity"/> is parsed.
 	/// </summary>
 	/// <remarks>
-	/// Event args emitted by the <see cref="MimeParser"/> when a <see cref="MimeEntity"/> is parsed.
+	/// Event args emitted by the <see cref="LegacyMimeParser"/> when a <see cref="MimeEntity"/> is parsed.
 	/// </remarks>
 	public class MimeEntityEndEventArgs : MimeEntityBeginEventArgs
 	{
@@ -43,7 +43,7 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="entity">The entity that was parsed.</param>
 		/// <exception cref="ArgumentNullException">
-		/// <paramref name="entity"/> is <c>null</c>.
+		/// <paramref name="entity"/> is <see langword="null"/>.
 		/// </exception>
 		public MimeEntityEndEventArgs (MimeEntity entity) : base (entity)
 		{
@@ -58,9 +58,9 @@ namespace MimeKit {
 		/// <param name="entity">The entity that was parsed.</param>
 		/// <param name="parent">The parent multipart.</param>
 		/// <exception cref="ArgumentNullException">
-		/// <para><paramref name="entity"/> is <c>null</c>.</para>
+		/// <para><paramref name="entity"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="parent"/> is <c>null</c>.</para>
+		/// <para><paramref name="parent"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public MimeEntityEndEventArgs (MimeEntity entity, Multipart parent) : base (entity, parent)
 		{

@@ -1,0 +1,587 @@
+﻿//
+// AsymmetricAlgorithmExtensions.cs
+//
+// Author: Jeffrey Stedfast <jestedfa@microsoft.com>
+//
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+//
+
+using System;
+using System.Security.Cryptography;
+
+using Org.BouncyCastle.Math;
+using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Parameters;
+
+#if NET47_OR_GREATER || NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.Asn1.X9;
+using Org.BouncyCastle.Asn1.Nist;
+using Org.BouncyCastle.Asn1.Sec;
+using Org.BouncyCastle.Asn1.TeleTrust;
+#endif
+
+namespace MimeKit.Cryptography {
+	/// <summary>
+	/// Extension methods for System.Security.Cryptography.AsymmetricAlgorithm.
+	/// </summary>
+	/// <remarks>
+	/// Extension methods for System.Security.Cryptography.AsymmetricAlgorithm.
+	/// </remarks>
+	public static class AsymmetricAlgorithmExtensions
+	{
+#if ENABLE_NATIVE_DKIM
+		const int MinDsaKeySize = 2048;
+		const int MinRsaKeySize = 2048;
+#endif
+
+		static void GetAsymmetricKeyParameters (DSA dsa, bool publicOnly, out AsymmetricKeyParameter pub, out AsymmetricKeyParameter? key)
+		{
+			var dp = dsa.ExportParameters (!publicOnly);
+			var validationParameters = dp.Seed != null ? new DsaValidationParameters (dp.Seed, dp.Counter) : null;
+			var parameters = new DsaParameters (
+				new BigInteger (1, dp.P),
+				new BigInteger (1, dp.Q),
+				new BigInteger (1, dp.G),
+				validationParameters);
+
+			pub = new DsaPublicKeyParameters (new BigInteger (1, dp.Y), parameters);
+			key = publicOnly ? null : new DsaPrivateKeyParameters (new BigInteger (1, dp.X), parameters);
+		}
+
+		static AsymmetricKeyParameter GetAsymmetricKeyParameter (DSACryptoServiceProvider dsa)
+		{
+			GetAsymmetricKeyParameters (dsa, dsa.PublicOnly, out var pub, out var key);
+
+			return dsa.PublicOnly ? pub : key!; // key is not null when publicOnly is false
+		}
+
+		static AsymmetricCipherKeyPair GetAsymmetricCipherKeyPair (DSACryptoServiceProvider dsa)
+		{
+			if (dsa.PublicOnly)
+				throw new ArgumentException ("DSA key is not a private key.", "key");
+
+			GetAsymmetricKeyParameters (dsa, dsa.PublicOnly, out var pub, out var key);
+
+			return new AsymmetricCipherKeyPair (pub, key);
+		}
+
+		static AsymmetricKeyParameter GetAsymmetricKeyParameter (DSA dsa)
+		{
+			GetAsymmetricKeyParameters (dsa, false, out _, out var key);
+
+			return key!; // key is not null when publicOnly is false
+		}
+
+		static AsymmetricCipherKeyPair GetAsymmetricCipherKeyPair (DSA dsa)
+		{
+			GetAsymmetricKeyParameters (dsa, false, out var pub, out var key);
+
+			return new AsymmetricCipherKeyPair (pub, key);
+		}
+
+		static void GetAsymmetricKeyParameters (RSA rsa, bool publicOnly, out AsymmetricKeyParameter pub, out AsymmetricKeyParameter? key)
+		{
+			var rp = rsa.ExportParameters (!publicOnly);
+			var modulus = new BigInteger (1, rp.Modulus);
+			var exponent = new BigInteger (1, rp.Exponent);
+
+			pub = new RsaKeyParameters (false, modulus, exponent);
+			key = publicOnly ? null : new RsaPrivateCrtKeyParameters (
+				modulus,
+				exponent,
+				new BigInteger (1, rp.D),
+				new BigInteger (1, rp.P),
+				new BigInteger (1, rp.Q),
+				new BigInteger (1, rp.DP),
+				new BigInteger (1, rp.DQ),
+				new BigInteger (1, rp.InverseQ)
+			);
+		}
+
+		static AsymmetricKeyParameter GetAsymmetricKeyParameter (RSACryptoServiceProvider rsa)
+		{
+			GetAsymmetricKeyParameters (rsa, rsa.PublicOnly, out var pub, out var key);
+
+			return rsa.PublicOnly ? pub : key!; // key is not null when publicOnly is false
+		}
+
+		static AsymmetricCipherKeyPair GetAsymmetricCipherKeyPair (RSACryptoServiceProvider rsa)
+		{
+			if (rsa.PublicOnly)
+				throw new ArgumentException ("RSA key is not a private key.", "key");
+
+			GetAsymmetricKeyParameters (rsa, rsa.PublicOnly, out var pub, out var key);
+
+			return new AsymmetricCipherKeyPair (pub, key);
+		}
+
+		static AsymmetricKeyParameter GetAsymmetricKeyParameter (RSA rsa)
+		{
+			GetAsymmetricKeyParameters (rsa, false, out _, out var key);
+
+			return key!; // key is not null when publicOnly is false
+		}
+
+		static AsymmetricCipherKeyPair GetAsymmetricCipherKeyPair (RSA rsa)
+		{
+			GetAsymmetricKeyParameters (rsa, false, out var pub, out var key);
+
+			return new AsymmetricCipherKeyPair (pub, key);
+		}
+
+#if NET47_OR_GREATER || NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+		static X9ECParameters GetECParameters (ECCurve curve)
+		{
+			X9ECParameters? parameters = null;
+
+			if (curve.IsNamed) {
+				var oid = new DerObjectIdentifier (curve.Oid.Value);
+
+				if (oid.Id.StartsWith ("1.2.840.10045.3.1.", StringComparison.Ordinal))
+					parameters = NistNamedCurves.GetByOid (oid);
+				else if (oid.Id.StartsWith ("1.3.132.0.", StringComparison.Ordinal))
+					parameters = SecNamedCurves.GetByOid (oid);
+				else if (oid.Id.StartsWith ("1.3.36.3.3.2.8.1.1.", StringComparison.Ordinal))
+					parameters = TeleTrusTNamedCurves.GetByOid (oid);
+			}
+
+			if (parameters == null)
+				throw new NotSupportedException ("The EC curve is not supported.");
+
+			return parameters;
+		}
+
+		static AsymmetricKeyParameter GetAsymmetricKeyParameter (ECDsa ecdsa)
+		{
+			ECParameters parameters;
+
+			// Note: There's no easy way to know if this ECDsa key has private key parameters or not.
+			// Try exporting them. If we get CryptographicException, then it's probably apublic key.
+			// Try again with includePrivateParameters = false.
+			try {
+				parameters = ecdsa.ExportParameters (true);
+			} catch (CryptographicException) {
+				parameters = ecdsa.ExportParameters (false);
+			}
+
+			var ecParams = GetECParameters (parameters.Curve);
+			var domain = new ECDomainParameters (ecParams.Curve, ecParams.G, ecParams.N, ecParams.H, ecParams.GetSeed ());
+
+			if (parameters.D != null) {
+				// Private key
+				var d = new BigInteger (1, parameters.D);
+				return new ECPrivateKeyParameters (d, domain);
+			} else {
+				// Public key only
+				var q = ecParams.Curve.CreatePoint (
+					new BigInteger (1, parameters.Q.X),
+					new BigInteger (1, parameters.Q.Y));
+				return new ECPublicKeyParameters (q, domain);
+			}
+		}
+
+		static AsymmetricCipherKeyPair GetAsymmetricCipherKeyPair (ECDsa ecdsa)
+		{
+			var parameters = ecdsa.ExportParameters (true);
+
+			if (parameters.D == null)
+				throw new ArgumentException ("ECDsa key is not a private key.", "key");
+
+			var ecParams = GetECParameters (parameters.Curve);
+			var domain = new ECDomainParameters (ecParams.Curve, ecParams.G, ecParams.N, ecParams.H, ecParams.GetSeed ());
+			var d = new BigInteger (1, parameters.D);
+			var q = ecParams.Curve.CreatePoint (
+				new BigInteger (1, parameters.Q.X),
+				new BigInteger (1, parameters.Q.Y));
+
+			var privateKey = new ECPrivateKeyParameters (d, domain);
+			var publicKey = new ECPublicKeyParameters (q, domain);
+
+			return new AsymmetricCipherKeyPair (publicKey, privateKey);
+		}
+#endif
+
+		/// <summary>
+		/// Convert an AsymmetricAlgorithm into a BouncyCastle AsymmetricKeyParameter.
+		/// </summary>
+		/// <remarks>
+		/// <para>Converts an AsymmetricAlgorithm into a BouncyCastle AsymmetricKeyParameter.</para>
+		/// <note type="note">Currently, only RSA and DSA keys are supported.</note>
+		/// </remarks>
+		/// <returns>The Bouncy Castle AsymmetricKeyParameter.</returns>
+		/// <param name="key">The key.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="key"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.NotSupportedException">
+		/// <paramref name="key"/> is an unsupported asymmetric algorithm.
+		/// </exception>
+		public static AsymmetricKeyParameter AsAsymmetricKeyParameter (this AsymmetricAlgorithm key)
+		{
+			if (key == null)
+				throw new ArgumentNullException (nameof (key));
+
+			if (key is RSACryptoServiceProvider rsaKey)
+				return GetAsymmetricKeyParameter (rsaKey);
+
+			if (key is RSA rsa)
+				return GetAsymmetricKeyParameter (rsa);
+
+			if (key is DSACryptoServiceProvider dsaKey)
+				return GetAsymmetricKeyParameter (dsaKey);
+
+			if (key is DSA dsa)
+				return GetAsymmetricKeyParameter (dsa);
+
+#if NET47_OR_GREATER || NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+			if (key is ECDsa ecdsa)
+				return GetAsymmetricKeyParameter (ecdsa);
+#endif
+
+			throw new NotSupportedException (string.Format ("'{0}' is currently not supported.", key.GetType ().Name));
+		}
+
+		/// <summary>
+		/// Convert an AsymmetricAlgorithm into a BouncyCastle AsymmetricCipherKeyPair.
+		/// </summary>
+		/// <remarks>
+		/// <para>Converts an AsymmetricAlgorithm into a BouncyCastle AsymmetricCipherKeyPair.</para>
+		/// <note type="note">Currently, only RSA and DSA keys are supported.</note>
+		/// </remarks>
+		/// <returns>The Bouncy Castle AsymmetricCipherKeyPair.</returns>
+		/// <param name="key">The key.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="key"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="key"/> is a public key.
+		/// </exception>
+		/// <exception cref="System.NotSupportedException">
+		/// <paramref name="key"/> is an unsupported asymmetric algorithm.
+		/// </exception>
+		public static AsymmetricCipherKeyPair AsAsymmetricCipherKeyPair (this AsymmetricAlgorithm key)
+		{
+			if (key == null)
+				throw new ArgumentNullException (nameof (key));
+
+			if (key is RSACryptoServiceProvider rsaKey)
+				return GetAsymmetricCipherKeyPair (rsaKey);
+
+			if (key is RSA rsa)
+				return GetAsymmetricCipherKeyPair (rsa);
+
+			if (key is DSACryptoServiceProvider dsaKey)
+				return GetAsymmetricCipherKeyPair (dsaKey);
+
+			if (key is DSA dsa)
+				return GetAsymmetricCipherKeyPair (dsa);
+
+#if NET47_OR_GREATER || NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+			if (key is ECDsa ecdsa)
+				return GetAsymmetricCipherKeyPair (ecdsa);
+#endif
+
+			throw new NotSupportedException (string.Format ("'{0}' is currently not supported.", key.GetType ().Name));
+		}
+
+#if ENABLE_NATIVE_DKIM
+		// Note: The BouncyCastle -> System.Security.Cryptography conversions below are only needed by
+		// DkimSignerBase and DkimVerifierBase when ENABLE_NATIVE_DKIM is defined.
+
+		static byte[] GetPaddedByteArray (BigInteger big, int length)
+		{
+			var bytes = big.ToByteArrayUnsigned ();
+
+			if (bytes.Length >= length)
+				return bytes;
+
+			var padded = new byte[length];
+
+			Buffer.BlockCopy (bytes, 0, padded, length - bytes.Length, bytes.Length);
+
+			return padded;
+		}
+
+		static DSAParameters GetDSAParameters (DsaKeyParameters key)
+		{
+			var parameters = new DSAParameters ();
+
+			if (key.Parameters.ValidationParameters != null) {
+				parameters.Counter = key.Parameters.ValidationParameters.Counter;
+				parameters.Seed = key.Parameters.ValidationParameters.GetSeed ();
+			}
+
+			parameters.P = key.Parameters.P.ToByteArrayUnsigned ();
+			parameters.Q = key.Parameters.Q.ToByteArrayUnsigned ();
+			parameters.G = GetPaddedByteArray (key.Parameters.G, parameters.P.Length);
+
+			return parameters;
+		}
+
+		static AsymmetricAlgorithm GetAsymmetricAlgorithm (DsaPrivateKeyParameters key, DsaPublicKeyParameters? pub)
+		{
+			var parameters = GetDSAParameters (key); // GetDSAParameters sets P, Q, and G
+			parameters.X = GetPaddedByteArray (key.X, parameters.Q!.Length);
+
+			if (pub != null) {
+				parameters.Y = GetPaddedByteArray (pub.Y, parameters.P!.Length);
+			} else {
+				// If pub is null, derive Y from the private key parameters
+				parameters.Y = key.Parameters.G.ModPow (key.X, key.Parameters.P).ToByteArrayUnsigned ();
+			}
+
+			var dsa = new DSACryptoServiceProvider (MinDsaKeySize);
+
+			dsa.ImportParameters (parameters);
+
+			return dsa;
+		}
+
+		static AsymmetricAlgorithm GetAsymmetricAlgorithm (DsaPublicKeyParameters key)
+		{
+			var parameters = GetDSAParameters (key); // GetDSAParameters sets P, Q, and G
+			parameters.Y = GetPaddedByteArray (key.Y, parameters.P!.Length);
+
+			var dsa = new DSACryptoServiceProvider (MinDsaKeySize);
+
+			dsa.ImportParameters (parameters);
+
+			return dsa;
+		}
+
+		static AsymmetricAlgorithm GetAsymmetricAlgorithm (RsaPrivateCrtKeyParameters key)
+		{
+			var parameters = new RSAParameters {
+				Exponent = key.PublicExponent.ToByteArrayUnsigned (),
+				Modulus = key.Modulus.ToByteArrayUnsigned (),
+				P = key.P.ToByteArrayUnsigned (),
+				Q = key.Q.ToByteArrayUnsigned ()
+			};
+
+			parameters.InverseQ = GetPaddedByteArray (key.QInv, parameters.Q.Length);
+			parameters.D = GetPaddedByteArray (key.Exponent, parameters.Modulus.Length);
+			parameters.DP = GetPaddedByteArray (key.DP, parameters.P.Length);
+			parameters.DQ = GetPaddedByteArray (key.DQ, parameters.Q.Length);
+
+			var rsa = new RSACryptoServiceProvider (MinRsaKeySize);
+
+			rsa.ImportParameters (parameters);
+
+			return rsa;
+		}
+
+		static AsymmetricAlgorithm GetAsymmetricAlgorithm (RsaKeyParameters key)
+		{
+			var parameters = new RSAParameters {
+				Exponent = key.Exponent.ToByteArrayUnsigned (),
+				Modulus = key.Modulus.ToByteArrayUnsigned ()
+			};
+
+			var rsa = new RSACryptoServiceProvider (MinRsaKeySize);
+
+			rsa.ImportParameters (parameters);
+
+			return rsa;
+		}
+
+#if NET47_OR_GREATER || NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+		static bool IsCurve (X9ECParameters namedCurve, ECDomainParameters domain)
+		{
+			return namedCurve.Curve.Equals (domain.Curve) &&
+					namedCurve.G.Equals (domain.G) &&
+					namedCurve.N.Equals (domain.N) &&
+					namedCurve.H.Equals (domain.H);
+		}
+
+		static ECCurve GetECCurve (ECDomainParameters domain)
+		{
+			// Try to match against NIST curves
+			foreach (string name in NistNamedCurves.Names) {
+				var oid = NistNamedCurves.GetOid (name);
+
+				if (oid != null) {
+					var namedCurve = NistNamedCurves.GetByOid (oid);
+
+					if (namedCurve != null && IsCurve (namedCurve, domain))
+						return ECCurve.CreateFromOid (new Oid (oid.Id));
+				}
+			}
+
+			// Try to match against SEC curves
+			foreach (string name in SecNamedCurves.Names) {
+				var oid = SecNamedCurves.GetOid (name);
+
+				if (oid != null) {
+					var namedCurve = SecNamedCurves.GetByOid (oid);
+
+					if (namedCurve != null && IsCurve (namedCurve, domain))
+						return ECCurve.CreateFromOid (new Oid (oid.Id));
+				}
+			}
+
+			// Try to match against TeleTrust curves
+			foreach (string name in TeleTrusTNamedCurves.Names) {
+				var oid = TeleTrusTNamedCurves.GetOid (name);
+
+				if (oid != null) {
+					var namedCurve = TeleTrusTNamedCurves.GetByOid (oid);
+
+					if (namedCurve != null && IsCurve (namedCurve, domain))
+						return ECCurve.CreateFromOid (new Oid (oid.Id));
+				}
+			}
+
+			throw new NotSupportedException ("The EC curve is not a supported named curve.");
+		}
+
+		static AsymmetricAlgorithm GetAsymmetricAlgorithm (ECPrivateKeyParameters key)
+		{
+			var curve = GetECCurve (key.Parameters);
+
+			// Calculate the public key point Q = d * G
+			var q = key.Parameters.G.Multiply (key.D).Normalize ();
+			var qx = q.AffineXCoord.ToBigInteger ();
+			var qy = q.AffineYCoord.ToBigInteger ();
+
+			var fieldSize = (key.Parameters.Curve.FieldSize + 7) / 8;
+			var orderSize = (key.Parameters.N.BitLength + 7) / 8;
+
+			var parameters = new ECParameters {
+				Curve = curve,
+				D = GetPaddedByteArray (key.D, orderSize),
+				Q = {
+					X = GetPaddedByteArray (qx, fieldSize),
+					Y = GetPaddedByteArray (qy, fieldSize)
+				}
+			};
+
+			return ECDsa.Create (parameters);
+		}
+
+		static AsymmetricAlgorithm GetAsymmetricAlgorithm (ECPublicKeyParameters key)
+		{
+			var curve = GetECCurve (key.Parameters);
+			var q = key.Q.Normalize ();
+			var qx = q.AffineXCoord.ToBigInteger ();
+			var qy = q.AffineYCoord.ToBigInteger ();
+
+			var fieldSize = (key.Parameters.Curve.FieldSize + 7) / 8;
+
+			var parameters = new ECParameters {
+				Curve = curve,
+				Q = {
+					X = GetPaddedByteArray (qx, fieldSize),
+					Y = GetPaddedByteArray (qy, fieldSize)
+				}
+			};
+
+			return ECDsa.Create (parameters);
+		}
+#endif
+
+		/// <summary>
+		/// Convert a BouncyCastle AsymmetricKeyParameter into an AsymmetricAlgorithm.
+		/// </summary>
+		/// <remarks>
+		/// <para>Converts a BouncyCastle AsymmetricKeyParameter into an AsymmetricAlgorithm.</para>
+		/// <note type="note">Currently, only RSA and DSA keys are supported.</note>
+		/// </remarks>
+		/// <returns>The AsymmetricAlgorithm.</returns>
+		/// <param name="key">The AsymmetricKeyParameter.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="key"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.NotSupportedException">
+		/// <paramref name="key"/> is an unsupported asymmetric key parameter.
+		/// </exception>
+		public static AsymmetricAlgorithm AsAsymmetricAlgorithm (this AsymmetricKeyParameter key)
+		{
+			// Note: WindowsSecureMimeContext no longer uses this API (it exports the certificate & key into a pkcs12 and loads that into an
+			// X509Certificate2 instead). It is still used by DkimSignerBase and DkimVerifierBase when ENABLE_NATIVE_DKIM is defined.
+			if (key == null)
+				throw new ArgumentNullException (nameof (key));
+
+			if (key.IsPrivate) {
+				if (key is RsaPrivateCrtKeyParameters rsaPrivateKey)
+					return GetAsymmetricAlgorithm (rsaPrivateKey);
+
+				if (key is DsaPrivateKeyParameters dsaPrivateKey)
+					return GetAsymmetricAlgorithm (dsaPrivateKey, null);
+
+#if NET47_OR_GREATER || NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+				if (key is ECPrivateKeyParameters ecPrivateKey)
+					return GetAsymmetricAlgorithm (ecPrivateKey);
+#endif
+			} else {
+				if (key is RsaKeyParameters rsaPublicKey)
+					return GetAsymmetricAlgorithm (rsaPublicKey);
+
+				if (key is DsaPublicKeyParameters dsaPublicKey)
+					return GetAsymmetricAlgorithm (dsaPublicKey);
+
+#if NET47_OR_GREATER || NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+				if (key is ECPublicKeyParameters ecPublicKey)
+					return GetAsymmetricAlgorithm (ecPublicKey);
+#endif
+			}
+
+			throw new NotSupportedException (string.Format ("{0} is currently not supported.", key.GetType ().Name));
+		}
+
+		/// <summary>
+		/// Convert a BouncyCastle AsymmetricCipherKeyPair into an AsymmetricAlgorithm.
+		/// </summary>
+		/// <remarks>
+		/// <para>Converts a BouncyCastle AsymmetricCipherKeyPair into an AsymmetricAlgorithm.</para>
+		/// <note type="note">Currently, only RSA and DSA keys are supported.</note>
+		/// </remarks>
+		/// <returns>The AsymmetricAlgorithm.</returns>
+		/// <param name="key">The AsymmetricCipherKeyPair.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="key"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.NotSupportedException">
+		/// <paramref name="key"/> is an unsupported asymmetric algorithm.
+		/// </exception>
+		public static AsymmetricAlgorithm AsAsymmetricAlgorithm (this AsymmetricCipherKeyPair key)
+		{
+			// Note: WindowsSecureMimeContext no longer uses this API (it exports the certificate & key into a pkcs12 and loads that into an
+			// X509Certificate2 instead). It is still used by DkimSignerBase and DkimVerifierBase when ENABLE_NATIVE_DKIM is defined.
+			if (key == null)
+				throw new ArgumentNullException (nameof (key));
+
+			if (key.Private is RsaPrivateCrtKeyParameters rsaPrivateKey)
+				return GetAsymmetricAlgorithm (rsaPrivateKey);
+
+			if (key.Private is DsaPrivateKeyParameters dsaPrivateKey)
+				return GetAsymmetricAlgorithm (dsaPrivateKey, (DsaPublicKeyParameters) key.Public);
+
+#if NET47_OR_GREATER || NETSTANDARD2_0_OR_GREATER || NET6_0_OR_GREATER
+			if (key.Private is ECPrivateKeyParameters ecdsaPrivateKey)
+				return GetAsymmetricAlgorithm (ecdsaPrivateKey);
+#endif
+
+			throw new NotSupportedException (string.Format ("{0} is currently not supported.", key.Private.GetType ().Name));
+		}
+#endif
+	}
+}

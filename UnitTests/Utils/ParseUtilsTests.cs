@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,7 @@
 // THE SOFTWARE.
 //
 
-using System;
 using System.Text;
-
-using NUnit.Framework;
 
 using MimeKit;
 using MimeKit.Utils;
@@ -36,6 +33,26 @@ namespace UnitTests.Utils {
 	[TestFixture]
 	public class ParseUtilsTests
 	{
+		[TestCase (null, null)]
+		[TestCase ("", "")]
+		[TestCase (" \t\r\n", "")]
+		[TestCase (" \tvalue\r\n ", "value")]
+		[TestCase (" \t\u00a0value\u2008\r\n ", "\u00a0value\u2008")]
+		[TestCase ("\vvalue\f", "\vvalue\f")]
+		public void TestTrimWhiteSpace (string text, string expected)
+		{
+			Assert.That (ParseUtils.TrimWhiteSpace (text), Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestWhiteSpaceCharacters ()
+		{
+			for (int c = char.MinValue; c <= char.MaxValue; c++) {
+				bool expected = c == ' ' || c == '\t' || c == '\r' || c == '\n';
+				Assert.That (ParseUtils.IsWhiteSpace ((char) c), Is.EqualTo (expected), $"U+{c:X4}");
+			}
+		}
+
 		[Test]
 		public void TestTryParseInt32 ()
 		{
@@ -46,20 +63,20 @@ namespace UnitTests.Utils {
 			buffer = Encoding.ASCII.GetBytes (int.MaxValue.ToString ());
 			index = 0;
 
-			Assert.IsTrue (ParseUtils.TryParseInt32 (buffer, ref index, buffer.Length, out value), "Failed to parse MaxValue.");
-			Assert.AreEqual (int.MaxValue, value);
+			Assert.That (ParseUtils.TryParseInt32 (buffer, ref index, buffer.Length, out value), Is.True, "Failed to parse MaxValue.");
+			Assert.That (value, Is.EqualTo (int.MaxValue));
 
 			// make sure that MaxValue+1 fails
 			buffer = Encoding.ASCII.GetBytes ((((long) int.MaxValue) + 1).ToString ());
 			index = 0;
 
-			Assert.IsFalse (ParseUtils.TryParseInt32 (buffer, ref index, buffer.Length, out value), "Parsing MaxValue+1 should result in overflow.");
+			Assert.That (ParseUtils.TryParseInt32 (buffer, ref index, buffer.Length, out _), Is.False, "Parsing MaxValue+1 should result in overflow.");
 
 			// make sure that MaxValue*10 fails
 			buffer = Encoding.ASCII.GetBytes ((((long) int.MaxValue) * 10).ToString ());
 			index = 0;
 
-			Assert.IsFalse (ParseUtils.TryParseInt32 (buffer, ref index, buffer.Length, out value), "Parsing MaxValue*10 should result in overflow.");
+			Assert.That (ParseUtils.TryParseInt32 (buffer, ref index, buffer.Length, out _), Is.False, "Parsing MaxValue*10 should result in overflow.");
 		}
 
 		[Test]
@@ -68,14 +85,14 @@ namespace UnitTests.Utils {
 			var buffer = Encoding.ASCII.GetBytes ("\"This is missing the end quote.");
 			int index = 0;
 
-			Assert.False (ParseUtils.SkipQuoted (buffer, ref index, buffer.Length, false), "Skipping an unterminated qstring should have failed.");
-			Assert.AreEqual (buffer.Length, index, "The index should be at the end of the buffer.");
+			Assert.That (ParseUtils.SkipQuoted (buffer, ref index, buffer.Length, false), Is.False, "Skipping an unterminated qstring should have failed.");
+			Assert.That (index, Is.EqualTo (buffer.Length), "The index should be at the end of the buffer.");
 
 			index = 0;
 
 			var ex = Assert.Throws<ParseException> (() => ParseUtils.SkipQuoted (buffer, ref index, buffer.Length, true), "An exception should have been thrown.");
-			Assert.AreEqual (0, ex.TokenIndex, "The token index should be 0.");
-			Assert.AreEqual (buffer.Length, ex.ErrorIndex, "The error index should be at the end of the buffer.");
+			Assert.That (ex.TokenIndex, Is.EqualTo (0), "The token index should be 0.");
+			Assert.That (ex.ErrorIndex, Is.EqualTo (buffer.Length), "The error index should be at the end of the buffer.");
 		}
 
 		static readonly string[] GoodDomains = {
@@ -94,8 +111,8 @@ namespace UnitTests.Utils {
 				string domain;
 				int index = 0;
 
-				Assert.IsTrue (ParseUtils.TryParseDomain (buffer, ref index, buffer.Length, sentinels, false, out domain), "Should have parsed '{0}'.", GoodDomains[i]);
-				Assert.AreEqual (GoodDomains[i + 1], domain, "Parsed domains did not match.");
+				Assert.That (ParseUtils.TryParseDomain (buffer, ref index, buffer.Length, sentinels, false, out domain), Is.True, $"Should have parsed '{GoodDomains[i]}'.");
+				Assert.That (domain, Is.EqualTo (GoodDomains[i + 1]), "Parsed domains did not match.");
 			}
 		}
 
@@ -125,23 +142,27 @@ namespace UnitTests.Utils {
 				if (BadDomains[i][0] > 127)
 					buffer = Encoding.Convert (Encoding.UTF8, Encoding.GetEncoding ("GB18030"), buffer);
 
-				Assert.IsFalse (ParseUtils.TryParseDomain (buffer, ref index, buffer.Length, sentinels, false, out domain), "Should have failed to parse '{0}'.", BadDomains[i]);
+				Assert.That (ParseUtils.TryParseDomain (buffer, ref index, buffer.Length, sentinels, false, out domain), Is.False, $"Should have failed to parse '{BadDomains[i]}'.");
 
 				index = 0;
 
 				var ex = Assert.Throws<ParseException> (() => ParseUtils.TryParseDomain (buffer, ref index, buffer.Length, sentinels, true, out domain), "Parsing '{0}' should have thrown.", BadDomains[i]);
-				Assert.AreEqual (BadDomainTokenIndexes[i], ex.TokenIndex, "Unexpected token index.");
-				Assert.AreEqual (BadDomainErrorIndexes[i], ex.ErrorIndex, "Unexpected error index.");
+				Assert.That (ex.TokenIndex, Is.EqualTo (BadDomainTokenIndexes[i]), "Unexpected token index.");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (BadDomainErrorIndexes[i]), "Unexpected error index.");
 			}
 		}
 
 		static readonly string[] MsgIdInputs = {
 			" <Messe_Bauma_rz(1)_ae284449-6bdc-488f-8ec3-5be5e5b09efb.jpg>",
 			" Messe_Bauma_rz(1)_ae284449-6bdc-488f-8ec3-5be5e5b09efb.jpg",
+			" <15627601.388658.1676916781911.JavaMail.\"xxxxxx@united.com\"@xxxxxxx.ual.com>",
+			" @0@" // test for issue #1227
 		};
 		static readonly string[] MsgIdOutputs = {
 			"Messe_Bauma_rz(1)_ae284449-6bdc-488f-8ec3-5be5e5b09efb.jpg",
 			"Messe_Bauma_rz(1)_ae284449-6bdc-488f-8ec3-5be5e5b09efb.jpg",
+			"15627601.388658.1676916781911.JavaMail.\"xxxxxx@united.com\"@xxxxxxx.ual.com",
+			"@0@"
 		};
 
 		[Test]
@@ -153,8 +174,8 @@ namespace UnitTests.Utils {
 				int index = 0;
 				string msgid;
 
-				Assert.IsTrue (ParseUtils.TryParseMsgId (buffer, ref index, endIndex, false, false, out msgid), "TryParseMsgId");
-				Assert.AreEqual (MsgIdOutputs[i], msgid, "MsgIdOutputs[{0}]", i);
+				Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, endIndex, false, false, out msgid), Is.True, "TryParseMsgId");
+				Assert.That (msgid, Is.EqualTo (MsgIdOutputs[i]), $"MsgIdOutputs[{i}]");
 			}
 		}
 
@@ -165,15 +186,15 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 			try {
 				index = 0;
 				ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 				Assert.Fail ("throwOnError");
 			} catch (ParseException ex) {
-				Assert.AreEqual (1, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (1, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (1), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (1), "ErrorIndex");
 			}
 		}
 
@@ -184,15 +205,15 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 			try {
 				index = 0;
 				ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 				Assert.Fail ("throwOnError");
 			} catch (ParseException ex) {
-				Assert.AreEqual (1, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (2, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (1), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (2), "ErrorIndex");
 			}
 		}
 
@@ -203,15 +224,15 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 			try {
 				index = 0;
 				ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 				Assert.Fail ("throwOnError");
 			} catch (ParseException ex) {
-				Assert.AreEqual (1, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (12, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (1), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (12), "ErrorIndex");
 			}
 		}
 
@@ -222,15 +243,15 @@ namespace UnitTests.Utils {
 		//	int index = 0;
 		//	string msgid;
 
-		//	Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+		//	Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 		//	try {
 		//		index = 0;
 		//		ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 		//		Assert.Fail ("throwOnError");
 		//	} catch (ParseException ex) {
-		//		Assert.AreEqual (1, ex.TokenIndex, "TokenIndex");
-		//		Assert.AreEqual (12, ex.ErrorIndex, "ErrorIndex");
+		//		Assert.That (ex.TokenIndex, Is.EqualTo (1), "TokenIndex");
+		//		Assert.That (ex.ErrorIndex, Is.EqualTo (12), "ErrorIndex");
 		//	}
 		//}
 
@@ -241,15 +262,15 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 			try {
 				index = 0;
 				ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 				Assert.Fail ("throwOnError");
 			} catch (ParseException ex) {
-				Assert.AreEqual (1, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (13, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (1), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (13), "ErrorIndex");
 			}
 		}
 
@@ -260,15 +281,15 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 			try {
 				index = 0;
 				ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 				Assert.Fail ("throwOnError");
 			} catch (ParseException ex) {
-				Assert.AreEqual (1, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (13, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (1), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (13), "ErrorIndex");
 			}
 		}
 
@@ -279,8 +300,8 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsTrue (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
-			Assert.AreEqual ("local-part@", msgid);
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.True, "TryParseMsgId");
+			Assert.That (msgid, Is.EqualTo ("local-part@"));
 		}
 
 		[Test]
@@ -290,15 +311,15 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 			try {
 				index = 0;
 				ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 				Assert.Fail ("throwOnError");
 			} catch (ParseException ex) {
-				Assert.AreEqual (1, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (19, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (1), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (19), "ErrorIndex");
 			}
 		}
 
@@ -309,15 +330,15 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 			try {
 				index = 0;
 				ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 				Assert.Fail ("throwOnError");
 			} catch (ParseException ex) {
-				Assert.AreEqual (2, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (24, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (2), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (24), "ErrorIndex");
 			}
 		}
 
@@ -328,32 +349,79 @@ namespace UnitTests.Utils {
 			int index = 0;
 			string msgid;
 
-			Assert.IsFalse (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
 
 			try {
 				index = 0;
 				ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid);
 				Assert.Fail ("throwOnError");
 			} catch (ParseException ex) {
-				Assert.AreEqual (2, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (2, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (2), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (2), "ErrorIndex");
 			}
 		}
 
 		[Test]
 		public void TestTryParseMsgIdWithIdnDomain ()
 		{
+			// Note: The MsgId parser should NOT IDN-decode the domain.
 			var buffer = Encoding.ASCII.GetBytes (" <id@xn--v8jxj3d1dzdz08w.com>");
-			const string expected = "id@名がドメイン.com";
+			const string expected = "id@xn--v8jxj3d1dzdz08w.com";
+			//const string expected = "id@名がドメイン.com";
 			int index = 0;
 			string msgid;
 
-			Assert.IsTrue (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), "TryParseMsgId");
-			Assert.AreEqual (expected, msgid, "msgid");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.True, "TryParseMsgId");
+			Assert.That (msgid, Is.EqualTo (expected), "msgid");
 
 			index = 0;
-			Assert.IsTrue (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid), "TryParseMsgId+thowOnError");
-			Assert.AreEqual (expected, msgid, "msgid");
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, true, out msgid), Is.True, "TryParseMsgId+thowOnError");
+			Assert.That (msgid, Is.EqualTo (expected), "msgid");
+		}
+
+		[Test]
+		public void TestTryParseMsgIdWithDoubleDomains ()
+		{
+			var buffer = Encoding.ASCII.GetBytes (" <id@domain1@domain2>");
+			const string expected = "id@domain1@domain2";
+			int index = 0;
+			string msgid;
+
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.True, "TryParseMsgId");
+			Assert.That (msgid, Is.EqualTo (expected), "msgid");
+		}
+
+		[Test]
+		public void TestTryParseMsgIdWithAtAfterDomain ()
+		{
+			var buffer = Encoding.ASCII.GetBytes (" <id@domain@>");
+			int index = 0;
+			string msgid;
+
+			// FIXME: should this succeed and produce "id@domain@" as the msgid?
+			Assert.That (ParseUtils.TryParseMsgId (buffer, ref index, buffer.Length, false, false, out msgid), Is.False, "TryParseMsgId");
+		}
+
+		[Test]
+		public void TestSkipNestedStringComment ()
+		{
+			const string text = "(outer (inner\\) still inner) done) rest";
+			int index = 0;
+
+			Assert.That (ParseUtils.SkipComment (text, ref index, text.Length), Is.True);
+			Assert.That (index, Is.EqualTo (text.IndexOf (" rest", StringComparison.Ordinal)));
+		}
+
+		[Test]
+		public void TestSkipIncompleteStringComment ()
+		{
+			const string text = "(unterminated";
+			int index = 0;
+
+			Assert.That (ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, text.Length, false), Is.False);
+
+			index = 0;
+			Assert.Throws<ParseException> (() => ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, text.Length, true));
 		}
 	}
 }

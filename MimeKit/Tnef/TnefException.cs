@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,54 +26,28 @@
 
 using System;
 
-#if SERIALIZABLE
-using System.Security;
-using System.Runtime.Serialization;
-#endif
-
 namespace MimeKit.Tnef {
 	/// <summary>
 	/// A TNEF exception.
 	/// </summary>
 	/// <remarks>
-	/// A <see cref="TnefException"/> occurs when when a TNEF stream is found to be
-	/// corrupted and cannot be read any futher.
+	/// A <see cref="TnefException"/> occurs when a TNEF stream is found to be
+	/// corrupted and cannot be read any further.
 	/// </remarks>
-#if SERIALIZABLE
-	[Serializable]
-#endif
 	public class TnefException : FormatException
 	{
-#if SERIALIZABLE
 		/// <summary>
 		/// Initialize a new instance of the <see cref="TnefException"/> class.
 		/// </summary>
 		/// <remarks>
 		/// Creates a new <see cref="TnefException"/>.
 		/// </remarks>
-		/// <param name="info">The serialization info.</param>
-		/// <param name="context">The stream context.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="info"/> is <c>null</c>.
-		/// </exception>
-		protected TnefException (SerializationInfo info, StreamingContext context) : base (info, context)
-		{
-			Error = (TnefComplianceStatus) info.GetValue ("Error", typeof (TnefComplianceStatus));
-		}
-#endif
-
-		/// <summary>
-		/// Initialize a new instance of the <see cref="TnefException"/> class.
-		/// </summary>
-		/// <remarks>
-		/// Creates a new <see cref="TnefException"/>.
-		/// </remarks>
-		/// <param name="error">The compliance status error.</param>
+		/// <param name="violation">The compliance violation that caused the error.</param>
 		/// <param name="message">The error message.</param>
 		/// <param name="innerException">The inner exception.</param>
-		public TnefException (TnefComplianceStatus error, string message, Exception innerException) : base (message, innerException)
+		public TnefException (TnefComplianceViolation violation, string? message, Exception? innerException) : base (message, innerException)
 		{
-			Error = error;
+			Violation = violation;
 		}
 
 		/// <summary>
@@ -82,44 +56,21 @@ namespace MimeKit.Tnef {
 		/// <remarks>
 		/// Creates a new <see cref="TnefException"/>.
 		/// </remarks>
-		/// <param name="error">The compliance status error.</param>
+		/// <param name="violation">The compliance violation that caused the error.</param>
 		/// <param name="message">The error message.</param>
-		public TnefException (TnefComplianceStatus error, string message) : base (message)
+		public TnefException (TnefComplianceViolation violation, string? message) : base (message)
 		{
-			Error = error;
+			Violation = violation;
 		}
 
-#if SERIALIZABLE
 		/// <summary>
-		/// When overridden in a derived class, sets the <see cref="System.Runtime.Serialization.SerializationInfo"/>
-		/// with information about the exception.
+		/// Get the compliance violation that caused the error.
 		/// </summary>
 		/// <remarks>
-		/// Sets the <see cref="System.Runtime.Serialization.SerializationInfo"/>
-		/// with information about the exception.
+		/// Gets the compliance violation that caused the error.
 		/// </remarks>
-		/// <param name="info">The serialization info.</param>
-		/// <param name="context">The streaming context.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="info"/> is <c>null</c>.
-		/// </exception>
-		[SecurityCritical]
-		public override void GetObjectData (SerializationInfo info, StreamingContext context)
-		{
-			base.GetObjectData (info, context);
-
-			info.AddValue ("Error", Error);
-		}
-#endif
-
-		/// <summary>
-		/// Get the error.
-		/// </summary>
-		/// <remarks>
-		/// Gets the error.
-		/// </remarks>
-		/// <value>The error.</value>
-		public TnefComplianceStatus Error {
+		/// <value>The compliance violation.</value>
+		public TnefComplianceViolation Violation {
 			get; private set;
 		}
 	}

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,9 +32,9 @@ namespace MimeKit.IO {
 	/// </summary>
 	/// <remarks>
 	/// <para>This interface is meant to extend the functionality of a <see cref="System.IO.Stream"/>,
-	/// allowing the <see cref="MimeParser"/> to have much finer-grained canellability.</para>
+	/// allowing the <see cref="IMimeParser"/> to have much finer-grained canellability.</para>
 	/// <para>When a custom stream implementation also implements this interface,
-	/// the <see cref="MimeParser"/> will opt to use this interface
+	/// the <see cref="IMimeParser"/> will opt to use this interface
 	/// instead of the normal <see cref="System.IO.Stream.Read(byte[],int,int)"/>
 	/// API to read data from the stream.</para>
 	/// <para>This is really useful when parsing a message or other MIME entity
@@ -43,12 +43,12 @@ namespace MimeKit.IO {
 	public interface ICancellableStream
 	{
 		/// <summary>
-		/// Reads a sequence of bytes from the stream and advances the position
+		/// Read a sequence of bytes from the stream and advances the position
 		/// within the stream by the number of bytes read.
 		/// </summary>
 		/// <remarks>
 		/// <para>When a custom stream implementation also implements this interface,
-		/// the <see cref="MimeParser"/> will opt to use this interface
+		/// the <see cref="IMimeParser"/> will opt to use this interface
 		/// instead of the normal <see cref="System.IO.Stream.Read(byte[],int,int)"/>
 		/// API to read data from the stream.</para>
 		/// <para>This is really useful when parsing a message or other MIME entity
@@ -63,7 +63,7 @@ namespace MimeKit.IO {
 		int Read (byte[] buffer, int offset, int count, CancellationToken cancellationToken);
 
 		/// <summary>
-		/// Writes a sequence of bytes to the stream and advances the current
+		/// Write a sequence of bytes to the stream and advances the current
 		/// position within this stream by the number of bytes written.
 		/// </summary>
 		/// <remarks>
@@ -82,7 +82,7 @@ namespace MimeKit.IO {
 		void Write (byte[] buffer, int offset, int count, CancellationToken cancellationToken);
 
 		/// <summary>
-		/// Clears all buffers for this stream and causes any buffered data to be written
+		/// Clear all buffers for this stream and causes any buffered data to be written
 		/// to the underlying device.
 		/// </summary>
 		/// <remarks>

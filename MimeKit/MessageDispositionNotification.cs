@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,24 +33,24 @@ namespace MimeKit {
 	/// A message disposition notification MIME part.
 	/// </summary>
 	/// <remarks>
-	/// A message disposition notification MIME part is a machine readable notification
+	/// A message disposition notification MIME part is a machine-readable notification
 	/// denoting the disposition of a message once it has been successfully delivered 
 	/// and has a MIME-type of message/disposition-notification.
 	/// <seealso cref="MimeKit.MultipartReport"/>
 	/// </remarks>
-	public class MessageDispositionNotification : MimePart
+	public class MessageDispositionNotification : MimePart, IMessageDispositionNotification
 	{
-		HeaderList fields;
+		HeaderList? fields;
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="MessageDispositionNotification"/> class.
 		/// </summary>
 		/// <remarks>
-		/// This constructor is used by <see cref="MimeParser"/>.
+		/// This constructor is used by <see cref="IMimeParser"/>.
 		/// </remarks>
 		/// <param name="args">Information used by the constructor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="args"/> is <c>null</c>.
+		/// <paramref name="args"/> is <see langword="null"/>.
 		/// </exception>
 		public MessageDispositionNotification (MimeEntityConstructorArgs args) : base (args)
 		{
@@ -66,17 +66,27 @@ namespace MimeKit {
 		{
 		}
 
+		void CheckDisposed ()
+		{
+			CheckDisposed (nameof (MessageDispositionNotification));
+		}
+
 		/// <summary>
 		/// Get the disposition notification fields.
 		/// </summary>
 		/// <remarks>
 		/// Gets the disposition notification fields.
 		/// </remarks>
-		/// <value>The fields.</value>
+		/// <value>The disposition notification fields.</value>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="MessageDispositionNotification"/> has been disposed.
+		/// </exception>
 		public HeaderList Fields {
 			get {
-				if (fields == null) {
-					if (Content == null) {
+				CheckDisposed ();
+
+				if (fields is null) {
+					if (Content is null) {
 						Content = new MimeContent (new MemoryBlockStream ());
 						fields = new HeaderList ();
 					} else {
@@ -92,12 +102,13 @@ namespace MimeKit {
 			}
 		}
 
-		void OnFieldsChanged (object sender, HeaderListChangedEventArgs e)
+		void OnFieldsChanged (object? sender, HeaderListChangedEventArgs e)
 		{
 			var stream = new MemoryBlockStream ();
 			var options = FormatOptions.Default;
 
-			fields.WriteTo (options, stream);
+			// Note: fields cannot be null if an event handler is registered to its Changed event
+			fields!.WriteTo (options, stream);
 			stream.Position = 0;
 
 			Content = new MimeContent (stream);
@@ -116,12 +127,17 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="visitor">The visitor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="visitor"/> is <c>null</c>.
+		/// <paramref name="visitor"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="MessageDispositionNotification"/> has been disposed.
 		/// </exception>
 		public override void Accept (MimeVisitor visitor)
 		{
-			if (visitor == null)
+			if (visitor is null)
 				throw new ArgumentNullException (nameof (visitor));
+
+			CheckDisposed ();
 
 			visitor.VisitMessageDispositionNotification (this);
 		}

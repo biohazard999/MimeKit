@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,11 +24,7 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
-using System.Threading.Tasks;
-
-using NUnit.Framework;
+using System.Text;
 
 using MimeKit;
 using MimeKit.IO;
@@ -41,15 +37,34 @@ namespace UnitTests.IO {
 		static readonly string DataDir = Path.Combine (TestHelper.ProjectDir, "TestData", "encoders");
 
 		[Test]
+		public void TestObjectDisposedExceptions ()
+		{
+			var filtered = new FilteredStream (new MemoryStream ());
+			filtered.Dispose ();
+
+			byte[] buf = new byte[1024];
+			Assert.Throws<ObjectDisposedException> (() => filtered.Read (buf, 0, buf.Length));
+			Assert.ThrowsAsync<ObjectDisposedException> (() => filtered.ReadAsync (buf, 0, buf.Length));
+			Assert.Throws<ObjectDisposedException> (() => filtered.Write (buf, 0, buf.Length));
+			Assert.ThrowsAsync<ObjectDisposedException> (() => filtered.WriteAsync (buf, 0, buf.Length));
+			Assert.Throws<ObjectDisposedException> (filtered.Flush);
+			Assert.ThrowsAsync<ObjectDisposedException> (filtered.FlushAsync);
+
+			Assert.Throws<ObjectDisposedException> (() => filtered.Add (DecoderFilter.Create (ContentEncoding.Base64)));
+			Assert.Throws<ObjectDisposedException> (() => filtered.Remove (DecoderFilter.Create (ContentEncoding.Base64)));
+			Assert.Throws<ObjectDisposedException> (() => filtered.Contains (DecoderFilter.Create (ContentEncoding.Base64)));
+		}
+
+		[Test]
 		public void TestCanReadWriteSeekTimeout ()
 		{
 			var buffer = new byte[1024];
 
 			using (var filtered = new FilteredStream (new CanReadWriteSeekStream (true, false, false, false))) {
-				Assert.IsTrue (filtered.CanRead);
-				Assert.IsFalse (filtered.CanWrite);
-				Assert.IsFalse (filtered.CanSeek);
-				Assert.IsFalse (filtered.CanTimeout);
+				Assert.That (filtered.CanRead, Is.True);
+				Assert.That (filtered.CanWrite, Is.False);
+				Assert.That (filtered.CanSeek, Is.False);
+				Assert.That (filtered.CanTimeout, Is.False);
 
 				Assert.Throws<NotImplementedException> (() => filtered.Read (buffer, 0, buffer.Length));
 				Assert.Throws<NotSupportedException> (() => filtered.Write (buffer, 0, buffer.Length));
@@ -57,10 +72,10 @@ namespace UnitTests.IO {
 			}
 
 			using (var filtered = new FilteredStream (new CanReadWriteSeekStream (false, true, false, false))) {
-				Assert.IsFalse (filtered.CanRead);
-				Assert.IsTrue (filtered.CanWrite);
-				Assert.IsFalse (filtered.CanSeek);
-				Assert.IsFalse (filtered.CanTimeout);
+				Assert.That (filtered.CanRead, Is.False);
+				Assert.That (filtered.CanWrite, Is.True);
+				Assert.That (filtered.CanSeek, Is.False);
+				Assert.That (filtered.CanTimeout, Is.False);
 
 				Assert.Throws<NotSupportedException> (() => filtered.Read (buffer, 0, buffer.Length));
 				Assert.Throws<NotImplementedException> (() => filtered.Write (buffer, 0, buffer.Length));
@@ -68,10 +83,10 @@ namespace UnitTests.IO {
 			}
 
 			using (var filtered = new FilteredStream (new CanReadWriteSeekStream (false, false, true, false))) {
-				Assert.IsFalse (filtered.CanRead);
-				Assert.IsFalse (filtered.CanWrite);
-				Assert.IsFalse (filtered.CanSeek);  // FilteredStream can never seek
-				Assert.IsFalse (filtered.CanTimeout);
+				Assert.That (filtered.CanRead, Is.False);
+				Assert.That (filtered.CanWrite, Is.False);
+				Assert.That (filtered.CanSeek, Is.False);  // FilteredStream can never seek
+				Assert.That (filtered.CanTimeout, Is.False);
 
 				Assert.Throws<NotSupportedException> (() => filtered.Read (buffer, 0, buffer.Length));
 				Assert.Throws<NotSupportedException> (() => filtered.Write (buffer, 0, buffer.Length));
@@ -83,14 +98,14 @@ namespace UnitTests.IO {
 		public void TestGetSetTimeouts ()
 		{
 			using (var filtered = new FilteredStream (new TimeoutStream ())) {
-				Assert.AreEqual (0, filtered.ReadTimeout);
-				Assert.AreEqual (0, filtered.WriteTimeout);
+				Assert.That (filtered.ReadTimeout, Is.EqualTo (0));
+				Assert.That (filtered.WriteTimeout, Is.EqualTo (0));
 
 				filtered.ReadTimeout = 10;
-				Assert.AreEqual (10, filtered.ReadTimeout);
+				Assert.That (filtered.ReadTimeout, Is.EqualTo (10));
 
 				filtered.WriteTimeout = 100;
-				Assert.AreEqual (100, filtered.WriteTimeout);
+				Assert.That (filtered.WriteTimeout, Is.EqualTo (100));
 			}
 		}
 
@@ -113,10 +128,10 @@ namespace UnitTests.IO {
 					var buf1 = decoded.GetBuffer ();
 					int n = (int) original.Length;
 
-					Assert.AreEqual (original.Length, decoded.Length, "Decoded length is incorrect.");
+					Assert.That (decoded.Length, Is.EqualTo (original.Length), "Decoded length is incorrect.");
 
 					for (int i = 0; i < n; i++)
-						Assert.AreEqual (buf0[i], buf1[i], "The byte at offset {0} does not match.", i);
+						Assert.That (buf1[i], Is.EqualTo (buf0[i]), $"The byte at offset {i} does not match.");
 				}
 			}
 		}
@@ -140,10 +155,48 @@ namespace UnitTests.IO {
 					var buf1 = decoded.GetBuffer ();
 					int n = (int) original.Length;
 
-					Assert.AreEqual (original.Length, decoded.Length, "Decoded length is incorrect.");
+					Assert.That (decoded.Length, Is.EqualTo (original.Length), "Decoded length is incorrect.");
 
 					for (int i = 0; i < n; i++)
-						Assert.AreEqual (buf0[i], buf1[i], "The byte at offset {0} does not match.", i);
+						Assert.That (buf1[i], Is.EqualTo (buf0[i]), $"The byte at offset {i} does not match.");
+				}
+			}
+		}
+
+		[Test]
+		public void TestReadFlushesFiltersAtEndOfStream ([Values (1, 2, 4096)] int chunkSize)
+		{
+			var input = Encoding.ASCII.GetBytes ("a\r\n\r\nb\r");
+
+			using (var source = new ChunkedReadStream (input, chunkSize)) {
+				using (var filtered = new FilteredStream (source)) {
+					using (var output = new MemoryStream ()) {
+						filtered.Add (new Dos2UnixFilter (true));
+						filtered.CopyTo (output, 4096);
+
+						// Note: Dos2Unix holds back the trailing '\r' until the filter is flushed
+						Assert.That (Encoding.ASCII.GetString (output.ToArray ()), Is.EqualTo ("a\n\nb\n"));
+						Assert.That (filtered.Read (new byte[16], 0, 16), Is.EqualTo (0), "Read after EOF");
+					}
+				}
+			}
+		}
+
+		[Test]
+		public async Task TestReadFlushesFiltersAtEndOfStreamAsync ([Values (1, 2, 4096)] int chunkSize)
+		{
+			var input = Encoding.ASCII.GetBytes ("a\r\n\r\nb\r");
+
+			using (var source = new ChunkedReadStream (input, chunkSize)) {
+				using (var filtered = new FilteredStream (source)) {
+					using (var output = new MemoryStream ()) {
+						filtered.Add (new Dos2UnixFilter (true));
+						await filtered.CopyToAsync (output, 4096);
+
+						// Note: Dos2Unix holds back the trailing '\r' until the filter is flushed
+						Assert.That (Encoding.ASCII.GetString (output.ToArray ()), Is.EqualTo ("a\n\nb\n"));
+						Assert.That (await filtered.ReadAsync (new byte[16], 0, 16), Is.EqualTo (0), "ReadAsync after EOF");
+					}
 				}
 			}
 		}
@@ -168,10 +221,10 @@ namespace UnitTests.IO {
 					var buf1 = decoded.GetBuffer ();
 					int n = (int) original.Length;
 
-					Assert.AreEqual (original.Length, decoded.Length, "Decoded length is incorrect.");
+					Assert.That (decoded.Length, Is.EqualTo (original.Length), "Decoded length is incorrect.");
 
 					for (int i = 0; i < n; i++)
-						Assert.AreEqual (buf0[i], buf1[i], "The byte at offset {0} does not match.", i);
+						Assert.That (buf1[i], Is.EqualTo (buf0[i]), $"The byte at offset {i} does not match.");
 				}
 			}
 		}
@@ -196,10 +249,10 @@ namespace UnitTests.IO {
 					var buf1 = decoded.GetBuffer ();
 					int n = (int) original.Length;
 
-					Assert.AreEqual (original.Length, decoded.Length, "Decoded length is incorrect.");
+					Assert.That (decoded.Length, Is.EqualTo (original.Length), "Decoded length is incorrect.");
 
 					for (int i = 0; i < n; i++)
-						Assert.AreEqual (buf0[i], buf1[i], "The byte at offset {0} does not match.", i);
+						Assert.That (buf1[i], Is.EqualTo (buf0[i]), $"The byte at offset {i} does not match.");
 				}
 			}
 		}

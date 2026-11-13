@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,26 +24,20 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
 using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Generic;
 
-using NUnit.Framework;
-
-using MimeKit.IO;
 using MimeKit;
+using MimeKit.IO;
 
 namespace UnitTests.IO {
 	[TestFixture]
-	public class ChainedStreamTests
+	public class ChainedStreamTests : IDisposable
 	{
 		readonly List<int> lengths = new List<int> ();
 		readonly MemoryStream master, backing;
 		readonly ChainedStream chained;
 		readonly byte[] cbuf, mbuf;
-		Random random;
+		readonly Random random;
 
 		public ChainedStreamTests ()
 		{
@@ -65,7 +59,7 @@ namespace UnitTests.IO {
 			while (position < bytes.Length) {
 				int n = Math.Min (bytes.Length - position, random.Next () % 4096);
 
-				var stream = new BoundStream (backing, position, position + n, true);
+				var stream = new BoundedStream (backing, position, position + n, true);
 
 				lengths.Add (n);
 				position += n;
@@ -74,110 +68,107 @@ namespace UnitTests.IO {
 			}
 		}
 
-		//[TestFixtureTearDown]
-		//public void TearDown ()
-		//{
-		//	backing.Dispose ();
-		//	chained.Dispose ();
-		//	master.Dispose ();
-		//}
+		public void Dispose ()
+		{
+			backing.Dispose ();
+			chained.Dispose ();
+			master.Dispose ();
+		}
 
 		[Test]
 		public void TestCanReadWriteSeek ()
 		{
 			var buffer = new byte[1024];
 
-			using (var chained = new ChainedStream ()) {
-				chained.Add (new CanReadWriteSeekStream (true, false, false, false));
+			using (var stream = new ChainedStream ()) {
+				stream.Add (new CanReadWriteSeekStream (true, false, false, false));
 
-				Assert.IsTrue (chained.CanRead);
-				Assert.IsFalse (chained.CanWrite);
-				Assert.IsFalse (chained.CanSeek);
-				Assert.IsFalse (chained.CanTimeout);
+				Assert.That (stream.CanRead, Is.True);
+				Assert.That (stream.CanWrite, Is.False);
+				Assert.That (stream.CanSeek, Is.False);
+				Assert.That (stream.CanTimeout, Is.False);
 
-				Assert.Throws<NotImplementedException> (() => chained.Read (buffer, 0, buffer.Length));
-				Assert.Throws<NotSupportedException> (() => chained.Write (buffer, 0, buffer.Length));
-				Assert.Throws<NotSupportedException> (() => chained.Seek (0, SeekOrigin.End));
+				Assert.Throws<NotImplementedException> (() => stream.Read (buffer, 0, buffer.Length));
+				Assert.Throws<NotSupportedException> (() => stream.Write (buffer, 0, buffer.Length));
+				Assert.Throws<NotSupportedException> (() => stream.Seek (0, SeekOrigin.End));
 			}
 
-			using (var chained = new ChainedStream ()) {
-				chained.Add (new CanReadWriteSeekStream (false, true, false, false));
+			using (var stream = new ChainedStream ()) {
+				stream.Add (new CanReadWriteSeekStream (false, true, false, false));
 
-				Assert.IsFalse (chained.CanRead);
-				Assert.IsTrue (chained.CanWrite);
-				Assert.IsFalse (chained.CanSeek);
-				Assert.IsFalse (chained.CanTimeout);
+				Assert.That (stream.CanRead, Is.False);
+				Assert.That (stream.CanWrite, Is.True);
+				Assert.That (stream.CanSeek, Is.False);
+				Assert.That (stream.CanTimeout, Is.False);
 
-				Assert.Throws<NotSupportedException> (() => chained.Read (buffer, 0, buffer.Length));
-				Assert.Throws<NotImplementedException> (() => chained.Write (buffer, 0, buffer.Length));
-				Assert.Throws<NotSupportedException> (() => chained.Seek (0, SeekOrigin.End));
+				Assert.Throws<NotSupportedException> (() => stream.Read (buffer, 0, buffer.Length));
+				Assert.Throws<NotImplementedException> (() => stream.Write (buffer, 0, buffer.Length));
+				Assert.Throws<NotSupportedException> (() => stream.Seek (0, SeekOrigin.End));
 			}
 
-			using (var chained = new ChainedStream ()) {
-				chained.Add (new CanReadWriteSeekStream (false, false, true, false));
+			using (var stream = new ChainedStream ()) {
+				stream.Add (new CanReadWriteSeekStream (false, false, true, false));
 
-				Assert.IsFalse (chained.CanRead);
-				Assert.IsFalse (chained.CanWrite);
-				Assert.IsTrue (chained.CanSeek);
-				Assert.IsFalse (chained.CanTimeout);
+				Assert.That (stream.CanRead, Is.False);
+				Assert.That (stream.CanWrite, Is.False);
+				Assert.That (stream.CanSeek, Is.True);
+				Assert.That (stream.CanTimeout, Is.False);
 
-				Assert.Throws<NotSupportedException> (() => chained.Read (buffer, 0, buffer.Length));
-				Assert.Throws<NotSupportedException> (() => chained.Write (buffer, 0, buffer.Length));
-				Assert.Throws<NotImplementedException> (() => chained.Seek (0, SeekOrigin.End));
+				Assert.Throws<NotSupportedException> (() => stream.Read (buffer, 0, buffer.Length));
+				Assert.Throws<NotSupportedException> (() => stream.Write (buffer, 0, buffer.Length));
+				Assert.Throws<NotImplementedException> (() => stream.Seek (0, SeekOrigin.End));
 			}
 		}
 
 		[Test]
 		public void TestGetSetTimeouts ()
 		{
-			using (var chained = new ChainedStream ()) {
-				chained.Add (new TimeoutStream ());
+			using (var stream = new ChainedStream ()) {
+				stream.Add (new TimeoutStream ());
 
-				Assert.Throws<InvalidOperationException> (() => { int x = chained.ReadTimeout; });
-				Assert.Throws<InvalidOperationException> (() => { int x = chained.WriteTimeout; });
+				Assert.Throws<InvalidOperationException> (() => { int x = stream.ReadTimeout; });
+				Assert.Throws<InvalidOperationException> (() => { int x = stream.WriteTimeout; });
 
-				Assert.Throws<InvalidOperationException> (() => chained.ReadTimeout = 5);
-				Assert.Throws<InvalidOperationException> (() => chained.WriteTimeout = 5);
+				Assert.Throws<InvalidOperationException> (() => stream.ReadTimeout = 5);
+				Assert.Throws<InvalidOperationException> (() => stream.WriteTimeout = 5);
 			}
 		}
 
 		[Test]
 		public void TestRead ()
 		{
-			Assert.IsTrue (chained.CanRead, "Expected to be able to read from the chained stream.");
-
-			Assert.AreEqual (0, chained.Read (cbuf, 0, 0), "Zero-length read");
+			Assert.That (chained.CanRead, Is.True, "Expected to be able to read from the chained stream.");
+			Assert.That (chained.Read (cbuf, 0, 0), Is.EqualTo (0), "Zero-length read");
 
 			do {
 				int n = (int) Math.Min (master.Length - master.Position, mbuf.Length);
 				int nread = chained.Read (cbuf, 0, n);
 				int mread = master.Read (mbuf, 0, n);
 
-				Assert.AreEqual (mread, nread, "Did not read the expected number of bytes from the chained stream");
-				Assert.AreEqual (master.Position, chained.Position, "The chained stream's position did not match");
+				Assert.That (nread, Is.EqualTo (mread), "Did not read the expected number of bytes from the chained stream");
+				Assert.That (chained.Position, Is.EqualTo (master.Position), "The chained stream's position did not match");
 
 				for (int i = 0; i < n; i++)
-					Assert.AreEqual (mbuf[i], cbuf[i], "The bytes read do not match");
+					Assert.That (cbuf[i], Is.EqualTo (mbuf[i]), "The bytes read do not match");
 			} while (master.Position < master.Length);
 		}
 
 		[Test]
 		public async Task TestReadAsync ()
 		{
-			Assert.IsTrue (chained.CanRead, "Expected to be able to read from the chained stream.");
-
-			Assert.AreEqual (0, await chained.ReadAsync (cbuf, 0, 0), "Zero-length read");
+			Assert.That (chained.CanRead, Is.True, "Expected to be able to read from the chained stream.");
+			Assert.That (await chained.ReadAsync (cbuf, 0, 0), Is.EqualTo (0), "Zero-length read");
 
 			do {
 				int n = (int) Math.Min (master.Length - master.Position, mbuf.Length);
 				int nread = await chained.ReadAsync (cbuf, 0, n);
 				int mread = await master.ReadAsync (mbuf, 0, n);
 
-				Assert.AreEqual (mread, nread, "Did not read the expected number of bytes from the chained stream");
-				Assert.AreEqual (master.Position, chained.Position, "The chained stream's position did not match");
+				Assert.That (nread, Is.EqualTo (mread), "Did not read the expected number of bytes from the chained stream");
+				Assert.That (chained.Position, Is.EqualTo (master.Position), "The chained stream's position did not match");
 
 				for (int i = 0; i < n; i++)
-					Assert.AreEqual (mbuf[i], cbuf[i], "The bytes read do not match");
+					Assert.That (cbuf[i], Is.EqualTo (mbuf[i]), "The bytes read do not match");
 			} while (master.Position < master.Length);
 		}
 
@@ -187,17 +178,17 @@ namespace UnitTests.IO {
 			int nread = chained.Read (cbuf, 0, n);
 			int mread = master.Read (mbuf, 0, n);
 
-			Assert.AreEqual (mread, nread, "Did not read the expected number of bytes from the chained stream after {0}", operation);
-			Assert.AreEqual (master.Position, chained.Position, "The chained stream's position did not match after {0}", operation);
+			Assert.That (nread, Is.EqualTo (mread), $"Did not read the expected number of bytes from the chained stream after {operation}");
+			Assert.That (chained.Position, Is.EqualTo (master.Position), $"The chained stream's position did not match after {operation}");
 
 			for (int i = 0; i < n; i++)
-				Assert.AreEqual (mbuf[i], cbuf[i], "The bytes read do not match after {0}", operation);
+				Assert.That (cbuf[i], Is.EqualTo (mbuf[i]), $"The bytes read do not match after {operation}");
 		}
 
 		[Test]
 		public void TestRandomSeeking ()
 		{
-			Assert.IsTrue (chained.CanSeek, "Expected to be able to seek in the chained stream.");
+			Assert.That (chained.CanSeek, Is.True, "Expected to be able to seek in the chained stream.");
 
 			Assert.Throws<IOException> (() => chained.Seek (-1, SeekOrigin.Begin));
 			Assert.Throws<IOException> (() => chained.Seek (int.MaxValue, SeekOrigin.Begin));
@@ -208,8 +199,8 @@ namespace UnitTests.IO {
 				long expected, actual;
 
 				switch (origin) {
-				case SeekOrigin.Current: offset = offset - master.Position; break;
-				case SeekOrigin.End: offset = offset - master.Length; break;
+				case SeekOrigin.Current: offset -= master.Position; break;
+				case SeekOrigin.End: offset -= master.Length; break;
 				}
 
 				if (origin == SeekOrigin.Begin) {
@@ -223,7 +214,7 @@ namespace UnitTests.IO {
 					actual = chained.Seek (offset, origin);
 				}
 
-				Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+				Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 				AssertSeekResults ("seeking to random position");
 			}
@@ -237,28 +228,28 @@ namespace UnitTests.IO {
 			expected = master.Seek (99, SeekOrigin.Begin);
 			actual = chained.Seek (99, SeekOrigin.Begin);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to offset 99");
 
 			expected = master.Seek (master.Position, SeekOrigin.Begin);
 			actual = chained.Seek (chained.Position, SeekOrigin.Begin);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to current position via SeekOrigin.Begin");
 
 			expected = master.Seek (0, SeekOrigin.Current);
 			actual = chained.Seek (0, SeekOrigin.Current);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to current position via SeekOrigin.Current");
 
 			expected = master.Seek (master.Position - master.Length, SeekOrigin.End);
 			actual = chained.Seek (chained.Position - chained.Length, SeekOrigin.End);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to current position via SeekOrigin.End");
 		}
@@ -272,7 +263,7 @@ namespace UnitTests.IO {
 			expected = master.Seek (0, SeekOrigin.Begin);
 			actual = chained.Seek (0, SeekOrigin.Begin);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to the beginning");
 
@@ -280,7 +271,7 @@ namespace UnitTests.IO {
 			expected = master.Seek (lengths[1], SeekOrigin.Begin);
 			actual = chained.Seek (lengths[1], SeekOrigin.Begin);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to the second boundary");
 
@@ -288,7 +279,7 @@ namespace UnitTests.IO {
 			expected = master.Seek (lengths[0], SeekOrigin.Begin);
 			actual = chained.Seek (lengths[0], SeekOrigin.Begin);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to the first boundary");
 		}
@@ -299,17 +290,17 @@ namespace UnitTests.IO {
 			int nread = await chained.ReadAsync (cbuf, 0, n);
 			int mread = await master.ReadAsync (mbuf, 0, n);
 
-			Assert.AreEqual (mread, nread, "Did not read the expected number of bytes from the chained stream after {0}", operation);
-			Assert.AreEqual (master.Position, chained.Position, "The chained stream's position did not match after {0}", operation);
+			Assert.That (nread, Is.EqualTo (mread), $"Did not read the expected number of bytes from the chained stream after {operation}");
+			Assert.That (chained.Position, Is.EqualTo (master.Position), $"The chained stream's position did not match after {operation}");
 
 			for (int i = 0; i < n; i++)
-				Assert.AreEqual (mbuf[i], cbuf[i], "The bytes read do not match after {0}", operation);
+				Assert.That (cbuf[i], Is.EqualTo (mbuf[i]), $"The bytes read do not match after {operation}");
 		}
 
 		[Test]
 		public async Task TestRandomSeekingAsync ()
 		{
-			Assert.IsTrue (chained.CanSeek, "Expected to be able to seek in the chained stream.");
+			Assert.That (chained.CanSeek, Is.True, "Expected to be able to seek in the chained stream.");
 
 			Assert.Throws<IOException> (() => chained.Seek (-1, SeekOrigin.Begin));
 			Assert.Throws<IOException> (() => chained.Seek (int.MaxValue, SeekOrigin.Begin));
@@ -320,8 +311,8 @@ namespace UnitTests.IO {
 				long expected, actual;
 
 				switch (origin) {
-				case SeekOrigin.Current: offset = offset - master.Position; break;
-				case SeekOrigin.End: offset = offset - master.Length; break;
+				case SeekOrigin.Current: offset -= master.Position; break;
+				case SeekOrigin.End: offset -= master.Length; break;
 				}
 
 				if (origin == SeekOrigin.Begin) {
@@ -335,7 +326,7 @@ namespace UnitTests.IO {
 					actual = chained.Seek (offset, origin);
 				}
 
-				Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+				Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 				await AssertSeekResultsAsync ("seeking to random position");
 			}
@@ -350,7 +341,7 @@ namespace UnitTests.IO {
 			expected = master.Seek (0, SeekOrigin.Begin);
 			actual = chained.Seek (0, SeekOrigin.Begin);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to the beginning");
 
@@ -358,7 +349,7 @@ namespace UnitTests.IO {
 			expected = master.Seek (lengths[1], SeekOrigin.Begin);
 			actual = chained.Seek (lengths[1], SeekOrigin.Begin);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			AssertSeekResults ("seeking to the second boundary");
 
@@ -366,7 +357,7 @@ namespace UnitTests.IO {
 			expected = master.Seek (lengths[0], SeekOrigin.Begin);
 			actual = chained.Seek (lengths[0], SeekOrigin.Begin);
 
-			Assert.AreEqual (expected, actual, "Seeking the chained stream did not return the expected position");
+			Assert.That (actual, Is.EqualTo (expected), "Seeking the chained stream did not return the expected position");
 
 			await AssertSeekResultsAsync ("seeking to the first boundary");
 		}
@@ -385,7 +376,7 @@ namespace UnitTests.IO {
 
 			var array = backing.ToArray ();
 			for (int i = 0; i < buffer.Length; i++)
-				Assert.AreEqual (buffer[i], array[i], "Written byte @ offset {0} did not match", i);
+				Assert.That (array[i], Is.EqualTo (buffer[i]), $"Written byte @ offset {i} did not match");
 		}
 
 		[Test]
@@ -402,7 +393,7 @@ namespace UnitTests.IO {
 
 			var array = backing.ToArray ();
 			for (int i = 0; i < buffer.Length; i++)
-				Assert.AreEqual (buffer[i], array[i], "Written byte @ offset {0} did not match", i);
+				Assert.That (array[i], Is.EqualTo (buffer[i]), $"Written byte @ offset {i} did not match");
 		}
 
 		[Test]
@@ -441,8 +432,8 @@ namespace UnitTests.IO {
 		public void TestChainedHeadersAndContent ()
 		{
 			var buf = Encoding.ASCII.GetBytes ("Content-Type: text/plain\r\n\r\n");
-			var headers = new MemoryStream ();
-			var content = new MemoryStream ();
+			using var headers = new MemoryStream ();
+			using var content = new MemoryStream ();
 
 			headers.Write (buf, 0, buf.Length);
 			headers.Position = 0;
@@ -452,13 +443,13 @@ namespace UnitTests.IO {
 			content.Write (buf, 0, buf.Length);
 			content.Position = 0;
 
-			using (var chained = new ChainedStream ()) {
-				chained.Add (headers);
-				chained.Add (content);
+			using (var stream = new ChainedStream ()) {
+				stream.Add (headers);
+				stream.Add (content);
 
-				var entity = MimeEntity.Load (chained, true) as TextPart;
+				var entity = MimeEntity.Load (stream, MimeContentStorage.Source) as TextPart;
 
-				Assert.AreEqual ("Hello, world!" + Environment.NewLine, entity.Text);
+				Assert.That (entity.Text, Is.EqualTo ("Hello, world!" + Environment.NewLine));
 			}
 		}
 

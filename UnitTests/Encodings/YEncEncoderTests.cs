@@ -1,0 +1,189 @@
+﻿//
+// YEncEncoderTests.cs
+//
+// Author: Jeffrey Stedfast <jestedfa@microsoft.com>
+//
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+//
+
+using System.Text;
+
+using MimeKit;
+using MimeKit.Encodings;
+
+namespace UnitTests.Encodings {
+	[TestFixture]
+	public class YEncEncoderTests : MimeEncoderTestsBase
+	{
+		[Test]
+		public void TestArgumentExceptions ()
+		{
+			Assert.Throws<ArgumentOutOfRangeException> (() => new YEncEncoder (59));
+
+			AssertArgumentExceptions (new YEncEncoder ());
+		}
+
+		[Test]
+		public void TestEncoding ()
+		{
+			var encoder = new YEncEncoder ();
+
+			Assert.That (encoder.Encoding, Is.EqualTo (ContentEncoding.Unspecified));
+		}
+
+		[Test]
+		public void TestClone ()
+		{
+			CloneAndAssert (new YEncEncoder ());
+		}
+
+		[Test]
+		public void TestReset ()
+		{
+			ResetAndAssert (new YEncEncoder ());
+		}
+
+		[Test]
+		public void TestEncodeEscapesSpecialOctets ()
+		{
+			var encoder = new YEncEncoder ();
+			byte[] input = { 214, 224, 227, 19, 4, 223, 23 };
+			var output = new byte[encoder.EstimateOutputLength (input.Length)];
+
+			int n = encoder.Flush (input, 0, input.Length, output);
+			var actual = Encoding.ASCII.GetString (output, 0, n);
+
+			Assert.That (actual, Is.EqualTo ("=@=J=M=}=n=IA\r\n"));
+		}
+
+		[Test]
+		public void TestNewLineFormat ([Values (NewLineFormat.Dos, NewLineFormat.Unix)] NewLineFormat newLineFormat)
+		{
+			var newLine = newLineFormat == NewLineFormat.Dos ? "\r\n" : "\n";
+			var input = Enumerable.Repeat ((byte) 214, 93).ToArray ();
+			var expected = string.Concat (Enumerable.Repeat (string.Concat (Enumerable.Repeat ("=@", 30)) + newLine, 3)) + "=@=@=@" + newLine;
+			var encoder = new YEncEncoder (newLineFormat, 60);
+
+			AssertNewLineFormat (encoder, input, Encoding.ASCII.GetBytes (expected));
+			var other = new YEncEncoder (newLineFormat == NewLineFormat.Dos ? NewLineFormat.Unix : NewLineFormat.Dos, 60);
+			other.Flush (input, 0, input.Length, new byte[other.EstimateOutputLength (input.Length)]);
+			Assert.That (encoder.Checksum, Is.EqualTo (other.Checksum), "newline format must not affect checksum");
+			AssertNewLineFormat (encoder, Array.Empty<byte> (), Array.Empty<byte> ());
+		}
+
+		[Test]
+		public void TestEncodeWrapsAtConfiguredLineLength ()
+		{
+			var encoder = new YEncEncoder (60);
+			var input = new byte[61];
+			input.AsSpan ().Fill (23);
+			var output = new byte[encoder.EstimateOutputLength (input.Length)];
+
+			int n = encoder.Flush (input, 0, input.Length, output);
+			var actual = Encoding.ASCII.GetString (output, 0, n);
+
+			Assert.That (actual, Is.EqualTo (new string ('A', 60) + "\r\nA\r\n"));
+		}
+
+		[TestCase (253)]
+		[TestCase (254)]
+		[TestCase (255)]
+		[TestCase (256)]
+		[TestCase (998)]
+		public void TestEncodeWrapsLongLines (int lineLength)
+		{
+			var encoder = new YEncEncoder (lineLength);
+			var input = new byte[(lineLength * 4) + 1];
+
+			// alternate between octets that are escaped (214 + 42 wraps to 0x00) and octets that are not
+			for (int i = 0; i < input.Length; i++)
+				input[i] = (byte) ((i % 3) == 0 ? 214 : 23);
+
+			var output = new byte[encoder.EstimateOutputLength (input.Length)];
+			int n = encoder.Flush (input, 0, input.Length, output);
+			var lines = Encoding.ASCII.GetString (output, 0, n).Split ('\n');
+
+			Assert.That (lines.Length, Is.GreaterThan (4), "line count");
+
+			foreach (var line in lines)
+				Assert.That (line.TrimEnd ('\r').Length, Is.LessThanOrEqualTo (lineLength + 1));
+		}
+		static void AssertEstimateIsSufficient (YEncEncoder encoder, byte[] input, string message)
+		{
+			int estimate = encoder.EstimateOutputLength (input.Length);
+			var output = new byte[estimate + 1024];
+
+			int n = encoder.Flush (input, 0, input.Length, output);
+
+			Assert.That (n, Is.LessThanOrEqualTo (estimate), message);
+		}
+
+		[TestCase (60)]
+		[TestCase (128)]
+		[TestCase (998)]
+		public void TestEstimateOutputLengthWorstCase (int lineLength)
+		{
+			// 214 + 42 wraps to 0x00, which must always be escaped (2 octets per input byte)
+			for (int length = 0; length <= (lineLength * 3) + 1; length++) {
+				var input = new byte[length];
+				input.AsSpan ().Fill (214);
+
+				AssertEstimateIsSufficient (new YEncEncoder (lineLength), input, $"lineLength={lineLength} length={length}");
+
+				// start with a partially filled line from a previous Encode() call
+				for (int prefix = 1; prefix < lineLength; prefix += lineLength - 2) {
+					var encoder = new YEncEncoder (lineLength);
+					var unescaped = new byte[prefix];
+					unescaped.AsSpan ().Fill (23);
+
+					encoder.Encode (unescaped, 0, unescaped.Length, new byte[encoder.EstimateOutputLength (unescaped.Length)]);
+
+					AssertEstimateIsSufficient (encoder, input, $"lineLength={lineLength} prefix={prefix} length={length}");
+				}
+			}
+		}
+
+		[Test]
+		public void TestEncodeIntoExactlyEstimatedBuffer ()
+		{
+			var encoder = new YEncEncoder (60);
+			var input = new byte[59];
+			input.AsSpan ().Fill (214);
+			var output = new byte[encoder.EstimateOutputLength (input.Length)];
+
+			int n = encoder.Flush (input, 0, input.Length, output);
+			var expected = string.Concat (Enumerable.Repeat ("=@", 30)) + "\r\n" + string.Concat (Enumerable.Repeat ("=@", 29)) + "\r\n";
+
+			Assert.That (Encoding.ASCII.GetString (output, 0, n), Is.EqualTo (expected));
+		}
+
+		[TestCase (128)]
+		[TestCase (60)]
+		public void TestEstimateOutputLengthDoesNotOverflow (int maxLineLength)
+		{
+			var encoder = new YEncEncoder (maxLineLength);
+
+			Assert.Throws<ArgumentOutOfRangeException> (() => encoder.EstimateOutputLength (int.MaxValue));
+
+			TestHelper.AssertEstimateOutputLengthDoesNotOverflow (encoder.EstimateOutputLength);
+		}
+	}
+}

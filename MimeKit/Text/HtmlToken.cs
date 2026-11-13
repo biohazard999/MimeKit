@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,12 +68,12 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="output">The output.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="output"/> is <c>null</c>.
+		/// <paramref name="output"/> is <see langword="null"/>.
 		/// </exception>
 		public abstract void WriteTo (TextWriter output);
 
 		/// <summary>
-		/// Returns a <see cref="System.String"/> that represents the current <see cref="HtmlToken"/>.
+		/// Return a <see cref="System.String"/> that represents the current <see cref="HtmlToken"/>.
 		/// </summary>
 		/// <remarks>
 		/// Returns a <see cref="System.String"/> that represents the current <see cref="HtmlToken"/>.
@@ -104,13 +104,13 @@ namespace MimeKit.Text {
 		/// Creates a new <see cref="HtmlCommentToken"/>.
 		/// </remarks>
 		/// <param name="comment">The comment text.</param>
-		/// <param name="bogus"><c>true</c> if the comment is bogus; otherwise, <c>false</c>.</param>
+		/// <param name="bogus"><see langword="true" /> if the comment is bogus; otherwise, <see langword="false" />.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="comment"/> is <c>null</c>.
+		/// <paramref name="comment"/> is <see langword="null"/>.
 		/// </exception>
 		public HtmlCommentToken (string comment, bool bogus = false) : base (HtmlTokenKind.Comment)
 		{
-			if (comment == null)
+			if (comment is null)
 				throw new ArgumentNullException (nameof (comment));
 
 			IsBogusComment = bogus;
@@ -129,12 +129,12 @@ namespace MimeKit.Text {
 		}
 
 		/// <summary>
-		/// Get whether or not the comment is a bogus comment.
+		/// Get whether the comment is a bogus comment.
 		/// </summary>
 		/// <remarks>
-		/// Gets whether or not the comment is a bogus comment.
+		/// Gets whether the comment is a bogus comment.
 		/// </remarks>
-		/// <value><c>true</c> if the comment is bogus; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the comment is bogus; otherwise, <see langword="false" />.</value>
 		public bool IsBogusComment {
 			get; private set;
 		}
@@ -151,11 +151,11 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="output">The output.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="output"/> is <c>null</c>.
+		/// <paramref name="output"/> is <see langword="null"/>.
 		/// </exception>
 		public override void WriteTo (TextWriter output)
 		{
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
 			if (!IsBogusComment) {
@@ -163,9 +163,16 @@ namespace MimeKit.Text {
 				output.Write (Comment);
 				output.Write ("-->");
 			} else {
-				output.Write ('<');
+				// Note: Bogus comments come from "<!" (e.g. "<!DOC>"), "<?" (e.g. "<?xml ...?>") or "</" followed by a character
+				// that cannot start a tag name (e.g. "</ x>"). The leading '?' is part of the comment text in the "<?" case, but
+				// the '/' is not part of the comment text in the "</" case, so it needs to be restored in order for the output
+				// to tokenize as a bogus comment again (e.g. "</<o" must not be written as "<<o>").
 				if (IsBangComment)
-					output.Write ('!');
+					output.Write ("<!");
+				else if (Comment.Length > 0 && Comment[0] == '?')
+					output.Write ('<');
+				else
+					output.Write ("</");
 				output.Write (Comment);
 				output.Write ('>');
 			}
@@ -192,7 +199,7 @@ namespace MimeKit.Text {
 		/// <paramref name="kind"/> is not a valid <see cref="HtmlTokenKind"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="data"/> is <c>null</c>.
+		/// <paramref name="data"/> is <see langword="null"/>.
 		/// </exception>
 		protected HtmlDataToken (HtmlTokenKind kind, string data) : base (kind)
 		{
@@ -204,10 +211,10 @@ namespace MimeKit.Text {
 				break;
 			}
 
-			if (data == null)
+			if (data is null)
 				throw new ArgumentNullException (nameof (data));
 
-			Data = data;
+			content = data;
 		}
 
 		/// <summary>
@@ -218,17 +225,39 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="data">The character data.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="data"/> is <c>null</c>.
+		/// <paramref name="data"/> is <see langword="null"/>.
 		/// </exception>
 		public HtmlDataToken (string data) : base (HtmlTokenKind.Data)
 		{
-			if (data == null)
+			if (data is null)
 				throw new ArgumentNullException (nameof (data));
 
-			Data = data;
+			content = data;
 		}
 
+		/// <summary>
+		/// Initialize a new reusable instance of the <see cref="HtmlDataToken"/> class.
+		/// </summary>
+		/// <remarks>
+		/// Creates a new reusable <see cref="HtmlDataToken"/> whose content is set via SetData.
+		/// </remarks>
+		/// <param name="kind">The kind of character data.</param>
+		/// <param name="reusable">Not used; distinguishes this constructor from the public constructors.</param>
+		internal HtmlDataToken (HtmlTokenKind kind, bool reusable) : base (kind)
+		{
+			content = string.Empty;
+		}
+
+		// Note: This is either a string or, for a reusable token (used internally by HtmlToHtml), a CharBuffer that is reused
+		// for each run of character data in order to avoid allocating a string per token. The string is only created if the
+		// Data property is accessed.
+		object content;
+
 		internal bool EncodeEntities {
+			get; set;
+		}
+
+		internal bool IsDataState {
 			get; set;
 		}
 
@@ -240,7 +269,46 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <value>The character data.</value>
 		public string Data {
-			get; private set;
+			get {
+				if (content is CharBuffer buffer)
+					content = buffer.ToString ();
+
+				return (string) content;
+			}
+		}
+
+		internal void SetData (CharBuffer source)
+		{
+			if (content is not CharBuffer buffer)
+				content = buffer = new CharBuffer (Math.Max (source.Length, 64));
+
+			buffer.CopyFrom (source);
+			EncodeEntities = false;
+			IsDataState = false;
+		}
+
+		internal ReadOnlySpan<char> DataSpan {
+			get { return content is CharBuffer buffer ? buffer.AsSpan () : ((string) content).AsSpan (); }
+		}
+
+		internal void WriteData (TextWriter output, int count)
+		{
+			if (content is CharBuffer buffer) {
+				buffer.WriteTo (output, count);
+				return;
+			}
+
+			var data = (string) content;
+
+			if (count == data.Length) {
+				output.Write (data);
+			} else {
+#if NET6_0_OR_GREATER
+				output.Write (data.AsSpan (0, count));
+#else
+				output.Write (data.Substring (0, count));
+#endif
+			}
 		}
 
 		/// <summary>
@@ -252,24 +320,36 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="output">The output.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="output"/> is <c>null</c>.
+		/// <paramref name="output"/> is <see langword="null"/>.
 		/// </exception>
 		public override void WriteTo (TextWriter output)
 		{
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
+			var span = DataSpan;
+
 			if (!EncodeEntities) {
-				output.Write (Data);
+				// Note: The tokenizer only ends a data-state token with a literal '<' when the following input
+				// begins markup that a browser treats as text (e.g. the first '<' in "<</>c>"). If the markup that
+				// follows gets dropped (e.g. "</>", a filtered comment, or a tag removed by a callback), writing
+				// the '<' verbatim would allow it to combine with the next token to form a new tag, so encode it.
+				if (IsDataState && span.Length > 0 && span[span.Length - 1] == '<') {
+					WriteData (output, span.Length - 1);
+					output.Write ("&lt;");
+					return;
+				}
+
+				WriteData (output, span.Length);
 				return;
 			}
 
-			HtmlUtils.HtmlEncode (output, Data);
+			HtmlUtils.HtmlEncode (output, span);
 		}
 	}
 
 	/// <summary>
-	/// An HTML token constisting of <c>[CDATA[</c>.
+	/// An HTML token consisting of <c>[CDATA[</c>.
 	/// </summary>
 	/// <remarks>
 	/// An HTML token consisting of <c>[CDATA[</c>.
@@ -284,9 +364,13 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="data">The character data.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="data"/> is <c>null</c>.
+		/// <paramref name="data"/> is <see langword="null"/>.
 		/// </exception>
 		public HtmlCDataToken (string data) : base (HtmlTokenKind.CData, data)
+		{
+		}
+
+		internal HtmlCDataToken () : base (HtmlTokenKind.CData, true)
 		{
 		}
 
@@ -299,15 +383,15 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="output">The output.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="output"/> is <c>null</c>.
+		/// <paramref name="output"/> is <see langword="null"/>.
 		/// </exception>
 		public override void WriteTo (TextWriter output)
 		{
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
 			output.Write ("<![CDATA[");
-			output.Write (Data);
+			WriteData (output, DataSpan.Length);
 			output.Write ("]]>");
 		}
 	}
@@ -328,9 +412,13 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="data">The script data.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="data"/> is <c>null</c>.
+		/// <paramref name="data"/> is <see langword="null"/>.
 		/// </exception>
 		public HtmlScriptDataToken (string data) : base (HtmlTokenKind.ScriptData, data)
+		{
+		}
+
+		internal HtmlScriptDataToken () : base (HtmlTokenKind.ScriptData, true)
 		{
 		}
 
@@ -343,14 +431,14 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="output">The output.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="output"/> is <c>null</c>.
+		/// <paramref name="output"/> is <see langword="null"/>.
 		/// </exception>
 		public override void WriteTo (TextWriter output)
 		{
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
-			output.Write (Data);
+			WriteData (output, DataSpan.Length);
 		}
 	}
 
@@ -362,6 +450,8 @@ namespace MimeKit.Text {
 	/// </remarks>
 	public class HtmlTagToken : HtmlToken
 	{
+		HtmlTagId id = (HtmlTagId) (-1);
+
 		/// <summary>
 		/// Initialize a new instance of the <see cref="HtmlTagToken"/> class.
 		/// </summary>
@@ -370,23 +460,22 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="name">The name of the tag.</param>
 		/// <param name="attributes">The attributes.</param>
-		/// <param name="isEmptyElement"><c>true</c> if the tag is an empty element; otherwise, <c>false</c>.</param>
+		/// <param name="isEmptyElement"><see langword="true" /> if the tag is an empty element; otherwise, <see langword="false" />.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="name"/> is <c>null</c>.</para>
+		/// <para><paramref name="name"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="attributes"/> is <c>null</c>.</para>
+		/// <para><paramref name="attributes"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public HtmlTagToken (string name, IEnumerable<HtmlAttribute> attributes, bool isEmptyElement) : base (HtmlTokenKind.Tag)
 		{
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
-			if (attributes == null)
+			if (attributes is null)
 				throw new ArgumentNullException (nameof (attributes));
 
 			Attributes = new HtmlAttributeCollection (attributes);
 			IsEmptyElement = isEmptyElement;
-			Id = name.ToHtmlTagId ();
 			Name = name;
 		}
 
@@ -397,20 +486,20 @@ namespace MimeKit.Text {
 		/// Creates a new <see cref="HtmlTagToken"/>.
 		/// </remarks>
 		/// <param name="name">The name of the tag.</param>
-		/// <param name="isEndTag"><c>true</c> if the tag is an end tag; otherwise, <c>false</c>.</param>
+		/// <param name="isEndTag"><see langword="true" /> if the tag is an end tag; otherwise, <see langword="false" />.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <paramref name="name"/> is <see langword="null"/>.
 		/// </exception>
 		public HtmlTagToken (string name, bool isEndTag) : base (HtmlTokenKind.Tag)
 		{
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
-			Attributes = new HtmlAttributeCollection ();
-			Id = name.ToHtmlTagId ();
 			IsEndTag = isEndTag;
 			Name = name;
 		}
+
+		HtmlAttributeCollection? attributes;
 
 		/// <summary>
 		/// Get the attributes.
@@ -420,7 +509,14 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <value>The attributes.</value>
 		public HtmlAttributeCollection Attributes {
-			get; private set;
+			get { return attributes ?? HtmlAttributeCollection.Empty; }
+			private set { attributes = value; }
+		}
+
+		internal void AddAttribute (HtmlAttribute attribute)
+		{
+			attributes ??= new HtmlAttributeCollection ();
+			attributes.Add (attribute);
 		}
 
 		/// <summary>
@@ -431,27 +527,32 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <value>The HTML tag identifier.</value>
 		public HtmlTagId Id {
-			get; private set;
+			get {
+				if (id == (HtmlTagId) (-1))
+					id = Name.ToHtmlTagId ();
+
+				return id;
+			}
 		}
 
 		/// <summary>
-		/// Get whether or not the tag is an empty element.
+		/// Get whether the tag is an empty element.
 		/// </summary>
 		/// <remarks>
-		/// Gets whether or not the tag is an empty element.
+		/// Gets whether the tag is an empty element.
 		/// </remarks>
-		/// <value><c>true</c> if the tag is an empty element; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the tag is an empty element; otherwise, <see langword="false" />.</value>
 		public bool IsEmptyElement {
 			get; internal set;
 		}
 
 		/// <summary>
-		/// Get whether or not the tag is an end tag.
+		/// Get whether the tag is an end tag.
 		/// </summary>
 		/// <remarks>
-		/// Gets whether or not the tag is an end tag.
+		/// Gets whether the tag is an end tag.
 		/// </remarks>
-		/// <value><c>true</c> if the tag is an end tag; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the tag is an end tag; otherwise, <see langword="false" />.</value>
 		public bool IsEndTag {
 			get; private set;
 		}
@@ -475,11 +576,11 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="output">The output.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="output"/> is <c>null</c>.
+		/// <paramref name="output"/> is <see langword="null"/>.
 		/// </exception>
 		public override void WriteTo (TextWriter output)
 		{
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
 			output.Write ('<');
@@ -487,11 +588,20 @@ namespace MimeKit.Text {
 				output.Write ('/');
 			output.Write (Name);
 			for (int i = 0; i < Attributes.Count; i++) {
+				var name = Attributes[i].Name;
+
+				// Note: If the previous attribute had no value, give it an explicit empty value so that an attribute name
+				// that begins with '=' cannot get reparsed as the previous attribute's value.
+				if (i > 0 && Attributes[i - 1].Value == null && name.Length > 0 && name[0] == '=')
+					output.Write ("=\"\"");
+
 				output.Write (' ');
-				output.Write (Attributes[i].Name);
-				if (Attributes[i].Value != null) {
+				output.Write (name);
+
+				var value = Attributes[i].Value;
+				if (value != null) {
 					output.Write ('=');
-					HtmlUtils.HtmlAttributeEncode (output, Attributes[i].Value);
+					HtmlUtils.HtmlAttributeEncode (output, value);
 				}
 			}
 			if (IsEmptyElement)
@@ -508,8 +618,9 @@ namespace MimeKit.Text {
 	/// </remarks>
 	public class HtmlDocTypeToken : HtmlToken
 	{
-		string publicIdentifier;
-		string systemIdentifier;
+		string? publicIdentifier;
+		string? systemIdentifier;
+		string? name;
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="HtmlDocTypeToken"/> class.
@@ -527,12 +638,12 @@ namespace MimeKit.Text {
 		}
 
 		/// <summary>
-		/// Get whether or not quirks-mode should be forced.
+		/// Get whether quirks-mode should be forced.
 		/// </summary>
 		/// <remarks>
-		/// Gets whether or not quirks-mode should be forced.
+		/// Gets whether quirks-mode should be forced.
 		/// </remarks>
-		/// <value><c>true</c> if quirks-mode should be forced; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if quirks-mode should be forced; otherwise, <see langword="false" />.</value>
 		public bool ForceQuirksMode {
 			get; set;
 		}
@@ -544,8 +655,47 @@ namespace MimeKit.Text {
 		/// Gets or sets the DOCTYPE name.
 		/// </remarks>
 		/// <value>The name.</value>
-		public string Name {
-			get; set;
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="value"/> is empty or contains whitespace, a <c>'&gt;'</c> or a <c>NUL</c> character.
+		/// </exception>
+		public string? Name {
+			get { return name; }
+			set {
+				if (value != null && !IsValidName (value))
+					throw new ArgumentException ("The DOCTYPE name cannot be empty or contain whitespace, '>' or NUL characters.", nameof (value));
+
+				name = value;
+			}
+		}
+
+		static bool IsValidName (string value)
+		{
+			if (value.Length == 0)
+				return false;
+
+			foreach (var c in value) {
+				switch (c) {
+				case '\t': case '\n': case '\f': case '\r': case ' ': case '>': case '\0':
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		static bool IsValidIdentifier (string value)
+		{
+			bool singleQuote = false, doubleQuote = false;
+
+			foreach (var c in value) {
+				switch (c) {
+				case '>': case '\0': return false;
+				case '\'': singleQuote = true; break;
+				case '"': doubleQuote = true; break;
+				}
+			}
+
+			return !(singleQuote && doubleQuote);
 		}
 
 		/// <summary>
@@ -555,12 +705,19 @@ namespace MimeKit.Text {
 		/// Gets or sets the public identifier.
 		/// </remarks>
 		/// <value>The public identifier.</value>
-		public string PublicIdentifier {
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="value"/> contains a <c>'&gt;'</c> or a <c>NUL</c> character, or contains both
+		/// single and double quotes.
+		/// </exception>
+		public string? PublicIdentifier {
 			get { return publicIdentifier; }
 			set {
+				if (value != null && !IsValidIdentifier (value))
+					throw new ArgumentException ("The DOCTYPE public identifier cannot contain '>' or NUL characters, or both single and double quotes.", nameof (value));
+
 				publicIdentifier = value;
 				if (value != null) {
-					if (PublicKeyword == null)
+					if (PublicKeyword is null)
 						PublicKeyword = "PUBLIC";
 				} else {
 					if (systemIdentifier != null)
@@ -575,8 +732,8 @@ namespace MimeKit.Text {
 		/// <remarks>
 		/// Gets the public keyword that was used.
 		/// </remarks>
-		/// <value>The public keyword or <c>null</c> if it wasn't used.</value>
-		public string PublicKeyword {
+		/// <value>The public keyword or <see langword="null"/> if it wasn't used.</value>
+		public string? PublicKeyword {
 			get; internal set;
 		}
 
@@ -587,12 +744,19 @@ namespace MimeKit.Text {
 		/// Gets or sets the system identifier.
 		/// </remarks>
 		/// <value>The system identifier.</value>
-		public string SystemIdentifier {
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="value"/> contains a <c>'&gt;'</c> or a <c>NUL</c> character, or contains both
+		/// single and double quotes.
+		/// </exception>
+		public string? SystemIdentifier {
 			get { return systemIdentifier; }
 			set {
+				if (value != null && !IsValidIdentifier (value))
+					throw new ArgumentException ("The DOCTYPE system identifier cannot contain '>' or NUL characters, or both single and double quotes.", nameof (value));
+
 				systemIdentifier = value;
 				if (value != null) {
-					if (publicIdentifier == null && SystemKeyword == null)
+					if (publicIdentifier is null && SystemKeyword is null)
 						SystemKeyword = "SYSTEM";
 				} else {
 					SystemKeyword = null;
@@ -606,9 +770,27 @@ namespace MimeKit.Text {
 		/// <remarks>
 		/// Gets the system keyword that was used.
 		/// </remarks>
-		/// <value>The system keyword or <c>null</c> if it wasn't used.</value>
-		public string SystemKeyword {
+		/// <value>The system keyword or <see langword="null"/> if it wasn't used.</value>
+		public string? SystemKeyword {
 			get; internal set;
+		}
+
+		// The quote characters that were used to quote the identifiers in the original markup.
+		internal char PublicIdentifierQuote { get; set; } = '"';
+
+		internal char SystemIdentifierQuote { get; set; } = '"';
+
+		static void WriteIdentifier (TextWriter output, string identifier, char quote)
+		{
+			// Note: An identifier cannot contain the quote character that delimits it, so prefer the original
+			// quote character but fall back to whichever quote character the identifier does not contain.
+			if (quote != '\'' || identifier.IndexOf ('\'') != -1)
+				quote = identifier.IndexOf ('"') != -1 ? '\'' : '"';
+
+			output.Write (' ');
+			output.Write (quote);
+			output.Write (identifier);
+			output.Write (quote);
 		}
 
 		/// <summary>
@@ -619,36 +801,34 @@ namespace MimeKit.Text {
 		/// </remarks>
 		/// <param name="output">The output.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="output"/> is <c>null</c>.
+		/// <paramref name="output"/> is <see langword="null"/>.
 		/// </exception>
 		public override void WriteTo (TextWriter output)
 		{
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
 			output.Write ("<!");
 			output.Write (RawTagName);
-			if (Name != null) {
-				output.Write (' ');
-				output.Write (Name);
+
+			// Note: Without a name, a keyword would be parsed as the name, so the identifiers cannot be written.
+			if (name is null) {
+				output.Write ('>');
+				return;
 			}
+
+			output.Write (' ');
+			output.Write (name);
 			if (PublicIdentifier != null) {
 				output.Write (' ');
 				output.Write (PublicKeyword);
-				output.Write (" \"");
-				output.Write (PublicIdentifier);
-				output.Write ('"');
-				if (SystemIdentifier != null) {
-					output.Write (" \"");
-					output.Write (SystemIdentifier);
-					output.Write ('"');
-				}
+				WriteIdentifier (output, PublicIdentifier, PublicIdentifierQuote);
+				if (SystemIdentifier != null)
+					WriteIdentifier (output, SystemIdentifier, SystemIdentifierQuote);
 			} else if (SystemIdentifier != null) {
 				output.Write (' ');
 				output.Write (SystemKeyword);
-				output.Write (" \"");
-				output.Write (SystemIdentifier);
-				output.Write ('"');
+				WriteIdentifier (output, SystemIdentifier, SystemIdentifierQuote);
 			}
 			output.Write ('>');
 		}

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2023 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,6 @@
 // THE SOFTWARE.
 //
 
-using System;
-
-using NUnit.Framework;
-
 using MimeKit.Utils;
 
 namespace UnitTests.Utils {
@@ -39,9 +35,9 @@ namespace UnitTests.Utils {
 		{
 			var comparer = new OptimizedOrdinalIgnoreCaseComparer ();
 
-			Assert.IsFalse (comparer.Equals ("abc", "a"));
-			Assert.IsFalse (comparer.Equals ("abc", "abd"));
-			Assert.IsTrue (comparer.Equals ("abc", "abc"));
+			Assert.That (comparer.Equals ("abc", "a"), Is.False);
+			Assert.That (comparer.Equals ("abc", "abd"), Is.False);
+			Assert.That (comparer.Equals ("abc", "abc"), Is.True);
 		}
 
 		[Test]

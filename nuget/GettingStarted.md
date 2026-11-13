@@ -261,7 +261,7 @@ Will you be my +1?
 
 // create an image attachment for the file located at path
 var attachment = new MimePart ("image", "gif") {
-    Content = new MimeContent (File.OpenRead (path), ContentEncoding.Default),
+    Content = new MimeContent (File.OpenRead (path), ContentEncoding.Unspecified),
     ContentDisposition = new ContentDisposition (ContentDisposition.Attachment),
     ContentTransferEncoding = ContentEncoding.Base64,
     FileName = Path.GetFileName (path)
@@ -352,21 +352,42 @@ builder.Attachments.Add (@"C:\Users\Joey\Documents\party.ics");
 message.Body = builder.ToMessageBody ();
 ```
 
+### Initializing MimeKit's Cryptography Support
+
+As of MimeKit 5.0, MimeKit's S/MIME, PGP/MIME, DKIM, ARC and DMARC support lives in the `MimeKit.Cryptography`
+assembly. In order for the parser to create cryptographic MIME entities such as `MultipartSigned`,
+`MultipartEncrypted` and `ApplicationPkcs7Mime` (instead of a plain `Multipart` or `MimePart`), the
+cryptography module needs to be initialized before any messages are parsed. The best place to do this
+is during your application's startup:
+
+```csharp
+using MimeKit.Cryptography;
+
+CryptographyModule.Initialize ();
+```
+
+Note: The cryptography module is also initialized automatically the first time the `CryptographyContext`
+class is used (for example, when calling `CryptographyContext.Register ()`), and it is safe to call
+`CryptographyModule.Initialize ()` more than once.
+
 ### Preparing to use MimeKit's S/MIME support
 
 Before you can begin using MimeKit's S/MIME support, you will need to decide which
-database to use for certificate storage.
+S/MIME implementation to use.
 
-If you are targetting any of the Xamarin platforms (or Linux), you won't need to do
-anything (although you certainly can if you want to) because, by default, I've
-configured MimeKit to use the Mono.Data.Sqlite binding to SQLite.
+If your application runs exclusively on Windows, you'll probably want to use the
+`WindowsSecureMimeContext` backend which is based on the Windows Certificate
+Store and uses Microsoft's built-in S/MIME implementation.
 
-If you are on any of the Windows platforms, however, you'll need to decide on whether
-to use one of the conveniently available backends such as the `WindowsSecureMimeContext`
-backend or the `TemporarySecureMimeContext` backend or else you'll need to pick a
-System.Data provider such as
-[System.Data.SQLite](https://www.nuget.org/packages/System.Data.SQLite) to use with
-the `DefaultSecureMimeContext` base class.
+On the other hand, if your application or service runs on other platforms such as Linux,
+macOS, iOS, or Android or is expected to run cross-platform, then you will need to use
+one of the BouncyCastle-based S/MIME context classes:
+
+- The `TemporarySecureMimeContext` backend uses an in-memory certificate store and will
+  require your application to load all of the certificates it expects to use into the
+  context before it can be used.
+- The `DefaultSecureMimeContext` backend is designed to use a SQL database for certificate
+  storage such as [System.Data.SQLite](https://www.nuget.org/packages/System.Data.SQLite).
 
 If you opt for using the `DefaultSecureMimeContext` backend, you'll need to implement
 your own `DefaultSecureMimeContext` subclass. Luckily, it's very simple to do.
@@ -377,7 +398,7 @@ Assuming you've chosen System.Data.SQLite, here's how you'd implement your own
 using System.Data.SQLite;
 using MimeKit.Cryptography;
 
-using MyAppNamespace {
+namespace MyAppNamespace {
     class MySecureMimeContext : DefaultSecureMimeContext
     {
         public MySecureMimeContext () : base (OpenDatabase ("C:\\wherever\\certdb.sqlite"))
@@ -695,138 +716,99 @@ As you can see, it's fairly straight forward.
 ### Verifying DKIM Signatures
 
 Verifying DKIM signatures is slightly more involved than creating them because you'll need to write a custom
-implementation of the `IDkimPublicKeyLocator` interface. Typically, this custom class will need to download
-the DKIM public keys via your chosen DNS library as they are requested by MimeKit during verification of
-DKIM signature headers.
+implementation of the `IDnsResolver` interface. Typically, this custom class will use your chosen DNS library
+to look up the DNS TXT records requested by MimeKit during verification of DKIM signature headers. MimeKit
+takes care of parsing the DKIM public key records, so all your resolver needs to do is return the raw TXT
+record strings along with whether the domain exists or the lookup failed.
 
-Once you've implemented a custom `IDkimPublicKeyLocator`, verifying signatures is fairly trivial. Most of the work
-needed will be in the `IDkimPublicKeyLocator` implementation. As an example of how to implement this interface,
-here is one possible implementation using the [Heijden.DNS](http://www.nuget.org/packages/Heijden.Dns/) library:
+Once you've implemented a custom `IDnsResolver`, verifying signatures is fairly trivial. Most of the work
+needed will be in the `IDnsResolver` implementation. As an example of how to implement this interface,
+here is one possible implementation using the [DnsClient](https://www.nuget.org/packages/DnsClient/) library:
 
 ```csharp
 using System;
 using System.IO;
-using System.Text;
+using System.Net;
+using System.Linq;
 using System.Threading;
-using System.Collections.Generic;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
 
-using Heijden.DNS;
-
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.OpenSsl;
+using DnsClient;
 
 using MimeKit;
 using MimeKit.Cryptography;
 
-namespace DkimVerifier
+namespace DkimVerifierExample
 {
-	class DkimPublicKeyLocator : IDkimPublicKeyLocator
+	class DnsResolver : IDnsResolver
 	{
-		readonly Dictionary<string, AsymmetricKeyParameter> cache;
-		readonly Resolver resolver;
+		readonly ConcurrentDictionary<string, DnsTxtResponse> cache;
+		readonly LookupClient dnsClient;
 
-		public DkimPublicKeyLocator ()
+		public DnsResolver ()
 		{
-			cache = new Dictionary<string, AsymmetricKeyParameter> ();
+			cache = new ConcurrentDictionary<string, DnsTxtResponse> (StringComparer.OrdinalIgnoreCase);
 
-			resolver = new Resolver ("8.8.8.8") {
-				TransportType = TransportType.Udp,
+			var options = new LookupClientOptions (IPAddress.Parse ("8.8.8.8")) {
 				UseCache = true,
 				Retries = 3
 			};
+
+			dnsClient = new LookupClient (options);
 		}
 
-		AsymmetricKeyParameter DnsLookup (string domain, string selector, CancellationToken cancellationToken)
+		DnsTxtResponse GetTxtResponse (string domain, IDnsQueryResponse response)
 		{
-			var query = selector + "._domainkey." + domain;
-			AsymmetricKeyParameter pubkey;
+			DnsTxtResponse result;
 
-			// checked if we've already fetched this key
-			if (cache.TryGetValue (query, out pubkey))
-				return pubkey;
+			if (response.HasError) {
+				if (response.Header.ResponseCode == DnsHeaderResponseCode.NotExistentDomain)
+					result = new DnsTxtResponse (DnsQueryStatus.NonExistentDomain);
+				else
+					return new DnsTxtResponse (DnsQueryStatus.TemporaryFailure);
+			} else {
+				// Each TXT record may be split into multiple character-strings which must be concatenated.
+				// Note: separate TXT records must *not* be concatenated together.
+				var records = response.Answers.TxtRecords ().Select (record => string.Concat (record.Text));
 
-			// make a DNS query
-			var response = resolver.Query (query, QType.TXT);
-			var builder = new StringBuilder ();
-
-			// combine the TXT records into 1 string buffer
-			foreach (var record in response.RecordsTXT) {
-				foreach (var text in record.TXT)
-					builder.Append (text);
+				result = new DnsTxtResponse (records);
 			}
 
-			var txt = builder.ToString ();
-			string k = null, p = null;
-			int index = 0;
+			// only cache definitive answers
+			cache[domain] = result;
 
-			// parse the response (will look something like: "k=rsa; p=<base64>")
-			while (index < txt.Length) {
-				while (index < txt.Length && char.IsWhiteSpace (txt[index]))
-					index++;
-
-				if (index == txt.Length)
-					break;
-
-				// find the end of the key
-				int startIndex = index;
-				while (index < txt.Length && txt[index] != '=')
-					index++;
-
-				if (index == txt.Length)
-					break;
-
-				var key = txt.Substring (startIndex, index - startIndex);
-
-				// skip over the '='
-				index++;
-
-				// find the end of the value
-				startIndex = index;
-				while (index < txt.Length && txt[index] != ';')
-					index++;
-
-				var value = txt.Substring (startIndex, index - startIndex);
-
-				switch (key) {
-				case "k": k = value; break;
-				case "p": p = value; break;
-				}
-
-				// skip over the ';'
-				index++;
-			}
-
-			if (k != null && p != null) {
-				var data = "-----BEGIN PUBLIC KEY-----\r\n" + p + "\r\n-----END PUBLIC KEY-----\r\n";
-				var rawData = Encoding.ASCII.GetBytes (data);
-
-				using (var stream = new MemoryStream (rawData, false)) {
-					using (var reader = new StreamReader (stream)) {
-						var pem = new PemReader (reader);
-
-						pubkey = pem.ReadObject () as AsymmetricKeyParameter;
-
-						if (pubkey != null) {
-							cache.Add (query, pubkey);
-
-							return pubkey;
-						}
-					}
-				}
-			}
-
-			throw new Exception (string.Format ("Failed to look up public key for: {0}", domain));
+			return result;
 		}
 
-		public AsymmetricKeyParameter LocatePublicKey (string methods, string domain, string selector, CancellationToken cancellationToken = default (CancellationToken))
+		public DnsTxtResponse QueryTxt (string domain, CancellationToken cancellationToken = default)
 		{
-			var methodList = methods.Split (new char[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
-			for (int i = 0; i < methodList.Length; i++) {
-				if (methodList[i] == "dns/txt")
-					return DnsLookup (domain, selector, cancellationToken);
-			}
+			// check if we've already fetched this record
+			if (cache.TryGetValue (domain, out var cached))
+				return cached;
 
-			throw new NotSupportedException (string.Format ("{0} does not include any suported lookup methods.", methods));
+			try {
+				var response = dnsClient.Query (domain, QueryType.TXT, QueryClass.IN);
+
+				return GetTxtResponse (domain, response);
+			} catch (DnsResponseException) {
+				return new DnsTxtResponse (DnsQueryStatus.TemporaryFailure);
+			}
+		}
+
+		public async Task<DnsTxtResponse> QueryTxtAsync (string domain, CancellationToken cancellationToken = default)
+		{
+			// check if we've already fetched this record
+			if (cache.TryGetValue (domain, out var cached))
+				return cached;
+
+			try {
+				var response = await dnsClient.QueryAsync (domain, QueryType.TXT, QueryClass.IN, cancellationToken).ConfigureAwait (false);
+
+				return GetTxtResponse (domain, response);
+			} catch (DnsResponseException) {
+				return new DnsTxtResponse (DnsQueryStatus.TemporaryFailure);
+			}
 		}
 	}
 
@@ -846,7 +828,8 @@ namespace DkimVerifier
 				}
 			}
 
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new DnsResolver ();
+			var verifier = new DkimVerifier (resolver);
 
 			for (int i = 0; i < args.Length; i++) {
 				if (!File.Exists (args[i])) {
@@ -857,25 +840,34 @@ namespace DkimVerifier
 				Console.Write ("{0} -> ", args[i]);
 
 				var message = MimeMessage.Load (args[i]);
-				var index = message.Headers.IndexOf (HeaderId.DkimSignature);
+				// verify each of the DKIM-Signature headers (up to verifier.MaxSignatures)
+				var results = verifier.Verify (message);
 
-				if (index == -1) {
+				if (results.Length == 0) {
 					Console.WriteLine ("NO SIGNATURE");
 					continue;
 				}
 
-				var dkim = message.Headers[index];
+				Console.WriteLine ();
 
-				if (message.Verify (dkim, locator)) {
-					// the DKIM-Signature header is valid!
-					Console.ForegroundColor = ConsoleColor.Green;
-					Console.WriteLine ("VALID");
+				foreach (var result in results) {
+					Console.Write ("  d={0}; s={1} -> ", result.Domain, result.Selector);
+
+					if (result.Status == DkimSignatureStatus.Pass) {
+						// the DKIM-Signature header is valid!
+						Console.ForegroundColor = ConsoleColor.Green;
+						Console.WriteLine ("PASS");
+					} else {
+						// the DKIM-Signature header is invalid (Fail), uses a disallowed algorithm or key (Policy),
+						// could not be verified due to a DNS error (TempError) or is malformed (PermError).
+						Console.ForegroundColor = ConsoleColor.Red;
+						Console.WriteLine ("{0} ({1})", result.Status.ToString ().ToUpperInvariant (), result.Reason);
+					}
+
 					Console.ResetColor ();
-				} else {
-					// the DKIM-Signature is invalid!
-					Console.ForegroundColor = ConsoleColor.Red;
-					Console.WriteLine ("INVALID");
-					Console.ResetColor ();
+
+					// Note: result.ToAuthenticationMethodResult () can be used to add the result to an
+					// Authentication-Results header.
 				}
 			}
 		}
@@ -891,6 +883,46 @@ namespace DkimVerifier
 }
 ```
 
+### Verifying DMARC
+
+The `DmarcVerifier` determines whether a message's author domain (the domain in the `From` header)
+was authenticated by an aligned DKIM signature or SPF check, and which policy the domain owner has
+requested for messages that fail. It uses the same `IDnsResolver` interface as the `DkimVerifier`
+to discover the DMARC policy and determine Organizational Domains, so no Public Suffix List is needed.
+
+MimeKit does not implement SPF, so you will need to supply the result of your own SPF check of the
+`MAIL FROM` (or `HELO`) domain. If you have not already verified the DKIM signatures, the
+`DmarcVerifier` will do it for you using its `DkimVerifier` property.
+
+```csharp
+var resolver = new DnsResolver (); // from the DKIM example above
+var verifier = new DmarcVerifier (resolver);
+
+// The result of an SPF check performed by your SMTP server or a third-party SPF library.
+var spf = new SpfCheckResult (SpfStatus.Pass, "bounces.example.com");
+
+var result = await verifier.VerifyAsync (message, spf);
+
+Console.WriteLine ("DMARC result for {0}: {1}", result.AuthorDomain, result.Status);
+
+if (result.Status == DmarcStatus.Fail) {
+	// result.Policy is the policy requested by the domain owner (already adjusted for the
+	// sp=, np= and t= tags): None, Quarantine or Reject. The final decision is up to you.
+	Console.WriteLine ("Requested policy: {0}", result.Policy);
+}
+
+// result.Errors provides additional diagnostics, and the result can be added to an
+// Authentication-Results header using result.ToAuthenticationMethodResult ().
+```
+
+If you have already verified the DKIM signatures, you can pass those results to the `DmarcVerifier`
+to avoid verifying them twice:
+
+```csharp
+var dkimResults = await verifier.DkimVerifier.VerifyAsync (message);
+var result = await verifier.VerifyAsync (message, dkimResults, spf);
+```
+
 ## Donate
 
 MimeKit is a personal open source project that I have put thousands of hours into perfecting with the
@@ -900,7 +932,7 @@ Donating helps pay for things such as web hosting, domain registration and licen
 such as a performance profiler, memory profiler, a static code analysis tool, and more. It also helps
 motivate me to continue working on the project.
 
-<a href="https://paypal.me/pools/c/857bnxBTXg" _target="blank"><img alt="Click here to lend your support to MimeKit by making a donation!" src="https://www.paypal.com/en_US/i/btn/x-click-but21.gif"></a>
+<a href="https://github.com/sponsors/jstedfast" _target="blank"><img alt="Click here to lend your support to MimeKit by making a donation!" src="https://www.paypal.com/en_US/i/btn/x-click-but21.gif"></a>
 
 ## Reporting Bugs
 

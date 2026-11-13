@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,8 @@ using System;
 using System.IO;
 using System.Text;
 
+using MimeKit.Utils;
+
 namespace MimeKit.Text {
 	/// <summary>
 	/// A flowed text to text converter.
@@ -35,6 +37,9 @@ namespace MimeKit.Text {
 	/// <remarks>
 	/// Unwraps the flowed text format described in rfc3676.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\TextConverterExamples.cs" region="FlowedToText"/>
+	/// </example>
 	public class FlowedToText : TextConverter
 	{
 		/// <summary>
@@ -76,15 +81,18 @@ namespace MimeKit.Text {
 		/// <para>Gets or sets whether the trailing space on a wrapped line should be deleted.</para>
 		/// <para>The flowed text format defines a Content-Type parameter called "delsp" which can
 		/// have a value of "yes" or "no". If the parameter exists and the value is "yes", then
-		/// <see cref="DeleteSpace"/> should be set to <c>true</c>, otherwise <see cref="DeleteSpace"/>
-		/// should be set to <c>false</c>.</para>
+		/// <see cref="DeleteSpace"/> should be set to <see langword="true" />, otherwise <see cref="DeleteSpace"/>
+		/// should be set to <see langword="false" />.</para>
 		/// </remarks>
-		/// <value><c>true</c> if the trailing space on a wrapped line should be deleted; otherwise, <c>false</c>.</value>
+		/// <example>
+		/// <code language="c#" source="Examples\TextConverterExamples.cs" region="FlowedToText"/>
+		/// </example>
+		/// <value><see langword="true" /> if the trailing space on a wrapped line should be deleted; otherwise, <see langword="false" />.</value>
 		public bool DeleteSpace {
 			get; set;
 		}
 
-		static string Unquote (string line, out int quoteDepth)
+		static ReadOnlySpan<char> Unquote (ReadOnlySpan<char> line, out int quoteDepth)
 		{
 			int index = 0;
 
@@ -101,7 +109,7 @@ namespace MimeKit.Text {
 			if (index > 0 && index < line.Length && line[index] == ' ')
 				index++;
 
-			return index > 0 ? line.Substring (index) : line;
+			return index > 0 ? line.Slice (index) : line;
 		}
 
 		/// <summary>
@@ -115,32 +123,31 @@ namespace MimeKit.Text {
 		/// <param name="reader">The text reader.</param>
 		/// <param name="writer">The text writer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="reader"/> is <c>null</c>.</para>
+		/// <para><paramref name="reader"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="writer"/> is <c>null</c>.</para>
+		/// <para><paramref name="writer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public override void Convert (TextReader reader, TextWriter writer)
 		{
-			StringBuilder para = new StringBuilder ();
+			var para = new StringBuilder ();
 			int paraQuoteDepth = -1;
-			int quoteDepth;
-			string line;
+			string? line;
 
-			if (reader == null)
+			if (reader is null)
 				throw new ArgumentNullException (nameof (reader));
 
-			if (writer == null)
+			if (writer is null)
 				throw new ArgumentNullException (nameof (writer));
 
 			if (!string.IsNullOrEmpty (Header))
 				writer.Write (Header);
 
 			while ((line = reader.ReadLine ()) != null) {
-				line = Unquote (line, out quoteDepth);
+				var unquoted = Unquote (line.AsSpan (), out int quoteDepth);
 
 				// if there is a leading space, it was stuffed
-				if (quoteDepth == 0 && line.Length > 0 && line[0] == ' ')
-					line = line.Substring (1);
+				if (quoteDepth == 0 && unquoted.Length > 0 && unquoted[0] == ' ')
+					unquoted = unquoted.Slice (1);
 
 				if (paraQuoteDepth == -1) {
 					paraQuoteDepth = quoteDepth;
@@ -155,9 +162,9 @@ namespace MimeKit.Text {
 					para.Length = 0;
 				}
 
-				para.Append (line);
+				para.Append (unquoted);
 
-				if (line.Length == 0 || line[line.Length - 1] != ' ') {
+				if (unquoted.Length == 0 || unquoted[unquoted.Length - 1] != ' ') {
 					// when a line does not end with a space, then the paragraph has ended
 					if (paraQuoteDepth > 0)
 						writer.Write (new string ('>', paraQuoteDepth) + " ");
@@ -168,6 +175,13 @@ namespace MimeKit.Text {
 					// Note: lines ending with a space mean that the next line is a continuation
 					para.Length--;
 				}
+			}
+
+			// Flush any remaining paragraph text.
+			if (para.Length > 0) {
+				if (paraQuoteDepth > 0)
+					writer.Write (new string ('>', paraQuoteDepth) + " ");
+				writer.Write (para);
 			}
 
 			if (!string.IsNullOrEmpty (Footer))

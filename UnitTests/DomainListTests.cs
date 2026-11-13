@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +24,7 @@
 // THE SOFTWARE.
 //
 
-using System;
-
-using NUnit.Framework;
+using System.Collections;
 
 using MimeKit;
 
@@ -36,9 +34,7 @@ namespace UnitTests {
 	{
 		static void AssertParseFailure (string text)
 		{
-			DomainList route;
-
-			Assert.IsFalse (DomainList.TryParse (text, out route), "DomainList.TryParse(string)");
+			Assert.That (DomainList.TryParse (text, out _), Is.False, "DomainList.TryParse(string)");
 		}
 
 		static void AssertParse (string text, DomainList expected)
@@ -46,14 +42,14 @@ namespace UnitTests {
 			DomainList route;
 			int index = 0;
 
-			Assert.IsTrue (DomainList.TryParse (text, out route), "DomainList.TryParse(string)");
-			Assert.IsFalse (route.IsReadOnly, "IsReadOnly");
-			Assert.AreEqual (expected.Count, route.Count, "Count");
+			Assert.That (DomainList.TryParse (text, out route), Is.True, "DomainList.TryParse(string)");
+			Assert.That (route.IsReadOnly, Is.False, "IsReadOnly");
+			Assert.That (route.Count, Is.EqualTo (expected.Count), "Count");
 
 			foreach (var domain in expected) {
-				Assert.AreEqual (index, route.IndexOf (domain), "IndexOf");
-				Assert.IsTrue (route.Contains (domain), "Contains");
-				Assert.AreEqual (expected[index], route[index]);
+				Assert.That (route.IndexOf (domain), Is.EqualTo (index), "IndexOf");
+				Assert.That (route.Contains (domain), Is.True, "Contains");
+				Assert.That (route[index], Is.EqualTo (expected[index]));
 				index++;
 			}
 		}
@@ -67,7 +63,7 @@ namespace UnitTests {
 			Assert.Throws<ArgumentNullException> (() => list.Add (null));
 			Assert.Throws<ArgumentNullException> (() => list.Contains (null));
 			Assert.Throws<ArgumentNullException> (() => list.CopyTo (null, 0));
-			Assert.Throws<ArgumentOutOfRangeException> (() => list.CopyTo (new string[0], -1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => list.CopyTo (Array.Empty<string> (), -1));
 			Assert.Throws<ArgumentNullException> (() => list.IndexOf (null));
 			Assert.Throws<ArgumentOutOfRangeException> (() => list.Insert (-1, "item"));
 			Assert.Throws<ArgumentNullException> (() => list.Insert (0, null));
@@ -81,51 +77,84 @@ namespace UnitTests {
 		{
 			var list = new DomainList ();
 
-			Assert.IsFalse (list.IsReadOnly);
-			Assert.AreEqual (0, list.Count, "Initial count");
+			Assert.That (list.IsReadOnly, Is.False);
+			Assert.That (list.Count, Is.EqualTo (0), "Initial count");
 
 			list.Add ("domain2");
 
-			Assert.AreEqual (1, list.Count);
-			Assert.AreEqual ("domain2", list[0]);
+			Assert.That (list.Count, Is.EqualTo (1));
+			Assert.That (list[0], Is.EqualTo ("domain2"));
 
 			list.Insert (0, "domain0");
 			list.Insert (1, "domain1");
 
-			Assert.AreEqual (3, list.Count);
-			Assert.AreEqual ("domain0", list[0]);
-			Assert.AreEqual ("domain1", list[1]);
-			Assert.AreEqual ("domain2", list[2]);
+			Assert.That (list.Count, Is.EqualTo (3));
+			Assert.That (list[0], Is.EqualTo ("domain0"));
+			Assert.That (list[1], Is.EqualTo ("domain1"));
+			Assert.That (list[2], Is.EqualTo ("domain2"));
 
-			Assert.IsTrue (list.Contains ("domain1"), "Contains");
-			Assert.AreEqual (1, list.IndexOf ("domain1"), "IndexOf");
+			Assert.That (list.Contains ("domain1"), Is.True, "Contains");
+			Assert.That (list.IndexOf ("domain1"), Is.EqualTo (1), "IndexOf");
 
 			var array = new string[list.Count];
 			list.CopyTo (array, 0);
 			list.Clear ();
 
-			Assert.AreEqual (0, list.Count);
+			Assert.That (list.Count, Is.EqualTo (0));
 
 			foreach (var domain in array)
 				list.Add (domain);
 
-			Assert.AreEqual (array.Length, list.Count);
+			Assert.That (list.Count, Is.EqualTo (array.Length));
 
-			Assert.IsFalse (list.Remove ("not-in-the-list"));
-			Assert.IsTrue (list.Remove ("domain2"));
-			Assert.AreEqual (2, list.Count);
-			Assert.AreEqual ("domain0", list[0]);
-			Assert.AreEqual ("domain1", list[1]);
+			Assert.That (list.Remove ("not-in-the-list"), Is.False);
+			Assert.That (list.Remove ("domain2"), Is.True);
+			Assert.That (list.Count, Is.EqualTo (2));
+			Assert.That (list[0], Is.EqualTo ("domain0"));
+			Assert.That (list[1], Is.EqualTo ("domain1"));
 
 			list.RemoveAt (0);
 
-			Assert.AreEqual (1, list.Count);
-			Assert.AreEqual ("domain1", list[0]);
+			Assert.That (list.Count, Is.EqualTo (1));
+			Assert.That (list[0], Is.EqualTo ("domain1"));
 
 			list[0] = "domain";
 
-			Assert.AreEqual (1, list.Count);
-			Assert.AreEqual ("domain", list[0]);
+			Assert.That (list.Count, Is.EqualTo (1));
+			Assert.That (list[0], Is.EqualTo ("domain"));
+
+			list[0] = "domain";
+
+			Assert.That (list[0], Is.EqualTo ("domain"));
+		}
+
+		[Test]
+		public void TestNonGenericEnumerator ()
+		{
+			var list = new DomainList (new [] { "domain1", "domain2" });
+			var enumerator = ((IEnumerable) list).GetEnumerator ();
+
+			Assert.That (enumerator.MoveNext (), Is.True, "MoveNext #1");
+			Assert.That (enumerator.Current, Is.EqualTo ("domain1"), "Current #1");
+			Assert.That (enumerator.MoveNext (), Is.True, "MoveNext #2");
+			Assert.That (enumerator.Current, Is.EqualTo ("domain2"), "Current #2");
+			Assert.That (enumerator.MoveNext (), Is.False, "MoveNext #3");
+		}
+
+		[Test]
+		public void TestEncodeIdnDomains ()
+		{
+			var mailbox = new MailboxAddress ("", "user@example.com") {
+				Route = {
+					"bücher.example",
+					"example.net"
+				}
+			};
+			var options = FormatOptions.Default.Clone ();
+
+			options.International = false;
+
+			Assert.That (mailbox.ToString (options, true), Is.EqualTo ("<@xn--bcher-kva.example,@example.net:user@example.com>"));
 		}
 
 		[Test]
@@ -165,6 +194,21 @@ namespace UnitTests {
 		}
 
 		[Test]
+		public void TestParseIncompleteRouteThrows ()
+		{
+			var buffer = new byte[] { (byte) '@' };
+			int index = 0;
+
+			Assert.Throws<ParseException> (() => DomainList.TryParse (buffer, ref index, buffer.Length, true, out _));
+		}
+
+		[Test]
+		public void TestParseUnterminatedCommentAfterDomain ()
+		{
+			AssertParseFailure ("@example.com (unterminated");
+		}
+
+		[Test]
 		public void TestParseEmptyDomains ()
 		{
 			var expected = new DomainList (new [] { "domain1", "domain2" });
@@ -173,14 +217,78 @@ namespace UnitTests {
 		}
 
 		[Test]
+		public void TestParseWhiteSpaceDomains ()
+		{
+			var expected = new DomainList (new [] { "domain1", "domain2" });
+
+			// Note: U+2008 (PUNCTUATION SPACE) and U+3000 (IDEOGRAPHIC SPACE) are parsed as atom characters but are whitespace.
+			AssertParse ("@domain1,@\u2008,@\u3000\u2008@domain2", expected);
+		}
+
+		[Test]
+		public void TestParseMailboxWithWhiteSpaceRouteDomain ()
+		{
+			var options = FormatOptions.Default.Clone ();
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			Assert.That (MailboxAddress.TryParse ("<@route1,@\u2008,@route2:user@example.com>", out var mailbox), Is.True, "TryParse");
+			Assert.That (mailbox.Route.ToArray (), Is.EqualTo (new [] { "route1", "route2" }), "Route");
+
+			var encoded = mailbox.ToString (options, true);
+
+			Assert.That (MailboxAddress.TryParse (encoded, out var reparsed), Is.True, "Reparse");
+			Assert.That (reparsed.Route.ToArray (), Is.EqualTo (mailbox.Route.ToArray ()), "Reparsed route");
+			Assert.That (reparsed.ToString (options, true), Is.EqualTo (encoded), "Round trip");
+		}
+
+		[Test]
 		public void TestToString ()
 		{
-			var route = new DomainList ();
-			route.Add ("route1");
-			route.Add ("  \t\t ");
-			route.Add ("route2");
+			var route = new DomainList {
+				"route1",
+				"route2"
+			};
 
-			Assert.AreEqual ("@route1,@route2", route.ToString ());
+			Assert.That (route.ToString (), Is.EqualTo ("@route1,@route2"));
+		}
+
+		[TestCase ("localhost")]
+		[TestCase ("example.com")]
+		[TestCase ("b\u00fccher.example")]
+		[TestCase ("xn--bcher-kva.example")]
+		[TestCase ("mail_host.example")]
+		[TestCase ("[127.0.0.1]")]
+		[TestCase ("[IPv6:2001:db8::1]")]
+		[TestCase ("[opaque-literal]")]
+		[TestCase ("[]")]
+		[TestCase ("\ud83d\ude00.example")]
+		public void TestValidDomains (string domain)
+		{
+			var list = new DomainList (new[] { domain });
+
+			list.Add (domain);
+			list.Insert (0, domain);
+			list[1] = "other.example";
+			list[1] = domain;
+			Assert.That (list.ToArray (), Is.EqualTo (new[] { domain, domain, domain }));
+		}
+
+		[Test]
+		public void TestParseAndCloneRecoveredDomain ()
+		{
+			const string domain = "exam\u2008ple.com";
+			Assert.That (DomainList.TryParse ("@" + domain, out var route), Is.True);
+			Assert.That (route[0], Is.EqualTo (domain));
+			Assert.Throws<ArgumentException> (() => new DomainList (route));
+
+			var mailbox = MailboxAddress.Parse ("<@" + domain + ":user@example.com>");
+			var clone = (MailboxAddress) mailbox.Clone ();
+
+			Assert.That (clone.Route.ToArray (), Is.EqualTo (new[] { domain }));
+			Assert.That (clone.ToString (), Is.EqualTo (mailbox.ToString ()));
+			clone.Route[0] = "other.example";
+			Assert.That (mailbox.Route[0], Is.EqualTo (domain));
 		}
 	}
 }

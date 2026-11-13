@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,11 +35,14 @@ namespace MimeKit.Text {
 	/// </remarks>
 	public partial class HtmlEntityDecoder
 	{
+		const int MaxCodePoint = 0x10FFFF;
+
 		readonly char[] pushed;
 		readonly int[] states;
+		int numericValue;
 		bool semicolon;
 		bool numeric;
-		byte digits;
+		bool digits;
 		byte xbase;
 		int index;
 
@@ -61,14 +64,21 @@ namespace MimeKit.Text {
 
 			if (xbase == 0) {
 				if (c == 'X' || c == 'x') {
-					states[index] = 0;
-					pushed[index] = c;
+					pushed[index++] = c;
 					xbase = 16;
-					index++;
 					return true;
 				}
 
 				xbase = 10;
+			}
+
+			if (c == ';') {
+				if (!digits)
+					return false;
+
+				semicolon = true;
+				AppendNumeric (c);
+				return true;
 			}
 
 			if (c <= '9') {
@@ -77,9 +87,9 @@ namespace MimeKit.Text {
 
 				v = c - '0';
 			} else if (xbase == 16) {
-				if (c >= 'a') {
+				if (c >= 'a' && c <= 'f') {
 					v = (c - 'a') + 10;
-				} else if (c >= 'A') {
+				} else if (c >= 'A' && c <= 'F') {
 					v = (c - 'A') + 10;
 				} else {
 					return false;
@@ -88,25 +98,24 @@ namespace MimeKit.Text {
 				return false;
 			}
 
-			if (v >= (int) xbase)
-				return false;
+			// Per the HTML specification, a numeric character reference consumes every digit no matter how many
+			// there are. Saturate just above the maximum code point so that the value cannot overflow and is
+			// still recognized as out-of-range when it is decoded.
+			if (numericValue <= MaxCodePoint)
+				numericValue = Math.Min ((numericValue * xbase) + v, MaxCodePoint + 1);
 
-			int state = states[index - 1];
-
-			// check for overflow
-			if (state > int.MaxValue / xbase)
-				return false;
-
-			if (state == int.MaxValue / xbase && v > int.MaxValue % xbase)
-				return false;
-
-			state = (state * xbase) + v;
-			states[index] = state;
-			pushed[index] = c;
-			digits++;
-			index++;
+			AppendNumeric (c);
+			digits = true;
 
 			return true;
+		}
+
+		void AppendNumeric (char c)
+		{
+			// Only the leading characters of an arbitrarily long run of digits are retained. The raw text is
+			// only ever needed when no digits were consumed (e.g. "&#x"), in which case it is always short.
+			if (index < MaxEntityLength)
+				pushed[index++] = c;
 		}
 
 		/// <summary>
@@ -116,7 +125,7 @@ namespace MimeKit.Text {
 		/// <para>Pushes the specified character into the HTML entity decoder.</para>
 		/// <para>The first character pushed MUST be the '&amp;' character.</para>
 		/// </remarks>
-		/// <returns><c>true</c> if the character was accepted; otherwise, <c>false</c>.</returns>
+		/// <returns><see langword="true" /> if the character was accepted; otherwise, <see langword="false" />.</returns>
 		/// <param name="c">The character.</param>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="c"/> is the first character being pushed and was not the '&amp;' character.
@@ -136,6 +145,9 @@ namespace MimeKit.Text {
 				return true;
 			}
 
+			if (numeric)
+				return PushNumericEntity (c);
+
 			if (index + 1 > MaxEntityLength)
 				return false;
 
@@ -147,30 +159,22 @@ namespace MimeKit.Text {
 				return true;
 			}
 
+			if (!PushNamedEntity (c))
+				return false;
+
 			semicolon = c == ';';
 
-			if (numeric) {
-				if (c == ';') {
-					states[index] = states[index - 1];
-					pushed[index] = ';';
-					index++;
-					return true;
-				}
-
-				return PushNumericEntity (c);
-			}
-
-			return PushNamedEntity (c);
+			return true;
 		}
 
+		// 13.2.5.80 Numeric character reference end state
 		string GetNumericEntityValue ()
 		{
-			if (digits == 0 || !semicolon)
+			if (!digits)
 				return new string (pushed, 0, index);
 
-			int state = states[index - 1];
+			int state = numericValue;
 
-			// the following states are parse errors
 			switch (state) {
 			case 0x00: return "\uFFFD"; // REPLACEMENT CHARACTER
 			case 0x80: return "\u20AC"; // EURO SIGN (€)
@@ -194,33 +198,125 @@ namespace MimeKit.Text {
 			case 0x96: return "\u2013"; // EN DASH (–)
 			case 0x97: return "\u2014"; // EM DASH (—)
 			case 0x98: return "\u02DC"; // SMALL TILDE (˜)
-			case 0x99: return "\u2122"; // TRADE MARK SIGN (™)
+			case 0x99: return "\u2122"; // TRADEMARK SIGN (™)
 			case 0x9A: return "\u0161"; // LATIN SMALL LETTER S WITH CARON (š)
 			case 0x9B: return "\u203A"; // SINGLE RIGHT-POINTING ANGLE QUOTATION MARK (›)
 			case 0x9C: return "\u0153"; // LATIN SMALL LIGATURE OE (œ)
 			case 0x9E: return "\u017E"; // LATIN SMALL LETTER Z WITH CARON (ž)
 			case 0x9F: return "\u0178"; // LATIN CAPITAL LETTER Y WITH DIAERESIS (Ÿ)
-			case 0x0000B: case 0x0FFFE: case 0x1FFFE: case 0x1FFFF: case 0x2FFFE: case 0x2FFFF: case 0x3FFFE:
-			case 0x3FFFF: case 0x4FFFE: case 0x4FFFF: case 0x5FFFE: case 0x5FFFF: case 0x6FFFE: case 0x6FFFF:
-			case 0x7FFFE: case 0x7FFFF: case 0x8FFFE: case 0x8FFFF: case 0x9FFFE: case 0x9FFFF: case 0xAFFFE:
-			case 0xAFFFF: case 0xBFFFE: case 0xBFFFF: case 0xCFFFE: case 0xCFFFF: case 0xDFFFE: case 0xDFFFF:
-			case 0xEFFFE: case 0xEFFFF: case 0xFFFFE: case 0xFFFFF: case 0x10FFFE: case 0x10FFFF:
-				// parse error
-				return new string (pushed, 0, index);
 			default:
-				if ((state >= 0xD800 && state <= 0xDFFF) || state > 0x10FFFF) {
-					// parse error, emit REPLACEMENT CHARACTER
+				// Surrogates and values beyond the Unicode range are replaced. Noncharacters and the remaining
+				// control characters are parse errors, but are still emitted as-is.
+				if ((state >= 0xD800 && state <= 0xDFFF) || state > MaxCodePoint)
 					return "\uFFFD";
-				}
-
-				if ((state >= 0x0001 && state <= 0x0008) || (state >= 0x000D && state <= 0x001F) ||
-					(state >= 0x007F && state <= 0x009F) || (state >= 0xFDD0 && state <= 0xFDEF)) {
-					return new string (pushed, 0, index);
-				}
 				break;
 			}
 
 			return char.ConvertFromUtf32 (state);
+		}
+
+		// Gets the number of pushed characters (including the '&') that make up the longest matching named
+		// character reference, or 1 if there is no match.
+		int GetNamedMatchLength ()
+		{
+			int matched = index;
+
+			while (matched > 1 && !NamedEntities.ContainsKey (states[matched - 1]))
+				matched--;
+
+			return matched;
+		}
+
+		// 13.2.5.73 Named character reference state: if the character reference was consumed as part of an
+		// attribute, and the last character matched is not ';', and the next input character is either '=' or
+		// an ASCII alphanumeric, then the matched characters are flushed as-is (for historical reasons).
+		bool IsHistoricalAttributeValue (int matched, char next)
+		{
+			if (matched > 1 && pushed[matched - 1] != ';') {
+				char c = matched < index ? pushed[matched] : next;
+
+				return c == '=' || (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+			}
+
+			return false;
+		}
+
+		internal string GetAttributeValue (char next)
+		{
+			if (numeric)
+				return GetNumericEntityValue ();
+
+			if (IsHistoricalAttributeValue (GetNamedMatchLength (), next))
+				return new string (pushed, 0, index);
+
+			return GetNamedEntityValue ();
+		}
+
+		// Gets the parse errors for the character reference. The next input character is the character that
+		// the decoder refused (or '\0' at the end of the input).
+		internal void GetComplianceViolations (bool attribute, char next, out HtmlComplianceViolation first, out HtmlComplianceViolation second)
+		{
+			second = HtmlComplianceViolation.None;
+
+			if (numeric) {
+				// 13.2.5.75 Numeric character reference state & 13.2.5.76 Hexadecimal character reference start state
+				if (!digits) {
+					first = HtmlComplianceViolation.AbsenceOfDigitsInNumericCharacterReference;
+					return;
+				}
+
+				// 13.2.5.78 Hexadecimal character reference state & 13.2.5.79 Decimal character reference state
+				if (!semicolon) {
+					first = HtmlComplianceViolation.MissingSemicolonAfterCharacterReference;
+					second = GetNumericValueViolation ();
+				} else {
+					first = GetNumericValueViolation ();
+				}
+
+				return;
+			}
+
+			// 13.2.5.73 Named character reference state
+			int matched = GetNamedMatchLength ();
+
+			if (matched > 1 && pushed[matched - 1] != ';' && !(attribute && IsHistoricalAttributeValue (matched, next)))
+				first = HtmlComplianceViolation.MissingSemicolonAfterCharacterReference;
+			else
+				first = HtmlComplianceViolation.None;
+		}
+
+		// 13.2.5.80 Numeric character reference end state
+		HtmlComplianceViolation GetNumericValueViolation ()
+		{
+			int value = numericValue;
+
+			if (value == 0)
+				return HtmlComplianceViolation.NullCharacterReference;
+
+			if (value > MaxCodePoint)
+				return HtmlComplianceViolation.CharacterReferenceOutsideUnicodeRange;
+
+			if (value >= 0xD800 && value <= 0xDFFF)
+				return HtmlComplianceViolation.SurrogateCharacterReference;
+
+			if ((value >= 0xFDD0 && value <= 0xFDEF) || (value & 0xFFFE) == 0xFFFE)
+				return HtmlComplianceViolation.NoncharacterCharacterReference;
+
+			// Note: U+000D CARRIAGE RETURN is the only ASCII whitespace control character that is a parse error.
+			if (value == 0x0D || ((value < 0x20 || (value >= 0x7F && value <= 0x9F)) && value != 0x09 && value != 0x0A && value != 0x0C))
+				return HtmlComplianceViolation.ControlCharacterReference;
+
+			return HtmlComplianceViolation.None;
+		}
+
+		// Gets the number of characters following the '&' that are part of a named character reference that did not
+		// match any known name, or -1 if the character reference is numeric or matched a known name.
+		internal int GetUnknownNamedLength ()
+		{
+			if (numeric || GetNamedMatchLength () > 1)
+				return -1;
+
+			return index - 1;
 		}
 
 		/// <summary>
@@ -235,11 +331,6 @@ namespace MimeKit.Text {
 			return numeric ? GetNumericEntityValue () : GetNamedEntityValue ();
 		}
 
-		internal string GetPushedInput ()
-		{
-			return new string (pushed, 0, index);
-		}
-
 		/// <summary>
 		/// Reset the entity decoder.
 		/// </summary>
@@ -248,9 +339,10 @@ namespace MimeKit.Text {
 		/// </remarks>
 		public void Reset ()
 		{
+			numericValue = 0;
 			semicolon = false;
 			numeric = false;
-			digits = 0;
+			digits = false;
 			xbase = 0;
 			index = 0;
 		}

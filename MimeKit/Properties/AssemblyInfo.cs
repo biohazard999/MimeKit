@@ -1,9 +1,9 @@
-﻿//
+//
 // AssemblyInfo.cs
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,12 +30,12 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle ("MimeKit")]
+[assembly: AssemblyTitle ("MimeKit.Core")]
 [assembly: AssemblyDescription ("A complete MIME library with support for S/MIME, PGP, DKIM and Unix mbox spools.")]
 [assembly: AssemblyConfiguration ("")]
 [assembly: AssemblyCompany (".NET Foundation")]
-[assembly: AssemblyProduct ("MimeKit")]
-[assembly: AssemblyCopyright ("Copyright © 2013-2021 .NET Foundation and Contributors")]
+[assembly: AssemblyProduct ("MimeKit.Core")]
+[assembly: AssemblyCopyright ("Copyright © 2013-2026 .NET Foundation and Contributors")]
 [assembly: AssemblyTrademark (".NET Foundation")]
 [assembly: AssemblyCulture ("")]
 
@@ -46,11 +46,36 @@ using System.Runtime.InteropServices;
 
 // The following GUID is for the ID of the typelib if this project is exposed to COM
 [assembly: Guid ("2fe79b66-d107-45da-9493-175f59c4a53c")]
+
+[assembly: InternalsVisibleTo ("MimeKit.Cryptography, PublicKey=0024000004800000940" +
+	"0000006020000002400005253413100040000110000003fefa5187022727c3471938d10df4c47d" +
+	"5d5ecbe2f364656c5bfe4c47803453a91ae525f723f4316fd90a3f87366f4d948593277e950f6d" +
+	"2df6ee260681877a6d9e71c3ea77e87e61f3878af1d69bf10dce8debe92c54ca8a10afc44dc086" +
+	"74f3db6594ef545d67d31cc3e18b8f90d8f220c4b67d7e87f5b7e8df410ac8faeb3")]
+
+[assembly: InternalsVisibleTo ("Benchmarks, PublicKey=00240000048000009400000006020" +
+	"000002400005253413100040000110000003fefa5187022727c3471938d10df4c47d5d5ecbe2f3" +
+	"64656c5bfe4c47803453a91ae525f723f4316fd90a3f87366f4d948593277e950f6d2df6ee2606" +
+	"81877a6d9e71c3ea77e87e61f3878af1d69bf10dce8debe92c54ca8a10afc44dc08674f3db6594" +
+	"ef545d67d31cc3e18b8f90d8f220c4b67d7e87f5b7e8df410ac8faeb3")]
+
+[assembly: InternalsVisibleTo ("MimeKit.Fuzzing, PublicKey=002400000480000094000000060200" +
+	"00002400005253413100040000110000003fefa5187022727c3471938d10df4c47d5d5ecbe2f36" +
+	"4656c5bfe4c47803453a91ae525f723f4316fd90a3f87366f4d948593277e950f6d2df6ee26068" +
+	"1877a6d9e71c3ea77e87e61f3878af1d69bf10dce8debe92c54ca8a10afc44dc08674f3db6594e" +
+	"f545d67d31cc3e18b8f90d8f220c4b67d7e87f5b7e8df410ac8faeb3")]
+
 [assembly: InternalsVisibleTo ("UnitTests, PublicKey=002400000480000094000000060200" +
 	"00002400005253413100040000110000003fefa5187022727c3471938d10df4c47d5d5ecbe2f36" +
 	"4656c5bfe4c47803453a91ae525f723f4316fd90a3f87366f4d948593277e950f6d2df6ee26068" +
 	"1877a6d9e71c3ea77e87e61f3878af1d69bf10dce8debe92c54ca8a10afc44dc08674f3db6594e" +
 	"f545d67d31cc3e18b8f90d8f220c4b67d7e87f5b7e8df410ac8faeb3")]
+
+[assembly: InternalsVisibleTo ("MailKit, PublicKey=00240000048000009400000006020000" +
+	"00240000525341310004000011000000cde209732ce60a8fa70ee643cb32e9bf8149b61018c5b1" +
+	"66489b8a5cae44f1f88ca97ab9d9e035421933a6f0d556acc7c2219ae1464e35386ca1e239aa42" +
+	"508b9edbb4164bfa82aa2a0f4cd983d9e5ba2acfe08a10a2093e2b2bf8408eef43114db89b3999" +
+	"c59af1d3dc2c9f0cdbf51074e9a482cf09c9116ae1c5543ce8ff9b")]
 
 // Version information for an assembly consists of the following four values:
 //
@@ -78,6 +103,6 @@ using System.Runtime.InteropServices;
 //
 // If there have only been bug fixes, bump the Micro Version and/or the Build Number
 //    in the AssemblyFileVersion attribute.
-[assembly: AssemblyInformationalVersion ("2.14.0.0")]
-[assembly: AssemblyFileVersion ("2.14.0.0")]
-[assembly: AssemblyVersion ("2.14.0.0")]
+[assembly: AssemblyInformationalVersion ("5.0.0.0")]
+[assembly: AssemblyFileVersion ("5.0.0.0")]
+[assembly: AssemblyVersion ("5.0.0.0")]

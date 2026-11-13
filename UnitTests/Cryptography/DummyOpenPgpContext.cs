@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,17 +24,23 @@
 // THE SOFTWARE.
 //
 
-using System;
-
 using Org.BouncyCastle.Bcpg.OpenPgp;
 
-using MimeKit;
 using MimeKit.Cryptography;
 
 namespace UnitTests.Cryptography {
 	public class DummyOpenPgpContext : GnuPGContext
 	{
-		public DummyOpenPgpContext ()
+		// Note: Always pass an explicit GnuPG home directory. The parameterless GnuPGContext ctor uses
+		// a value cached from $GNUPGHOME the first time the GnuPGContext type is used which, depending on
+		// test ordering, may be the developer's real GnuPG home directory.
+		public static readonly string GnuPGDir = Path.Combine (TestHelper.ProjectDir, "Temp", ".gnupg");
+
+		public DummyOpenPgpContext () : base (GnuPGDir)
+		{
+		}
+
+		public DummyOpenPgpContext (string gnupgDir) : base (gnupgDir)
 		{
 		}
 

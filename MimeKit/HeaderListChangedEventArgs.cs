@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 //
 
 using System;
+using System.Diagnostics;
 
 namespace MimeKit {
 	/// <summary>
@@ -57,8 +58,10 @@ namespace MimeKit {
 
 	class HeaderListChangedEventArgs : EventArgs
 	{
-		internal HeaderListChangedEventArgs (Header header, HeaderListChangedAction action)
+		internal HeaderListChangedEventArgs (Header? header, HeaderListChangedAction action)
 		{
+			Debug.Assert (header != null || action == HeaderListChangedAction.Cleared, "Header cannot be null unless the action is Cleared.");
+
 			Header = header;
 			Action = action;
 		}
@@ -67,7 +70,7 @@ namespace MimeKit {
 			get; private set;
 		}
 
-		public Header Header {
+		public Header? Header {
 			get; private set;
 		}
 	}

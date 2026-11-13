@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@ using System.Linq;
 using System.Text;
 using System.Globalization;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 using MimeKit.Utils;
 
@@ -40,6 +41,9 @@ namespace MimeKit {
 	/// Group addresses are rarely used anymore. Typically, if you see a group address,
 	/// it will be of the form: <c>"undisclosed-recipients: ;"</c>.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\InternetAddressExamples.cs" region="GroupAddress"/>
+	/// </example>
 	public class GroupAddress : InternetAddress
 	{
 		/// <summary>
@@ -53,9 +57,9 @@ namespace MimeKit {
 		/// <param name="name">The name of the group.</param>
 		/// <param name="addresses">A list of addresses.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="encoding"/> is <c>null</c>.
+		/// <paramref name="encoding"/> is <see langword="null"/>.
 		/// </exception>
-		public GroupAddress (Encoding encoding, string name, IEnumerable<InternetAddress> addresses) : base (encoding, name)
+		public GroupAddress (Encoding encoding, string? name, IEnumerable<InternetAddress> addresses) : base (encoding, name)
 		{
 			Members = new InternetAddressList (addresses);
 			Members.Changed += MembersChanged;
@@ -69,7 +73,7 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="name">The name of the group.</param>
 		/// <param name="addresses">A list of addresses.</param>
-		public GroupAddress (string name, IEnumerable<InternetAddress> addresses) : this (Encoding.UTF8, name, addresses)
+		public GroupAddress (string? name, IEnumerable<InternetAddress> addresses) : this (Encoding.UTF8, name, addresses)
 		{
 		}
 
@@ -83,9 +87,9 @@ namespace MimeKit {
 		/// <param name="encoding">The character encoding to be used for encoding the name.</param>
 		/// <param name="name">The name of the group.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="encoding"/> is <c>null</c>.
+		/// <paramref name="encoding"/> is <see langword="null"/>.
 		/// </exception>
-		public GroupAddress (Encoding encoding, string name) : base (encoding, name)
+		public GroupAddress (Encoding encoding, string? name) : base (encoding, name)
 		{
 			Members = new InternetAddressList ();
 			Members.Changed += MembersChanged;
@@ -98,7 +102,7 @@ namespace MimeKit {
 		/// Creates a new <see cref="GroupAddress"/> with the specified name.
 		/// </remarks>
 		/// <param name="name">The name of the group.</param>
-		public GroupAddress (string name) : this (Encoding.UTF8, name)
+		public GroupAddress (string? name) : this (Encoding.UTF8, name)
 		{
 		}
 
@@ -115,7 +119,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets the members of the group.
+		/// Get the members of the group.
 		/// </summary>
 		/// <remarks>
 		/// <para>Represents the member addresses of the group. If the group address properly conforms
@@ -126,6 +130,9 @@ namespace MimeKit {
 		/// anything other than <see cref="MailboxAddress"/> members in order to comply with internet
 		/// standards.</para>
 		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\InternetAddressExamples.cs" region="GroupAddress"/>
+		/// </example>
 		/// <value>The list of members.</value>
 		public InternetAddressList Members {
 			get; private set;
@@ -137,8 +144,7 @@ namespace MimeKit {
 				string name;
 
 				if (!options.International) {
-					var encoded = Rfc2047.EncodePhrase (options, Encoding, Name);
-					name = Encoding.ASCII.GetString (encoded, 0, encoded.Length);
+					name = Rfc2047.EncodePhraseAsString (options, Encoding, Name);
 				} else {
 					name = EncodeInternationalizedPhrase (Name);
 				}
@@ -163,6 +169,12 @@ namespace MimeKit {
 					lineLength += name.Length;
 					builder.Append (name);
 				}
+			} else {
+				// rfc5322 requires a display-name for a group, so use an empty quoted-string. This also ensures that an
+				// unnamed group nested within another group can be parsed again (the parser skips extraneous ':'s
+				// after a group name).
+				builder.Append ("\"\"");
+				lineLength += 2;
 			}
 
 			builder.Append (": ");
@@ -175,24 +187,24 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Returns a string representation of the <see cref="GroupAddress"/>,
+		/// Return a string representation of the <see cref="GroupAddress"/>,
 		/// optionally encoding it for transport.
 		/// </summary>
 		/// <remarks>
 		/// Returns a string containing the formatted group of addresses. If the <paramref name="encode"/>
-		/// parameter is <c>true</c>, then the name of the group and all member addresses will be encoded
+		/// parameter is <see langword="true" />, then the name of the group and all member addresses will be encoded
 		/// according to the rules defined in rfc2047, otherwise the names will not be encoded at all and
 		/// will therefor only be suitable for display purposes.
 		/// </remarks>
 		/// <returns>A string representing the <see cref="GroupAddress"/>.</returns>
 		/// <param name="options">The formatting options.</param>
-		/// <param name="encode">If set to <c>true</c>, the <see cref="GroupAddress"/> will be encoded.</param>
+		/// <param name="encode">If set to <see langword="true" />, the <see cref="GroupAddress"/> will be encoded.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="options"/> is <c>null</c>.
+		/// <paramref name="options"/> is <see langword="null"/>.
 		/// </exception>
 		public override string ToString (FormatOptions options, bool encode)
 		{
-			if (options == null)
+			if (options is null)
 				throw new ArgumentNullException (nameof (options));
 
 			var builder = new StringBuilder ();
@@ -222,19 +234,17 @@ namespace MimeKit {
 		#region IEquatable implementation
 
 		/// <summary>
-		/// Determines whether the specified <see cref="GroupAddress"/> is equal to the current <see cref="GroupAddress"/>.
+		/// Determine whether the specified <see cref="GroupAddress"/> is equal to the current <see cref="GroupAddress"/>.
 		/// </summary>
 		/// <remarks>
 		/// Compares two group addresses to determine if they are identical or not.
 		/// </remarks>
 		/// <param name="other">The <see cref="GroupAddress"/> to compare with the current <see cref="GroupAddress"/>.</param>
-		/// <returns><c>true</c> if the specified <see cref="GroupAddress"/> is equal to the current
-		/// <see cref="GroupAddress"/>; otherwise, <c>false</c>.</returns>
-		public override bool Equals (InternetAddress other)
+		/// <returns><see langword="true" /> if the specified <see cref="GroupAddress"/> is equal to the current
+		/// <see cref="GroupAddress"/>; otherwise, <see langword="false" />.</returns>
+		public override bool Equals (InternetAddress? other)
 		{
-			var group = other as GroupAddress;
-
-			if (group == null)
+			if (other is not GroupAddress group)
 				return false;
 
 			return Name == group.Name && Members.Equals (group.Members);
@@ -242,20 +252,19 @@ namespace MimeKit {
 
 		#endregion
 
-		void MembersChanged (object sender, EventArgs e)
+		void MembersChanged (InternetAddressList sender, EventArgs e)
 		{
 			OnChanged ();
 		}
 
-		static bool TryParse (ParserOptions options, byte[] text, ref int index, int endIndex, bool throwOnError, out GroupAddress group)
+		static bool TryParse (ParserOptions options, byte[] text, ref int index, int endIndex, bool throwOnError, [NotNullWhen (true)] out GroupAddress? group)
 		{
 			var flags = AddressParserFlags.AllowGroupAddress;
-			InternetAddress address;
 
 			if (throwOnError)
 				flags |= AddressParserFlags.ThrowOnError;
 
-			if (!InternetAddress.TryParse (options, text, ref index, endIndex, 0, flags, out address)) {
+			if (!InternetAddress.TryParse (flags, options, text, ref index, endIndex, 0, out var address)) {
 				group = null;
 				return false;
 			}
@@ -272,24 +281,18 @@ namespace MimeKit {
 		/// Parses a single <see cref="GroupAddress"/>. If the address is not a group address or
 		/// there is more than a single group address, then parsing will fail.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <param name="group">The parsed group address.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, int startIndex, int length, out GroupAddress group)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, int startIndex, int length, [NotNullWhen (true)] out GroupAddress? group)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex, length);
+			if (!ArgumentValidator.TryValidate (options, buffer, startIndex, length)) {
+				group = null;
+				return false;
+			}
 
 			int endIndex = startIndex + length;
 			int index = startIndex;
@@ -312,19 +315,12 @@ namespace MimeKit {
 		/// Parses a single <see cref="GroupAddress"/>. If the address is not a group address or
 		/// there is more than a single group address, then parsing will fail.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <param name="group">The parsed group address.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, int length, out GroupAddress group)
+		public static bool TryParse (byte[]? buffer, int startIndex, int length, [NotNullWhen (true)] out GroupAddress? group)
 		{
 			return TryParse (ParserOptions.Default, buffer, startIndex, length, out group);
 		}
@@ -336,22 +332,17 @@ namespace MimeKit {
 		/// Parses a single <see cref="GroupAddress"/>. If the address is not a group address or
 		/// there is more than a single group address, then parsing will fail.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="group">The parsed group address.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> is out of range.
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, int startIndex, out GroupAddress group)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, int startIndex, [NotNullWhen (true)] out GroupAddress? group)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex);
+			if (!ArgumentValidator.TryValidate (options, buffer, startIndex)) {
+				group = null;
+				return false;
+			}
 
 			int endIndex = buffer.Length;
 			int index = startIndex;
@@ -374,17 +365,11 @@ namespace MimeKit {
 		/// Parses a single <see cref="GroupAddress"/>. If the address is not a group address or
 		/// there is more than a single group address, then parsing will fail.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="group">The parsed group address.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> is out of range.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, out GroupAddress group)
+		public static bool TryParse (byte[]? buffer, int startIndex, [NotNullWhen (true)] out GroupAddress? group)
 		{
 			return TryParse (ParserOptions.Default, buffer, startIndex, out group);
 		}
@@ -396,18 +381,16 @@ namespace MimeKit {
 		/// Parses a single <see cref="GroupAddress"/>. If the address is not a group address or
 		/// there is more than a single group address, then parsing will fail.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="group">The parsed group address.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, out GroupAddress group)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, [NotNullWhen (true)] out GroupAddress? group)
 		{
-			ParseUtils.ValidateArguments (options, buffer);
+			if (!ArgumentValidator.TryValidate (options, buffer)) {
+				group = null;
+				return false;
+			}
 
 			int endIndex = buffer.Length;
 			int index = 0;
@@ -430,13 +413,10 @@ namespace MimeKit {
 		/// Parses a single <see cref="GroupAddress"/>. If the address is not a group address or
 		/// there is more than a single group address, then parsing will fail.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="group">The parsed group address.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, out GroupAddress group)
+		public static bool TryParse (byte[]? buffer, [NotNullWhen (true)] out GroupAddress? group)
 		{
 			return TryParse (ParserOptions.Default, buffer, out group);
 		}
@@ -448,33 +428,25 @@ namespace MimeKit {
 		/// Parses a single <see cref="GroupAddress"/>. If the address is not a group address or
 		/// there is more than a single group address, then parsing will fail.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="text">The text.</param>
 		/// <param name="group">The parsed group address.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (ParserOptions options, string text, out GroupAddress group)
+		public static bool TryParse (ParserOptions? options, string? text, [NotNullWhen (true)] out GroupAddress? group)
 		{
-			if (options == null)
-				throw new ArgumentNullException (nameof (options));
-
-			if (text == null)
-				throw new ArgumentNullException (nameof (text));
-
-			var buffer = Encoding.UTF8.GetBytes (text);
-			int endIndex = buffer.Length;
-			int index = 0;
-
-			if (!TryParse (options, buffer, ref index, endIndex, false, out group))
-				return false;
-
-			if (!ParseUtils.SkipCommentsAndWhiteSpace (buffer, ref index, endIndex, false) || index != endIndex) {
+			if (!ArgumentValidator.TryValidate (options, text)) {
 				group = null;
 				return false;
 			}
 
+			var parser = AddressParser.Create (options, text);
+
+			if (!parser.TryParseCompleteAddress (AddressParserFlags.AllowGroupAddress, out var address)) {
+				group = null;
+				return false;
+			}
+
+			group = (GroupAddress) address;
 			return true;
 		}
 
@@ -485,13 +457,10 @@ namespace MimeKit {
 		/// Parses a single <see cref="GroupAddress"/>. If the address is not a group address or
 		/// there is more than a single group address, then parsing will fail.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="text">The text.</param>
 		/// <param name="group">The parsed group address.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (string text, out GroupAddress group)
+		public static bool TryParse (string? text, [NotNullWhen (true)] out GroupAddress? group)
 		{
 			return TryParse (ParserOptions.Default, text, out group);
 		}
@@ -509,9 +478,9 @@ namespace MimeKit {
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
+		/// <para><paramref name="buffer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -522,21 +491,19 @@ namespace MimeKit {
 		/// </exception>
 		public static new GroupAddress Parse (ParserOptions options, byte[] buffer, int startIndex, int length)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex, length);
+			ArgumentValidator.Validate (options, buffer, startIndex, length);
 
 			int endIndex = startIndex + length;
 			int index = startIndex;
-			GroupAddress group;
 
-			if (!TryParse (options, buffer, ref index, endIndex, true, out group))
-				throw new ParseException ("No group address found.", startIndex, startIndex);
+			TryParse (options, buffer, ref index, endIndex, true, out var group);
 
 			ParseUtils.SkipCommentsAndWhiteSpace (buffer, ref index, endIndex, true);
 
 			if (index != endIndex)
 				throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Unexpected token at offset {0}", index), index, index);
 
-			return group;
+			return group!;
 		}
 
 		/// <summary>
@@ -551,7 +518,7 @@ namespace MimeKit {
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -577,9 +544,9 @@ namespace MimeKit {
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
+		/// <para><paramref name="buffer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/>is out of range.
@@ -589,21 +556,19 @@ namespace MimeKit {
 		/// </exception>
 		public static new GroupAddress Parse (ParserOptions options, byte[] buffer, int startIndex)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex);
+			ArgumentValidator.Validate (options, buffer, startIndex);
 
 			int endIndex = buffer.Length;
 			int index = startIndex;
-			GroupAddress group;
 
-			if (!TryParse (options, buffer, ref index, endIndex, true, out group))
-				throw new ParseException ("No group address found.", startIndex, startIndex);
+			TryParse (options, buffer, ref index, endIndex, true, out var group);
 
 			ParseUtils.SkipCommentsAndWhiteSpace (buffer, ref index, endIndex, true);
 
 			if (index != endIndex)
 				throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Unexpected token at offset {0}", index), index, index);
 
-			return group;
+			return group!;
 		}
 
 		/// <summary>
@@ -617,7 +582,7 @@ namespace MimeKit {
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> is out of range.
@@ -641,30 +606,28 @@ namespace MimeKit {
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
+		/// <para><paramref name="buffer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// <paramref name="buffer"/> could not be parsed.
 		/// </exception>
 		public static new GroupAddress Parse (ParserOptions options, byte[] buffer)
 		{
-			ParseUtils.ValidateArguments (options, buffer);
+			ArgumentValidator.Validate (options, buffer);
 
 			int endIndex = buffer.Length;
-			GroupAddress group;
 			int index = 0;
 
-			if (!TryParse (options, buffer, ref index, endIndex, true, out group))
-				throw new ParseException ("No group address found.", 0, 0);
+			TryParse (options, buffer, ref index, endIndex, true, out var group);
 
 			ParseUtils.SkipCommentsAndWhiteSpace (buffer, ref index, endIndex, true);
 
 			if (index != endIndex)
 				throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Unexpected token at offset {0}", index), index, index);
 
-			return group;
+			return group!;
 		}
 
 		/// <summary>
@@ -677,7 +640,7 @@ namespace MimeKit {
 		/// <returns>The parsed <see cref="GroupAddress"/>.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// <paramref name="buffer"/> could not be parsed.
@@ -698,35 +661,21 @@ namespace MimeKit {
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="text">The text.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="text"/> is <c>null</c>.</para>
+		/// <para><paramref name="text"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// <paramref name="text"/> could not be parsed.
 		/// </exception>
 		public static new GroupAddress Parse (ParserOptions options, string text)
 		{
-			if (options == null)
-				throw new ArgumentNullException (nameof (options));
+			ArgumentValidator.Validate (options, text);
 
-			if (text == null)
-				throw new ArgumentNullException (nameof (text));
+			var parser = AddressParser.Create (options, text);
+			parser.TryParseCompleteAddress (AddressParserFlags.AllowGroupAddress | AddressParserFlags.ThrowOnError, out var address);
 
-			var buffer = Encoding.UTF8.GetBytes (text);
-			int endIndex = buffer.Length;
-			GroupAddress group;
-			int index = 0;
-
-			if (!TryParse (options, buffer, ref index, endIndex, true, out group))
-				throw new ParseException ("No group address found.", 0, 0);
-
-			ParseUtils.SkipCommentsAndWhiteSpace (buffer, ref index, endIndex, true);
-
-			if (index != endIndex)
-				throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Unexpected token at offset {0}", index), index, index);
-
-			return group;
+			return (GroupAddress) address!;
 		}
 
 		/// <summary>
@@ -739,7 +688,7 @@ namespace MimeKit {
 		/// <returns>The parsed <see cref="GroupAddress"/>.</returns>
 		/// <param name="text">The text.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// <paramref name="text"/> could not be parsed.

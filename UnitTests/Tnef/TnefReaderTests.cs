@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,11 +24,6 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
-
-using NUnit.Framework;
-
 using MimeKit.Tnef;
 
 namespace UnitTests.Tnef {
@@ -37,490 +32,602 @@ namespace UnitTests.Tnef {
 	{
 		static readonly string DataDir = Path.Combine (TestHelper.ProjectDir, "TestData", "tnef");
 
-		[Test]
-		public void TestArgumentExceptions ()
+		const int ValidSignature = 0x223e9f78;
+
+		// Writes a well-formed TNEF stream header (signature + legacy key).
+		static void WriteHeader (MemoryStream stream, int signature = ValidSignature)
 		{
-			using (var stream = File.OpenRead (Path.Combine (DataDir, "winmail.tnef"))) {
-				Assert.Throws<ArgumentNullException> (() => new TnefReader (null, 0, TnefComplianceMode.Strict));
-				Assert.Throws<ArgumentOutOfRangeException> (() => new TnefReader (stream, -1, TnefComplianceMode.Strict));
+			stream.Write (BitConverter.GetBytes (signature), 0, 4);
+			stream.WriteByte (0);
+			stream.WriteByte (0);
+		}
 
-				using (var reader = new TnefReader (stream, 1252, TnefComplianceMode.Strict)) {
-					var buffer = new byte[16];
+		// Writes a raw attribute (level + tag + length + value), optionally omitting the checksum.
+		static void WriteRawAttribute (MemoryStream stream, TnefAttributeLevel level, TnefAttributeTag tag, int length, byte[] value, bool checksum = true)
+		{
+			stream.WriteByte ((byte) level);
+			stream.Write (BitConverter.GetBytes ((int) tag), 0, 4);
+			stream.Write (BitConverter.GetBytes (length), 0, 4);
+			stream.Write (value, 0, value.Length);
 
-					Assert.Throws<ArgumentNullException> (() => reader.ReadAttributeRawValue (null, 0, buffer.Length));
-					Assert.Throws<ArgumentOutOfRangeException> (() => reader.ReadAttributeRawValue (buffer, -1, buffer.Length));
-					Assert.Throws<ArgumentOutOfRangeException> (() => reader.ReadAttributeRawValue (buffer, 0, -1));
-				}
+			if (checksum) {
+				short sum = 0;
+
+				for (int i = 0; i < value.Length; i++)
+					sum = (short) ((sum + value[i]) & 0xFFFF);
+
+				stream.Write (BitConverter.GetBytes (sum), 0, 2);
 			}
 		}
 
-		[Test]
-		public void TestSetComplianceError ()
+		static IEnumerable<TnefComplianceViolation> Violations (TestTnefComplianceLogger logger)
 		{
-			using (var stream = File.OpenRead (Path.Combine (DataDir, "winmail.tnef"))) {
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Strict)) {
-					foreach (TnefComplianceStatus error in Enum.GetValues (typeof (TnefComplianceStatus))) {
-						if (error == TnefComplianceStatus.Compliant) {
-							Assert.DoesNotThrow (() => reader.SetComplianceError (error));
-						} else {
-							Assert.Throws<TnefException> (() => reader.SetComplianceError (error));
-						}
-					}
-				}
-			}
+			return logger.Issues.Select (issue => issue.Violation);
+		}
+
+		#region Argument validation
+
+		[Test]
+		public void TestArgumentExceptions ()
+		{
+			Assert.Throws<ArgumentNullException> (() => new TnefReader (null));
+
+			var options = new TnefOptions ();
+
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.DefaultCodepage = -1);
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.MaxNestingDepth = -1);
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.MaxPropertyValueLength = -1);
+			Assert.Throws<ArgumentOutOfRangeException> (() => options.MaxTotalDataBytes = -1);
+
+			using var stream = File.OpenRead (Path.Combine (DataDir, "winmail.tnef"));
+			using var reader = new TnefReader (stream);
+
+			Assert.Throws<ArgumentNullException> (() => reader.ComplianceOptions = null);
+			Assert.Throws<ArgumentOutOfRangeException> (() => new TnefComplianceOptions { MaxIssuesPerViolation = -1 });
+		}
+
+		[Test]
+		public void TestComplianceOptions ()
+		{
+			using var stream = File.OpenRead (Path.Combine (DataDir, "winmail.tnef"));
+			using var reader = new TnefReader (stream);
+
+			Assert.That (reader.ComplianceOptions, Is.Not.SameAs (TnefComplianceOptions.Default), "Default should be a copy");
+			Assert.That (reader.ComplianceOptions.MaxIssuesPerViolation, Is.EqualTo (0));
+			Assert.That (TnefComplianceOptions.Default.MaxIssuesPerViolation, Is.EqualTo (0));
+
+			var options = new TnefComplianceOptions { MaxIssuesPerViolation = 4 };
+			var clone = options.Clone ();
+
+			Assert.That (clone, Is.Not.SameAs (options));
+			Assert.That (clone.MaxIssuesPerViolation, Is.EqualTo (4));
+
+			reader.ComplianceOptions = options;
+			Assert.That (reader.ComplianceOptions, Is.SameAs (options));
+
+			reader.ComplianceOptions = TnefComplianceOptions.Default;
+			Assert.That (reader.ComplianceOptions, Is.Not.SameAs (TnefComplianceOptions.Default), "Setting Default should store a copy");
+		}
+
+		#endregion
+
+		#region Malformed headers and attributes
+
+		[Test]
+		public void TestInvalidSignature ()
+		{
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
+
+			WriteHeader (stream, ValidSignature + 1);
+			stream.Position = 0;
+
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (reader.Read (), Is.False, "Read");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.InvalidSignature));
+		}
+
+		[Test]
+		public async Task TestInvalidSignatureAsync ()
+		{
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
+
+			WriteHeader (stream, ValidSignature + 1);
+			stream.Position = 0;
+
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (await reader.ReadAsync (), Is.False, "ReadAsync");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.InvalidSignature));
 		}
 
 		[Test]
 		public void TestTruncatedHeader ()
 		{
-			using (var stream = new MemoryStream ()) {
-				Assert.Throws<TnefException> (() => new TnefReader (stream, 0, TnefComplianceMode.Strict));
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					Assert.AreEqual (TnefComplianceStatus.StreamTruncated, reader.ComplianceStatus);
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
 
-					reader.ResetComplianceStatus ();
-					Assert.AreEqual (TnefComplianceStatus.Compliant, reader.ComplianceStatus);
-				}
-			}
+			Assert.That (reader.Read (), Is.False, "Read");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.TruncatedStream));
+		}
+
+		[Test]
+		public async Task TestTruncatedHeaderAsync ()
+		{
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
+
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (await reader.ReadAsync (), Is.False, "ReadAsync");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.TruncatedStream));
 		}
 
 		[Test]
 		public void TestTruncatedHeaderAfterSignature ()
 		{
-			using (var stream = new MemoryStream ()) {
-				var invalidSignature = BitConverter.GetBytes (0x223e9f78);
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
 
-				stream.Write (invalidSignature, 0, invalidSignature.Length);
-				stream.WriteByte (0);
+			stream.Write (BitConverter.GetBytes (ValidSignature), 0, 4);
+			stream.WriteByte (0);
+			stream.Position = 0;
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					Assert.AreEqual (TnefComplianceStatus.StreamTruncated, reader.ComplianceStatus);
-				}
-			}
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (reader.Read (), Is.False, "Read");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.TruncatedStream));
 		}
 
 		[Test]
-		public void TestInvalidSignatureLoose ()
+		public async Task TestTruncatedHeaderAfterSignatureAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				var invalidSignature = BitConverter.GetBytes (0x223e9f79);
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
 
-				stream.Write (invalidSignature, 0, invalidSignature.Length);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.Position = 0;
+			stream.Write (BitConverter.GetBytes (ValidSignature), 0, 4);
+			stream.WriteByte (0);
+			stream.Position = 0;
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					Assert.AreEqual (TnefComplianceStatus.InvalidTnefSignature, reader.ComplianceStatus);
-				}
-			}
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (await reader.ReadAsync (), Is.False, "ReadAsync");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.TruncatedStream));
 		}
 
 		[Test]
-		public void TestInvalidSignatureStrict ()
+		public void TestInvalidOemCodepage ()
 		{
-			using (var stream = new MemoryStream ()) {
-				var invalidSignature = BitConverter.GetBytes (0x223e9f79);
-				TnefReader reader;
+			var logger = new TestTnefComplianceLogger ();
+			var builder = new TnefBuilder ();
 
-				stream.Write (invalidSignature, 0, invalidSignature.Length);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.Position = 0;
+			builder.WriteOemCodepage (1);
 
-				try {
-					reader = new TnefReader (stream, 0, TnefComplianceMode.Strict);
-					Assert.Fail ("new TnefReader should have thrown TnefException");
-				} catch (TnefException ex) {
-					Assert.AreEqual (TnefComplianceStatus.InvalidTnefSignature, ex.Error, "Error");
-				} catch (Exception ex) {
-					Assert.Fail ("new TnefReader should have thrown TnefException, not {0}", ex);
-				}
-			}
+			using var reader = new TnefReader (builder.ToStream ()) { ComplianceLogger = logger };
+
+			Assert.That (reader.Read (), Is.True, "Read");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.OemCodepage), "Tag");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.InvalidMessageCodepage));
 		}
 
 		[Test]
-		public void TestInvalidOemCodepageLoose ()
+		public async Task TestInvalidOemCodepageAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.OemCodepage), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (1), 0, 4);
+			var logger = new TestTnefComplianceLogger ();
+			var builder = new TnefBuilder ();
 
-				stream.Position = 0;
+			builder.WriteOemCodepage (1);
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					Assert.IsTrue (reader.ReadNextAttribute (), "ReadNextAttribute");
-					Assert.AreEqual (TnefAttributeTag.OemCodepage, reader.AttributeTag, "AttributeTag");
-					Assert.AreEqual (TnefComplianceStatus.InvalidMessageCodepage, reader.ComplianceStatus);
-				}
-			}
+			using var reader = new TnefReader (builder.ToStream ()) { ComplianceLogger = logger };
+
+			Assert.That (await reader.ReadAsync (), Is.True, "ReadAsync");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.OemCodepage), "Tag");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.InvalidMessageCodepage));
 		}
 
 		[Test]
-		public void TestInvalidOemCodepageStrict ()
+		public void TestInvalidTnefVersion ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.OemCodepage), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (1), 0, 4);
+			var logger = new TestTnefComplianceLogger ();
+			var builder = new TnefBuilder ();
 
-				stream.Position = 0;
+			builder.WriteTnefVersion (1);
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Strict)) {
-					try {
-						reader.ReadNextAttribute ();
-						Assert.Fail ("ReadNextAttribute should have thrown TnefException");
-					} catch (TnefException ex) {
-						Assert.AreEqual (TnefComplianceStatus.InvalidMessageCodepage, ex.Error, "Error");
-					} catch (Exception ex) {
-						Assert.Fail ("ReadNextAttribute should have thrown TnefException, not {0}", ex);
-					}
-				}
-			}
+			using var reader = new TnefReader (builder.ToStream ()) { ComplianceLogger = logger };
+
+			Assert.That (reader.Read (), Is.True, "Read");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.TnefVersion), "Tag");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.UnsupportedVersion));
 		}
 
 		[Test]
-		public void TestInvalidTnefVersionLoose ()
+		public async Task TestInvalidTnefVersionAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.TnefVersion), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (1), 0, 4);
+			var logger = new TestTnefComplianceLogger ();
+			var builder = new TnefBuilder ();
 
-				stream.Position = 0;
+			builder.WriteTnefVersion (1);
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					Assert.IsTrue (reader.ReadNextAttribute (), "ReadNextAttribute");
-					Assert.AreEqual (TnefAttributeTag.TnefVersion, reader.AttributeTag, "AttributeTag");
-					reader.TnefPropertyReader.ReadValueAsInt32 ();
-					Assert.AreEqual (1, reader.TnefVersion, "TnefVersion");
-					Assert.AreEqual (TnefComplianceStatus.InvalidTnefVersion, reader.ComplianceStatus);
-				}
-			}
+			using var reader = new TnefReader (builder.ToStream ()) { ComplianceLogger = logger };
+
+			Assert.That (await reader.ReadAsync (), Is.True, "ReadAsync");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.TnefVersion), "Tag");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.UnsupportedVersion));
 		}
 
 		[Test]
-		public void TestInvalidTnefVersionStrict ()
+		public void TestNegativeAttributeRawValueLength ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.TnefVersion), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (1), 0, 4);
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
 
-				stream.Position = 0;
+			WriteHeader (stream);
+			WriteRawAttribute (stream, TnefAttributeLevel.Message, TnefAttributeTag.TnefVersion, -4, BitConverter.GetBytes (65536), checksum: false);
+			stream.Position = 0;
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Strict)) {
-					try {
-						reader.ReadNextAttribute ();
-						Assert.Fail ("ReadNextAttribute should have thrown TnefException");
-					} catch (TnefException ex) {
-						Assert.AreEqual (TnefComplianceStatus.InvalidTnefVersion, ex.Error, "Error");
-					} catch (Exception ex) {
-						Assert.Fail ("ReadNextAttribute should have thrown TnefException, not {0}", ex);
-					}
-				}
-			}
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (reader.Read (), Is.False, "Read");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.InvalidAttributeLength));
 		}
 
 		[Test]
-		public void TestNegativeAttributeRawValueLengthLoose ()
+		public async Task TestNegativeAttributeRawValueLengthAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.TnefVersion), 0, 4);
-				stream.Write (BitConverter.GetBytes (-4), 0, 4);
-				stream.Write (BitConverter.GetBytes (65536), 0, 4);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.OemCodepage), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (28591), 0, 4);
-				stream.Position = 0;
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					Assert.IsFalse (reader.ReadNextAttribute (), "ReadNextAttribute");
-					Assert.AreEqual (TnefAttributeTag.TnefVersion, reader.AttributeTag, "AttributeTag");
-					Assert.AreEqual (TnefComplianceStatus.InvalidAttributeLength, reader.ComplianceStatus);
-				}
-			}
+			WriteHeader (stream);
+			WriteRawAttribute (stream, TnefAttributeLevel.Message, TnefAttributeTag.TnefVersion, -4, BitConverter.GetBytes (65536), checksum: false);
+			stream.Position = 0;
+
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (await reader.ReadAsync (), Is.False, "ReadAsync");
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.InvalidAttributeLength));
 		}
 
 		[Test]
-		public void TestNegativeAttributeRawValueLengthStrict ()
+		public void TestReadValueTruncated ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.TnefVersion), 0, 4);
-				stream.Write (BitConverter.GetBytes (-4), 0, 4);
-				stream.Write (BitConverter.GetBytes (65536), 0, 4);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.OemCodepage), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (28591), 0, 4);
-				stream.Position = 0;
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Strict)) {
-					try {
-						reader.ReadNextAttribute ();
-						Assert.Fail ("ReadNextAttribute should have thrown TnefException");
-					} catch (TnefException ex) {
-						Assert.AreEqual (TnefComplianceStatus.InvalidAttributeLength, ex.Error, "Error");
-					} catch (Exception ex) {
-						Assert.Fail ("ReadNextAttribute should have thrown TnefException, not {0}", ex);
-					}
-				}
+			WriteHeader (stream);
+			// Declares 28 bytes of value but only supplies 4.
+			WriteRawAttribute (stream, TnefAttributeLevel.Message, TnefAttributeTag.MessageId, 28, BitConverter.GetBytes (0xFFFFFFFF), checksum: false);
+			stream.Position = 0;
+
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (reader.Read (), Is.True, "Read");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.MessageId), "Tag");
+
+			var buffer = new byte[28];
+
+			using (var value = reader.OpenValueStream ()) {
+				while (value.Read (buffer, 0, buffer.Length) > 0)
+					;
 			}
+
+			while (reader.Read ())
+				;
+
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.TruncatedStream));
 		}
 
 		[Test]
-		public void TestReadAfterClose ()
+		public async Task TestReadValueTruncatedAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.TnefVersion), 0, 4);
-				stream.Write (BitConverter.GetBytes (28), 0, 4);
-				stream.Write (BitConverter.GetBytes (65536), 0, 4);
-				stream.Position = 0;
+			var logger = new TestTnefComplianceLogger ();
+			using var stream = new MemoryStream ();
 
-				var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose);
-				reader.Close ();
+			WriteHeader (stream);
+			WriteRawAttribute (stream, TnefAttributeLevel.Message, TnefAttributeTag.MessageId, 28, BitConverter.GetBytes (0xFFFFFFFF), checksum: false);
+			stream.Position = 0;
 
-				Assert.Throws<ObjectDisposedException> (() => reader.ReadNextAttribute ());
+			using var reader = new TnefReader (stream) { ComplianceLogger = logger };
+
+			Assert.That (await reader.ReadAsync (), Is.True, "ReadAsync");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.MessageId), "Tag");
+
+			var buffer = new byte[28];
+
+			using (var value = reader.OpenValueStream ()) {
+				while (await value.ReadAsync (buffer, 0, buffer.Length) > 0)
+					;
 			}
+
+			while (await reader.ReadAsync ())
+				;
+
+			Assert.That (Violations (logger), Has.Member (TnefComplianceViolation.TruncatedStream));
+		}
+
+		#endregion
+
+		#region Value re-readability
+
+		[Test]
+		public void TestFixedWidthValueIsRereadable ()
+		{
+			var builder = new TnefBuilder ();
+
+			builder.WriteTnefVersion ();
+
+			using var reader = new TnefReader (builder.ToStream ());
+
+			Assert.That (reader.Read (), Is.True, "Read");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.TnefVersion), "Tag");
+
+			var first = reader.ReadValueAsInt32 ();
+			var second = reader.ReadValueAsInt32 ();
+
+			Assert.That (second, Is.EqualTo (first), "fixed-width values are re-readable");
 		}
 
 		[Test]
-		public void TestReadAttributeRawValueTruncatedLoose ()
+		public async Task TestFixedWidthValueIsRereadableAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.MessageId), 0, 4);
-				stream.Write (BitConverter.GetBytes (28), 0, 4);
-				stream.Write (BitConverter.GetBytes (0xFFFFFFFF), 0, 4);
-				stream.Position = 0;
+			var builder = new TnefBuilder ();
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					Assert.IsTrue (reader.ReadNextAttribute (), "ReadNextAttribute");
-					Assert.AreEqual (TnefAttributeTag.MessageId, reader.AttributeTag, "AttributeTag");
+			builder.WriteTnefVersion ();
 
-					var buffer = new byte[28];
-					int nread, n = 0;
+			using var reader = new TnefReader (builder.ToStream ());
 
-					do {
-						if ((nread = reader.ReadAttributeRawValue (buffer, n, buffer.Length - n)) == 0)
-							break;
+			Assert.That (await reader.ReadAsync (), Is.True, "ReadAsync");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.TnefVersion), "Tag");
 
-						n += nread;
-					} while (n < 28);
+			var first = await reader.ReadValueAsInt32Async ();
+			var second = await reader.ReadValueAsInt32Async ();
 
-					Assert.AreEqual (TnefComplianceStatus.StreamTruncated, reader.ComplianceStatus);
-				}
-			}
+			Assert.That (second, Is.EqualTo (first), "fixed-width values are re-readable");
 		}
 
 		[Test]
-		public void TestReadAttributeRawValueTruncatedStrict ()
+		public void TestReadMessageClassAsString ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.MessageId), 0, 4);
-				stream.Write (BitConverter.GetBytes (28), 0, 4);
-				stream.Write (BitConverter.GetBytes (0xFFFFFFFF), 0, 4);
-				stream.Position = 0;
+			using var stream = new MemoryStream ();
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Strict)) {
-					Assert.IsTrue (reader.ReadNextAttribute (), "ReadNextAttribute");
-					Assert.AreEqual (TnefAttributeTag.MessageId, reader.AttributeTag, "AttributeTag");
-
-					var buffer = new byte[28];
-					int n;
-
-					n = reader.ReadAttributeRawValue (buffer, 0, buffer.Length);
-
-					try {
-						reader.ReadAttributeRawValue (buffer, n, buffer.Length - n);
-						Assert.Fail ("ReadAttributeRawValue should have thrown TnefException");
-					} catch (TnefException ex) {
-						Assert.AreEqual (TnefComplianceStatus.StreamTruncated, ex.Error, "Error");
-					} catch (Exception ex) {
-						Assert.Fail ("ReadAttributeRawValue should have thrown TnefException, not {0}", ex);
-					}
-				}
+			using (var writer = new TnefWriter (stream, leaveOpen: true)) {
+				writer.WriteAttribute (TnefAttributeTag.MessageClass, "IPM.Note");
+				writer.WriteAttribute (TnefAttributeTag.OriginalMessageClass, "IPM.Note.Original");
 			}
+
+			stream.Position = 0;
+
+			using var reader = new TnefReader (stream);
+
+			do {
+				Assert.That (reader.Read (), Is.True, "Read MessageClass");
+			} while (reader.Tag != TnefAttributeTag.MessageClass);
+
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.MessageClass), "MessageClass Tag");
+			Assert.That (reader.ReadValueAsString (), Is.EqualTo ("IPM.Note"), "MessageClass");
+
+			Assert.That (reader.Read (), Is.True, "Read OriginalMessageClass");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.OriginalMessageClass), "OriginalMessageClass Tag");
+			Assert.That (reader.ReadValueAsString (), Is.EqualTo ("IPM.Note.Original"), "OriginalMessageClass");
 		}
 
 		[Test]
-		public void TestReadInt32 ()
+		public async Task TestReadMessageClassAsStringAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				var signature = BitConverter.GetBytes (0x223e9f78);
+			using var stream = new MemoryStream ();
 
-				stream.Write (signature, 0, signature.Length);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-
-				var buffer = BitConverter.GetBytes (1060);
-				stream.Write (buffer, 0, buffer.Length);
-				stream.Position = 0;
-
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					var value = reader.ReadInt32 ();
-
-					Assert.AreEqual (1060, value);
-				}
+			using (var writer = new TnefWriter (stream, leaveOpen: true)) {
+				await writer.WriteAttributeAsync (TnefAttributeTag.MessageClass, "IPM.Note");
+				await writer.WriteAttributeAsync (TnefAttributeTag.OriginalMessageClass, "IPM.Note.Original");
 			}
+
+			stream.Position = 0;
+
+			using var reader = new TnefReader (stream);
+
+			do {
+				Assert.That (await reader.ReadAsync (), Is.True, "Read MessageClass");
+			} while (reader.Tag != TnefAttributeTag.MessageClass);
+
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.MessageClass), "MessageClass Tag");
+			Assert.That (await reader.ReadValueAsStringAsync (), Is.EqualTo ("IPM.Note"), "MessageClass");
+
+			Assert.That (await reader.ReadAsync (), Is.True, "Read OriginalMessageClass");
+			Assert.That (reader.Tag, Is.EqualTo (TnefAttributeTag.OriginalMessageClass), "OriginalMessageClass Tag");
+			Assert.That (await reader.ReadValueAsStringAsync (), Is.EqualTo ("IPM.Note.Original"), "OriginalMessageClass");
 		}
 
 		[Test]
-		public void TestReadInt64 ()
+		public void TestSecondVariableReadThrows ()
 		{
-			using (var stream = new MemoryStream ()) {
-				var signature = BitConverter.GetBytes (0x223e9f78);
+			var builder = new TnefBuilder ();
 
-				stream.Write (signature, 0, signature.Length);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
+			builder.WriteAttribute (TnefAttributeLevel.Message, TnefAttributeTag.Owner, new byte[] { 1, 2, 3, 4 });
 
-				var buffer = BitConverter.GetBytes ((long) 1060);
-				stream.Write (buffer, 0, buffer.Length);
-				stream.Position = 0;
+			using var reader = new TnefReader (builder.ToStream ());
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					var value = reader.ReadInt64 ();
+			Assert.That (reader.Read (), Is.True, "Read");
 
-					Assert.AreEqual (1060, value);
-				}
-			}
+			var bytes = reader.ReadValueAsBytes ();
+
+			Assert.That (bytes, Is.EqualTo (new byte[] { 1, 2, 3, 4 }), "bytes");
+			Assert.Throws<InvalidOperationException> (() => reader.ReadValueAsString ());
 		}
 
 		[Test]
-		public void TestReadDouble ()
+		public async Task TestSecondVariableReadThrowsAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				var signature = BitConverter.GetBytes (0x223e9f78);
+			var builder = new TnefBuilder ();
 
-				stream.Write (signature, 0, signature.Length);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
+			builder.WriteAttribute (TnefAttributeLevel.Message, TnefAttributeTag.Owner, new byte[] { 1, 2, 3, 4 });
 
-				var buffer = BitConverter.GetBytes (1024.1024);
-				stream.Write (buffer, 0, buffer.Length);
-				stream.Position = 0;
+			using var reader = new TnefReader (builder.ToStream ());
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					var value = reader.ReadDouble ();
+			Assert.That (await reader.ReadAsync (), Is.True, "ReadAsync");
 
-					Assert.AreEqual (1024.1024, value);
-				}
-			}
+			var bytes = await reader.ReadValueAsBytesAsync ();
+
+			Assert.That (bytes, Is.EqualTo (new byte[] { 1, 2, 3, 4 }), "bytes");
+			Assert.ThrowsAsync<InvalidOperationException> (async () => await reader.ReadValueAsStringAsync ());
 		}
 
 		[Test]
-		public void TestReadSingle ()
+		public void TestValueStreamThrowsAfterReaderAdvances ()
 		{
-			using (var stream = new MemoryStream ()) {
-				var signature = BitConverter.GetBytes (0x223e9f78);
+			var builder = new TnefBuilder ();
 
-				stream.Write (signature, 0, signature.Length);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
+			builder.WriteAttribute (TnefAttributeLevel.Message, TnefAttributeTag.Owner, new byte[] { 1, 2, 3, 4 });
+			builder.WriteAttribute (TnefAttributeLevel.Message, TnefAttributeTag.Owner, new byte[] { 5, 6, 7, 8 });
 
-				var buffer = BitConverter.GetBytes ((float) 1024.1024);
-				stream.Write (buffer, 0, buffer.Length);
-				stream.Position = 0;
+			using var reader = new TnefReader (builder.ToStream ());
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					var value = reader.ReadSingle ();
+			Assert.That (reader.Read (), Is.True, "Read #1");
 
-					Assert.AreEqual ((float) 1024.1024, value);
-				}
-			}
+			var value = reader.OpenValueStream ();
+
+			Assert.That (reader.Read (), Is.True, "Read #2");
+			Assert.Throws<InvalidOperationException> (() => value.Read (new byte[4], 0, 4));
 		}
 
 		[Test]
-		public void TestSeekTruncatedLoose ()
+		public async Task TestValueStreamThrowsAfterReaderAdvancesAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.TnefVersion), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (65536), 0, 4);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.OemCodepage), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (28591), 0, 4);
-				stream.Position = 0;
+			var builder = new TnefBuilder ();
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Loose)) {
-					Assert.IsFalse (reader.Seek (64), "Seek");
-					Assert.AreEqual (TnefComplianceStatus.StreamTruncated, reader.ComplianceStatus);
-				}
-			}
+			builder.WriteAttribute (TnefAttributeLevel.Message, TnefAttributeTag.Owner, new byte[] { 1, 2, 3, 4 });
+			builder.WriteAttribute (TnefAttributeLevel.Message, TnefAttributeTag.Owner, new byte[] { 5, 6, 7, 8 });
+
+			using var reader = new TnefReader (builder.ToStream ());
+
+			Assert.That (await reader.ReadAsync (), Is.True, "ReadAsync #1");
+
+			var value = reader.OpenValueStream ();
+
+			Assert.That (await reader.ReadAsync (), Is.True, "ReadAsync #2");
+			Assert.Throws<InvalidOperationException> (() => value.Read (new byte[4], 0, 4));
+		}
+
+		#endregion
+
+		#region Compliance issue cap
+
+		[Test]
+		public void TestMaxIssuesPerViolationCap ()
+		{
+			var logger = new TestTnefComplianceLogger ();
+			var builder = new TnefBuilder ();
+			var unknown = (TnefAttributeTag) ((int) TnefAttributeType.Byte | 0x1234);
+
+			for (int i = 0; i < 10; i++)
+				builder.WriteAttribute (TnefAttributeLevel.Message, unknown, new byte[] { 0 });
+
+			using var reader = new TnefReader (builder.ToStream ()) {
+				ComplianceOptions = new TnefComplianceOptions { MaxIssuesPerViolation = 3 },
+				ComplianceLogger = logger
+			};
+
+			while (reader.Read ())
+				;
+
+			Assert.That (logger.Issues.Count (issue => issue.Violation == TnefComplianceViolation.UnknownAttribute), Is.EqualTo (3), "UnknownAttribute count");
+			Assert.That (logger.Issues.Count (issue => issue.Violation == TnefComplianceViolation.TooManyComplianceIssues), Is.EqualTo (1), "TooManyComplianceIssues count");
 		}
 
 		[Test]
-		public void TestSeekTruncatedStrict ()
+		public async Task TestMaxIssuesPerViolationCapAsync ()
 		{
-			using (var stream = new MemoryStream ()) {
-				stream.Write (BitConverter.GetBytes (0x223e9f78), 0, 4);
-				stream.WriteByte (0);
-				stream.WriteByte (0);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.TnefVersion), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (65536), 0, 4);
-				stream.WriteByte ((byte) TnefAttributeLevel.Message);
-				stream.Write (BitConverter.GetBytes ((int) TnefAttributeTag.OemCodepage), 0, 4);
-				stream.Write (BitConverter.GetBytes (4), 0, 4);
-				stream.Write (BitConverter.GetBytes (28591), 0, 4);
-				stream.Position = 0;
+			var logger = new TestTnefComplianceLogger ();
+			var builder = new TnefBuilder ();
+			var unknown = (TnefAttributeTag) ((int) TnefAttributeType.Byte | 0x1234);
 
-				using (var reader = new TnefReader (stream, 0, TnefComplianceMode.Strict)) {
-					try {
-						reader.Seek (64);
-						Assert.Fail ("Seek should have thrown TnefException");
-					} catch (TnefException ex) {
-						Assert.AreEqual (TnefComplianceStatus.StreamTruncated, ex.Error, "Error");
-					} catch (Exception ex) {
-						Assert.Fail ("Seek should have thrown TnefException, not {0}", ex);
-					}
-				}
-			}
+			for (int i = 0; i < 10; i++)
+				builder.WriteAttribute (TnefAttributeLevel.Message, unknown, new byte[] { 0 });
+
+			using var reader = new TnefReader (builder.ToStream ()) {
+				ComplianceLogger = logger
+			};
+
+			// Note: The options are read when the stream starts, so changes made after setting the logger apply.
+			reader.ComplianceOptions.MaxIssuesPerViolation = 3;
+
+			while (await reader.ReadAsync ())
+				;
+
+			Assert.That (logger.Issues.Count (issue => issue.Violation == TnefComplianceViolation.UnknownAttribute), Is.EqualTo (3), "UnknownAttribute count");
+			Assert.That (logger.Issues.Count (issue => issue.Violation == TnefComplianceViolation.TooManyComplianceIssues), Is.EqualTo (1), "TooManyComplianceIssues count");
 		}
+
+		#endregion
+
+		#region Disposal
+
+		[Test]
+		public void TestReadAfterDisposeThrows ()
+		{
+			var builder = new TnefBuilder ();
+
+			builder.WriteTnefVersion ();
+
+			var reader = new TnefReader (builder.ToStream ());
+
+			reader.Dispose ();
+
+			Assert.Throws<ObjectDisposedException> (() => reader.Read ());
+			Assert.Throws<ObjectDisposedException> (() => reader.ReadValueAsInt32 ());
+		}
+
+		[Test]
+		public void TestReadAfterDisposeThrowsAsync ()
+		{
+			var builder = new TnefBuilder ();
+
+			builder.WriteTnefVersion ();
+
+			var reader = new TnefReader (builder.ToStream ());
+
+			reader.Dispose ();
+
+			Assert.ThrowsAsync<ObjectDisposedException> (async () => await reader.ReadAsync ());
+		}
+
+		#endregion
+
+		#region leaveOpen
+
+		[Test]
+		public void TestLeaveOpenTrue ()
+		{
+			var builder = new TnefBuilder ();
+
+			builder.WriteTnefVersion ();
+
+			var stream = builder.ToStream ();
+
+			using (var reader = new TnefReader (stream, null, leaveOpen: true))
+				Assert.That (reader.Read (), Is.True, "Read");
+
+			Assert.DoesNotThrow (() => _ = stream.Position, "the underlying stream should remain open");
+			stream.Dispose ();
+		}
+
+		[Test]
+		public void TestLeaveOpenFalse ()
+		{
+			var builder = new TnefBuilder ();
+
+			builder.WriteTnefVersion ();
+
+			var stream = builder.ToStream ();
+
+			using (var reader = new TnefReader (stream))
+				Assert.That (reader.Read (), Is.True, "Read");
+
+			Assert.Throws<ObjectDisposedException> (() => _ = stream.Position, "the underlying stream should be disposed");
+		}
+
+		#endregion
 	}
 }

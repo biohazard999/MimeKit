@@ -1,0 +1,274 @@
+﻿//
+// IMimeParser.cs
+//
+// Author: Jeffrey Stedfast <jestedfa@microsoft.com>
+//
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+//
+
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace MimeKit
+{
+	/// <summary>
+	/// An interface for parsing messages, entities, and/or headers.
+	/// </summary>
+	/// <remarks>
+	/// An interface for parsing messages, entities, and/or headers. Implemented by <see cref="MimeParser"/> and
+	/// <see cref="LegacyMimeParser"/>.
+	/// </remarks>
+	public interface IMimeParser
+	{
+		/// <summary>
+		/// Get or set the parser options.
+		/// </summary>
+		/// <remarks>
+		/// Gets or sets the parser options.
+		/// </remarks>
+		/// <value>The parser options.</value>
+		public ParserOptions Options { get; set; }
+
+		/// <summary>
+		/// Get a value indicating whether the parser has reached the end of the input stream.
+		/// </summary>
+		/// <remarks>
+		/// Gets a value indicating whether the parser has reached the end of the input stream.
+		/// </remarks>
+		/// <value><see langword="true" /> if this parser has reached the end of the input stream;
+		/// otherwise, <see langword="false" />.</value>
+		bool IsEndOfStream { get; }
+
+		/// <summary>
+		/// Get the current position of the parser within the stream.
+		/// </summary>
+		/// <remarks>
+		/// Gets the current position of the parser within the stream.
+		/// </remarks>
+		/// <value>The stream offset.</value>
+		public long Position { get; }
+
+		/// <summary>
+		/// Get the mbox marker stream offset for the most recently parsed message.
+		/// </summary>
+		/// <remarks>
+		/// <para>Gets the mbox marker stream offset for the most recently parsed message.</para>
+		/// <para>If the <see cref="IMimeParser"/> was not initialized to parse the <see cref="MimeFormat.Mbox"/> format or if
+		/// the most recent call to <see cref="ParseMessage(CancellationToken)"/> or <see cref="ParseMessageAsync(CancellationToken)"/>
+		/// was not successful, then this property will return <c>-1</c>.</para>
+		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\MimeParserExamples.cs" region="ParseMbox" />
+		/// </example>
+		/// <value>The mbox marker stream offset.</value>
+		long MboxMarkerOffset { get; }
+
+		/// <summary>
+		/// Get the mbox marker for the most recently parsed message.
+		/// </summary>
+		/// <remarks>
+		/// <para>Gets the mbox marker for the most recently parsed message.</para>
+		/// <para>If the <see cref="IMimeParser"/> was not initialized to parse the <see cref="MimeFormat.Mbox"/> format or if
+		/// the most recent call to <see cref="ParseMessage(CancellationToken)"/> or <see cref="ParseMessageAsync(CancellationToken)"/>
+		/// was not successful, then this property will return <see langword="null"/>.</para>
+		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\MimeParserExamples.cs" region="ParseMbox" />
+		/// </example>
+		/// <value>The mbox marker.</value>
+		string? MboxMarker { get; }
+
+		/// <summary>
+		/// Set the stream to parse.
+		/// </summary>
+		/// <remarks>
+		/// <para>Sets the stream to parse.</para>
+		/// <para><see cref="MimeContentStorage.Memory"/> copies MIME part content into memory (the default).
+		/// <see cref="MimeContentStorage.Source"/> references content in the seekable input stream instead.
+		/// The caller owns the stream in both modes. With Source, keep it open and its contents unchanged
+		/// while the parsed content is in use. Disposing parsed messages or entities does not close the input stream.</para>
+		/// </remarks>
+		/// <param name="stream">The stream to parse.</param>
+		/// <param name="format">The format of the stream.</param>
+		/// <param name="storage">The storage used for parsed MIME part content.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="format"/> or <paramref name="storage"/> is not a valid value.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="storage"/> is <see cref="MimeContentStorage.Source"/> and <paramref name="stream"/> is not seekable.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="stream"/> is <see langword="null"/>.
+		/// </exception>
+		void SetStream (Stream stream, MimeFormat format, MimeContentStorage storage);
+
+		/// <summary>
+		/// Set the stream to parse.
+		/// </summary>
+		/// <remarks>
+		/// Sets the stream to parse, copying MIME part content into memory.
+		/// </remarks>
+		/// <param name="stream">The stream to parse.</param>
+		/// <param name="format">The format of the stream.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="stream"/> is <see langword="null"/>.
+		/// </exception>
+		void SetStream (Stream stream, MimeFormat format = MimeFormat.Default);
+
+		/// <summary>
+		/// Set the stream to parse.
+		/// </summary>
+		/// <remarks>
+		/// <para>Sets the stream to parse.</para>
+		/// <para><see cref="MimeContentStorage.Memory"/> copies MIME part content into memory (the default).
+		/// <see cref="MimeContentStorage.Source"/> references content in the seekable input stream instead.
+		/// The caller owns the stream in both modes. With Source, keep it open and its contents unchanged
+		/// while the parsed content is in use. Disposing parsed messages or entities does not close the input stream.</para>
+		/// </remarks>
+		/// <param name="stream">The stream to parse.</param>
+		/// <param name="storage">The storage used for parsed MIME part content.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="storage"/> is not a valid value.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="storage"/> is <see cref="MimeContentStorage.Source"/> and <paramref name="stream"/> is not seekable.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="stream"/> is <see langword="null"/>.
+		/// </exception>
+		void SetStream (Stream stream, MimeContentStorage storage);
+
+		/// <summary>
+		/// Parse a list of headers from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Parses a list of headers from the stream.
+		/// </remarks>
+		/// <returns>The parsed list of headers.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the headers.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		HeaderList ParseHeaders (CancellationToken cancellationToken = default);
+
+		/// <summary>
+		/// Asynchronously parse a list of headers from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Asynchronously parses a list of headers from the stream.
+		/// </remarks>
+		/// <returns>The parsed list of headers.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the headers.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		Task<HeaderList> ParseHeadersAsync (CancellationToken cancellationToken = default);
+
+		/// <summary>
+		/// Parse an entity from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Parses an entity from the stream.
+		/// </remarks>
+		/// <returns>The parsed entity.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the entity.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		MimeEntity ParseEntity (CancellationToken cancellationToken = default);
+
+		/// <summary>
+		/// Asynchronously parse an entity from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Asynchronously parses an entity from the stream.
+		/// </remarks>
+		/// <returns>The parsed entity.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the entity.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		Task<MimeEntity> ParseEntityAsync (CancellationToken cancellationToken = default);
+
+		/// <summary>
+		/// Parse a message from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Parses a message from the stream.
+		/// </remarks>
+		/// <returns>The parsed message.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the message.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		MimeMessage ParseMessage (CancellationToken cancellationToken = default);
+
+		/// <summary>
+		/// Asynchronously parse a message from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Asynchronously parses a message from the stream.
+		/// </remarks>
+		/// <returns>The parsed message.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the message.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		Task<MimeMessage> ParseMessageAsync (CancellationToken cancellationToken = default);
+	}
+}

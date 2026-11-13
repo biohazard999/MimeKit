@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -71,11 +71,11 @@ namespace MimeKit.Text {
 		/// <param name="text">The original text.</param>
 		/// <returns>A string representing a shortened preview of the original text.</returns>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
 		public override string GetPreviewText (string text)
 		{
-			if (text == null)
+			if (text is null)
 				throw new ArgumentNullException (nameof (text));
 
 			if (text.Length == 0)
@@ -116,11 +116,11 @@ namespace MimeKit.Text {
 		/// <param name="reader">The original text stream.</param>
 		/// <returns>A string representing a shortened preview of the original text.</returns>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="reader"/> is <c>null</c>.
+		/// <paramref name="reader"/> is <see langword="null"/>.
 		/// </exception>
 		public override string GetPreviewText (TextReader reader)
 		{
-			if (reader == null)
+			if (reader is null)
 				throw new ArgumentNullException (nameof (reader));
 
 			var preview = new char[MaximumPreviewLength];

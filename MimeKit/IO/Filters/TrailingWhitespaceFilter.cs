@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 //
+
+using System;
 
 using MimeKit.Utils;
 
@@ -47,37 +49,33 @@ namespace MimeKit.IO.Filters {
 		{
 		}
 
-		unsafe int Filter (byte* inbuf, int length, byte* outbuf)
+		int Filter (ReadOnlySpan<byte> input, byte[] output)
 		{
-			byte* inend = inbuf + length;
-			byte* outptr = outbuf;
-			byte* inptr = inbuf;
+			int outputIndex = 0;
 			int count = 0;
 
-			while (inptr < inend) {
-				if ((*inptr).IsBlank ()) {
-					lwsp.Add (*inptr);
-				} else if (*inptr == (byte) '\r') {
-					*outptr++ = *inptr;
+			foreach (var c in input) {
+				if (c.IsBlank ()) {
+					lwsp.Add (c);
+				} else if (c == (byte) '\r') {
+					output[outputIndex++] = c;
 					lwsp.Clear ();
 					count++;
-				} else if (*inptr == (byte) '\n') {
-					*outptr++ = *inptr;
+				} else if (c == (byte) '\n') {
+					output[outputIndex++] = c;
 					lwsp.Clear ();
 					count++;
 				} else {
 					if (lwsp.Count > 0) {
-						lwsp.CopyTo (OutputBuffer, count);
-						outptr += lwsp.Count;
+						lwsp.CopyTo (output, count);
+						outputIndex += lwsp.Count;
 						count += lwsp.Count;
 						lwsp.Clear ();
 					}
 
-					*outptr++ = *inptr;
+					output[outputIndex++] = c;
 					count++;
 				}
-
-				inptr++;
 			}
 
 			return count;
@@ -96,7 +94,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="length">The length of the input buffer, starting at <paramref name="startIndex"/>.</param>
 		/// <param name="outputIndex">The output index.</param>
 		/// <param name="outputLength">The output length.</param>
-		/// <param name="flush">If set to <c>true</c>, all internally buffered data should be flushed to the output buffer.</param>
+		/// <param name="flush">If set to <see langword="true" />, all internally buffered data should be flushed to the output buffer.</param>
 		protected override byte[] Filter (byte[] input, int startIndex, int length, out int outputIndex, out int outputLength, bool flush)
 		{
 			if (length == 0) {
@@ -110,23 +108,17 @@ namespace MimeKit.IO.Filters {
 			}
 
 			EnsureOutputSize (length + lwsp.Count, false);
-
-			unsafe {
-				fixed (byte* inptr = input, outptr = OutputBuffer) {
-					outputLength = Filter (inptr + startIndex, length, outptr);
-				}
-			}
+			outputLength = Filter (input.AsSpan (startIndex, length), OutputBuffer);
+			outputIndex = 0;
 
 			if (flush)
 				lwsp.Clear ();
-
-			outputIndex = 0;
 
 			return OutputBuffer;
 		}
 
 		/// <summary>
-		/// Resets the filter.
+		/// Reset the filter.
 		/// </summary>
 		/// <remarks>
 		/// Resets the filter.

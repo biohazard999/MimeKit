@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,151 +28,74 @@ using System;
 using System.IO;
 using System.Text;
 using System.Threading;
-using System.Diagnostics;
-using System.Collections;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 
 using MimeKit.IO;
 using MimeKit.Utils;
 
 namespace MimeKit {
-	enum BoundaryType
-	{
-		None,
-		Eos,
-		ImmediateBoundary,
-		ImmediateEndBoundary,
-		ParentBoundary,
-		ParentEndBoundary,
-	}
-
-	class Boundary
-	{
-		public static readonly byte[] MboxFrom = Encoding.ASCII.GetBytes ("From ");
-
-		public byte[] Marker { get; private set; }
-		public int FinalLength { get { return Marker.Length; } }
-		public int Length { get; private set; }
-		public int MaxLength { get; private set; }
-
-		public Boundary (string boundary, int currentMaxLength)
-		{
-			Marker = Encoding.UTF8.GetBytes ("--" + boundary + "--");
-			Length = Marker.Length - 2;
-
-			MaxLength = Math.Max (currentMaxLength, Marker.Length);
-		}
-
-		Boundary ()
-		{
-		}
-
-		public static Boundary CreateMboxBoundary ()
-		{
-			var boundary = new Boundary ();
-			boundary.Marker = MboxFrom;
-			boundary.MaxLength = 5;
-			boundary.Length = 5;
-			return boundary;
-		}
-
-#if DEBUG_PARSER
-		public override string ToString ()
-		{
-			return Encoding.UTF8.GetString (Marker, 0, Marker.Length);
-		}
-#endif
-	}
-
-	enum MimeParserState : sbyte
-	{
-		Error = -1,
-		Initialized,
-		MboxMarker,
-		MessageHeaders,
-		Headers,
-		Content,
-		Boundary,
-		Complete,
-		Eos
-	}
-
 	/// <summary>
 	/// A MIME message and entity parser.
 	/// </summary>
 	/// <remarks>
-	/// A MIME parser is used to parse <see cref="MimeMessage"/> and
-	/// <see cref="MimeEntity"/> objects from arbitrary streams.
+	/// <para>A MIME parser is used to parse <see cref="MimeMessage"/> and
+	/// <see cref="MimeEntity"/> objects from arbitrary streams.</para>
+	/// <para>The parser is built on top of a <see cref="MimeReader"/>, and the protected <c>On*</c> methods
+	/// mirror the <see cref="MimeReader"/> callbacks so that subclasses can observe the parsing process (for
+	/// example, to record the stream offsets of each entity). Overrides must call the base implementation
+	/// or the parser will not be able to construct the resulting <see cref="MimeMessage"/> or
+	/// <see cref="MimeEntity"/>.</para>
 	/// </remarks>
-	public partial class MimeParser : IEnumerable<MimeMessage>
+	public partial class MimeParser : IMimeParser
 	{
-		static readonly byte[] UTF8ByteOrderMark = { 0xEF, 0xBB, 0xBF };
-		const int ReadAheadSize = 128;
-		const int BlockSize = 4096;
-		const int PadSize = 4;
+		readonly Stack<object> stack = new Stack<object> ();
+		readonly Reader reader;
 
-		// I/O buffering
-		readonly byte[] input = new byte[ReadAheadSize + BlockSize + PadSize];
-		const int inputStart = ReadAheadSize;
-		int inputIndex = ReadAheadSize;
-		int inputEnd = ReadAheadSize;
-
-		// mbox From-line state
-		byte[] mboxMarkerBuffer;
+		// Mbox state
+		byte[]? mboxMarkerBuffer;
 		long mboxMarkerOffset;
 		int mboxMarkerLength;
 
-		// message/rfc822 mbox markers (shouldn't exist, but sometimes do)
-		byte[] preHeaderBuffer = new byte[128];
+		// Current MimeMessage/MimeEntity Header state
+		readonly List<Header> headers = new List<Header> ();
+		byte[]? preHeaderBuffer;
 		int preHeaderLength;
 
-		// header buffer
-		byte[] headerBuffer = new byte[512];
-		long headerOffset;
-		int headerIndex;
+		byte[]? rawBoundary;
 
-		readonly List<Boundary> bounds = new List<Boundary> ();
-		readonly List<Header> headers = new List<Header> ();
+		// MimePart content and Multipart preamble/epilogue state
+		Stream? content;
 
-		MimeParserState state;
-		BoundaryType boundary;
-		MimeFormat format;
-		bool persistent;
-		bool toplevel;
-		bool eos;
+		bool parsingMessageHeaders;
+		bool hasBodySeparator;
+		int depth;
 
-		ParserOptions options; // FIXME: might be better if devs passed ParserOptions into the Parse*() methods rather than .ctor and/or SetStream()
-		long headerBlockBegin;
-		long headerBlockEnd;
-		long contentEnd;
-
-		long prevLineBeginOffset;
-		long lineBeginOffset;
-		int lineNumber;
-
-		Stream stream;
-		long position;
+		MimeContentStorage storage;
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="MimeParser"/> class.
 		/// </summary>
 		/// <remarks>
 		/// <para>Creates a new <see cref="MimeParser"/> that will parse the specified stream.</para>
-		/// <para>If <paramref name="persistent"/> is <c>true</c> and <paramref name="stream"/> is seekable, then
-		/// the <see cref="MimeParser"/> will not copy the content of <see cref="MimePart"/>s into memory. Instead,
-		/// it will use a <see cref="BoundStream"/> to reference a substream of <paramref name="stream"/>.
-		/// This has the potential to not only save memory usage, but also improve <see cref="MimeParser"/>
-		/// performance.</para>
-		/// <para>It should be noted, however, that disposing <paramref name="stream"/> will make it impossible
-		/// for <see cref="MimeContent"/> to read the content.</para>
+		/// <para><see cref="MimeContentStorage.Memory"/> copies MIME part content into memory (the default).
+		/// <see cref="MimeContentStorage.Source"/> references content in the seekable input stream instead.
+		/// The caller owns the stream in both modes. With Source, keep it open and its contents unchanged
+		/// while the parsed content is in use. Disposing parsed messages or entities does not close the input stream.</para>
 		/// </remarks>
 		/// <param name="stream">The stream to parse.</param>
 		/// <param name="format">The format of the stream.</param>
-		/// <param name="persistent"><c>true</c> if the stream is persistent; otherwise <c>false</c>.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="stream"/> is <c>null</c>.
+		/// <param name="storage">The storage used for parsed MIME part content.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="format"/> or <paramref name="storage"/> is not a valid value.
 		/// </exception>
-		public MimeParser (Stream stream, MimeFormat format, bool persistent = false) : this (ParserOptions.Default, stream, format, persistent)
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="storage"/> is <see cref="MimeContentStorage.Source"/> and <paramref name="stream"/> is not seekable.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="stream"/> is <see langword="null"/>.
+		/// </exception>
+		public MimeParser (Stream stream, MimeFormat format, MimeContentStorage storage = MimeContentStorage.Memory) : this (ParserOptions.Default, stream, format, storage)
 		{
 		}
 
@@ -181,20 +104,23 @@ namespace MimeKit {
 		/// </summary>
 		/// <remarks>
 		/// <para>Creates a new <see cref="MimeParser"/> that will parse the specified stream.</para>
-		/// <para>If <paramref name="persistent"/> is <c>true</c> and <paramref name="stream"/> is seekable, then
-		/// the <see cref="MimeParser"/> will not copy the content of <see cref="MimePart"/>s into memory. Instead,
-		/// it will use a <see cref="BoundStream"/> to reference a substream of <paramref name="stream"/>.
-		/// This has the potential to not only save memory usage, but also improve <see cref="MimeParser"/>
-		/// performance.</para>
-		/// <para>It should be noted, however, that disposing <paramref name="stream"/> will make it impossible
-		/// for <see cref="MimeContent"/> to read the content.</para>
+		/// <para><see cref="MimeContentStorage.Memory"/> copies MIME part content into memory (the default).
+		/// <see cref="MimeContentStorage.Source"/> references content in the seekable input stream instead.
+		/// The caller owns the stream in both modes. With Source, keep it open and its contents unchanged
+		/// while the parsed content is in use. Disposing parsed messages or entities does not close the input stream.</para>
 		/// </remarks>
 		/// <param name="stream">The stream to parse.</param>
-		/// <param name="persistent"><c>true</c> if the stream is persistent; otherwise <c>false</c>.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="stream"/> is <c>null</c>.
+		/// <param name="storage">The storage used for parsed MIME part content.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="storage"/> is not a valid value.
 		/// </exception>
-		public MimeParser (Stream stream, bool persistent = false) : this (ParserOptions.Default, stream, MimeFormat.Default, persistent)
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="storage"/> is <see cref="MimeContentStorage.Source"/> and <paramref name="stream"/> is not seekable.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="stream"/> is <see langword="null"/>.
+		/// </exception>
+		public MimeParser (Stream stream, MimeContentStorage storage = MimeContentStorage.Memory) : this (ParserOptions.Default, stream, MimeFormat.Default, storage)
 		{
 		}
 
@@ -203,23 +129,26 @@ namespace MimeKit {
 		/// </summary>
 		/// <remarks>
 		/// <para>Creates a new <see cref="MimeParser"/> that will parse the specified stream.</para>
-		/// <para>If <paramref name="persistent"/> is <c>true</c> and <paramref name="stream"/> is seekable, then
-		/// the <see cref="MimeParser"/> will not copy the content of <see cref="MimePart"/>s into memory. Instead,
-		/// it will use a <see cref="BoundStream"/> to reference a substream of <paramref name="stream"/>.
-		/// This has the potential to not only save memory usage, but also improve <see cref="MimeParser"/>
-		/// performance.</para>
-		/// <para>It should be noted, however, that disposing <paramref name="stream"/> will make it impossible
-		/// for <see cref="MimeContent"/> to read the content.</para>
+		/// <para><see cref="MimeContentStorage.Memory"/> copies MIME part content into memory (the default).
+		/// <see cref="MimeContentStorage.Source"/> references content in the seekable input stream instead.
+		/// The caller owns the stream in both modes. With Source, keep it open and its contents unchanged
+		/// while the parsed content is in use. Disposing parsed messages or entities does not close the input stream.</para>
 		/// </remarks>
 		/// <param name="options">The parser options.</param>
 		/// <param name="stream">The stream to parse.</param>
-		/// <param name="persistent"><c>true</c> if the stream is persistent; otherwise <c>false</c>.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
+		/// <param name="storage">The storage used for parsed MIME part content.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="storage"/> is not a valid value.
 		/// </exception>
-		public MimeParser (ParserOptions options, Stream stream, bool persistent = false) : this (options, stream, MimeFormat.Default, persistent)
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="storage"/> is <see cref="MimeContentStorage.Source"/> and <paramref name="stream"/> is not seekable.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
+		/// <para>-or-</para>
+		/// <para><paramref name="stream"/> is <see langword="null"/>.</para>
+		/// </exception>
+		public MimeParser (ParserOptions options, Stream stream, MimeContentStorage storage = MimeContentStorage.Memory) : this (options, stream, MimeFormat.Default, storage)
 		{
 		}
 
@@ -228,1465 +157,1481 @@ namespace MimeKit {
 		/// </summary>
 		/// <remarks>
 		/// <para>Creates a new <see cref="MimeParser"/> that will parse the specified stream.</para>
-		/// <para>If <paramref name="persistent"/> is <c>true</c> and <paramref name="stream"/> is seekable, then
-		/// the <see cref="MimeParser"/> will not copy the content of <see cref="MimePart"/>s into memory. Instead,
-		/// it will use a <see cref="BoundStream"/> to reference a substream of <paramref name="stream"/>.
-		/// This has the potential to not only save memory usage, but also improve <see cref="MimeParser"/>
-		/// performance.</para>
-		/// <para>It should be noted, however, that disposing <paramref name="stream"/> will make it impossible
-		/// for <see cref="MimeContent"/> to read the content.</para>
+		/// <para><see cref="MimeContentStorage.Memory"/> copies MIME part content into memory (the default).
+		/// <see cref="MimeContentStorage.Source"/> references content in the seekable input stream instead.
+		/// The caller owns the stream in both modes. With Source, keep it open and its contents unchanged
+		/// while the parsed content is in use. Disposing parsed messages or entities does not close the input stream.</para>
 		/// </remarks>
 		/// <param name="options">The parser options.</param>
 		/// <param name="stream">The stream to parse.</param>
 		/// <param name="format">The format of the stream.</param>
-		/// <param name="persistent"><c>true</c> if the stream is persistent; otherwise <c>false</c>.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
+		/// <param name="storage">The storage used for parsed MIME part content.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="format"/> or <paramref name="storage"/> is not a valid value.
 		/// </exception>
-		public MimeParser (ParserOptions options, Stream stream, MimeFormat format, bool persistent = false)
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="storage"/> is <see cref="MimeContentStorage.Source"/> and <paramref name="stream"/> is not seekable.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
+		/// <para>-or-</para>
+		/// <para><paramref name="stream"/> is <see langword="null"/>.</para>
+		/// </exception>
+		public MimeParser (ParserOptions options, Stream stream, MimeFormat format, MimeContentStorage storage = MimeContentStorage.Memory)
 		{
-			SetStream (options, stream, format, persistent);
+			ArgumentValidator.Validate (stream, format, storage);
+
+			reader = new Reader (this, options, stream, format);
+
+			OnSetStream (format, storage);
 		}
 
 		/// <summary>
-		/// Gets a value indicating whether the parser has reached the end of the input stream.
+		/// Get or set the parser options.
+		/// </summary>
+		/// <remarks>
+		/// Gets or sets the parser options.
+		/// </remarks>
+		/// <value>The parser options.</value>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="value"/> is <see langword="null"/>.
+		/// </exception>
+		public ParserOptions Options {
+			get { return reader.Options; }
+			set { reader.Options = value; }
+		}
+
+		/// <summary>
+		/// Get a value indicating whether the parser has reached the end of the input stream.
 		/// </summary>
 		/// <remarks>
 		/// Gets a value indicating whether the parser has reached the end of the input stream.
 		/// </remarks>
-		/// <value><c>true</c> if this parser has reached the end of the input stream;
-		/// otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if this parser has reached the end of the input stream;
+		/// otherwise, <see langword="false" />.</value>
 		public bool IsEndOfStream {
-			get { return state == MimeParserState.Eos; }
+			get { return reader.IsEndOfStream; }
 		}
 
 		/// <summary>
-		/// Gets the current position of the parser within the stream.
+		/// Get the current position of the parser within the stream.
 		/// </summary>
 		/// <remarks>
 		/// Gets the current position of the parser within the stream.
 		/// </remarks>
 		/// <value>The stream offset.</value>
 		public long Position {
-			get { return GetOffset (inputIndex); }
+			get { return reader.Position; }
 		}
 
 		/// <summary>
-		/// Gets the most recent mbox marker offset.
+		/// Get or set the logger to use for reporting MIME compliance violations.
 		/// </summary>
 		/// <remarks>
-		/// Gets the most recent mbox marker offset.
+		/// <para>Gets or sets the logger to use for reporting MIME compliance violations.</para>
+		/// <para>When no logger is set, no compliance checks are performed at all. When a logger is
+		/// set, <see cref="ComplianceOptions"/> controls which checks are performed and how the
+		/// violations that they detect are reported.</para>
 		/// </remarks>
-		/// <value>The mbox marker offset.</value>
+		/// <value>The MIME compliance logger.</value>
+		public IMimeComplianceLogger? ComplianceLogger {
+			get { return reader.ComplianceLogger; }
+			set { reader.ComplianceLogger = value; }
+		}
+
+		/// <summary>
+		/// Get or set the options that control how MIME compliance violations are reported.
+		/// </summary>
+		/// <remarks>
+		/// <para>Gets or sets the options that control how MIME compliance violations are reported to
+		/// the <see cref="ComplianceLogger"/>.</para>
+		/// <para>The options are read at the start of each parse operation, so changes made while a
+		/// message is being parsed take effect from the next parse operation.</para>
+		/// </remarks>
+		/// <value>The MIME compliance options.</value>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="value"/> is <see langword="null"/>.
+		/// </exception>
+		public MimeComplianceOptions ComplianceOptions {
+			get { return reader.ComplianceOptions; }
+			set { reader.ComplianceOptions = value; }
+		}
+
+		/// <summary>
+		/// Get the mbox marker stream offset for the most recently parsed message.
+		/// </summary>
+		/// <remarks>
+		/// <para>Gets the mbox marker stream offset for the most recently parsed message.</para>
+		/// <para>If the <see cref="IMimeParser"/> was not initialized to parse the <see cref="MimeFormat.Mbox"/> format or if
+		/// the most recent call to <see cref="ParseMessage(CancellationToken)"/> or <see cref="ParseMessageAsync(CancellationToken)"/>
+		/// was not successful, then this property will return <c>-1</c>.</para>
+		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\MimeParserExamples.cs" region="ParseMbox" />
+		/// </example>
+		/// <value>The mbox marker stream offset.</value>
 		public long MboxMarkerOffset {
 			get { return mboxMarkerOffset; }
 		}
 
 		/// <summary>
-		/// Gets the most recent mbox marker.
+		/// Get the mbox marker for the most recently parsed message.
 		/// </summary>
 		/// <remarks>
-		/// Gets the most recent mbox marker.
+		/// <para>Gets the mbox marker for the most recently parsed message.</para>
+		/// <para>If the <see cref="MimeParser"/> was not initialized to parse the <see cref="MimeFormat.Mbox"/> format or if
+		/// the most recent call to <see cref="ParseMessage(CancellationToken)"/> or <see cref="ParseMessageAsync(CancellationToken)"/>
+		/// was not successful, then this property will return <see langword="null"/>.</para>
 		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\MimeParserExamples.cs" region="ParseMbox" />
+		/// </example>
 		/// <value>The mbox marker.</value>
-		public string MboxMarker {
-			get { return Encoding.UTF8.GetString (mboxMarkerBuffer, 0, mboxMarkerLength); }
+		public string? MboxMarker {
+			get { return mboxMarkerOffset != -1 ? Encoding.UTF8.GetString (mboxMarkerBuffer!, 0, mboxMarkerLength) : null; }
 		}
 
-		/// <summary>
-		/// Sets the stream to parse.
-		/// </summary>
-		/// <remarks>
-		/// <para>Sets the stream to parse.</para>
-		/// <para>If <paramref name="persistent"/> is <c>true</c> and <paramref name="stream"/> is seekable, then
-		/// the <see cref="MimeParser"/> will not copy the content of <see cref="MimePart"/>s into memory. Instead,
-		/// it will use a <see cref="BoundStream"/> to reference a substream of <paramref name="stream"/>.
-		/// This has the potential to not only save memory usage, but also improve <see cref="MimeParser"/>
-		/// performance.</para>
-		/// <para>It should be noted, however, that disposing <paramref name="stream"/> will make it impossible
-		/// for <see cref="MimeContent"/> to read the content.</para>
-		/// </remarks>
-		/// <param name="options">The parser options.</param>
-		/// <param name="stream">The stream to parse.</param>
-		/// <param name="format">The format of the stream.</param>
-		/// <param name="persistent"><c>true</c> if the stream is persistent; otherwise <c>false</c>.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
-		/// </exception>
-		public void SetStream (ParserOptions options, Stream stream, MimeFormat format, bool persistent = false)
+		void OnSetStream (MimeFormat format, MimeContentStorage storage)
 		{
-			if (options == null)
-				throw new ArgumentNullException (nameof (options));
+			this.storage = storage;
 
-			if (stream == null)
-				throw new ArgumentNullException (nameof (stream));
+			mboxMarkerOffset = -1;
 
-			this.persistent = persistent && stream.CanSeek;
-			this.options = options.Clone ();
-			this.format = format;
-			this.stream = stream;
-
-			inputIndex = inputStart;
-			inputEnd = inputStart;
-
-			mboxMarkerOffset = 0;
-			mboxMarkerLength = 0;
-			headerBlockBegin = 0;
-			headerBlockEnd = 0;
-			lineNumber = 1;
-			contentEnd = 0;
-
-			position = stream.CanSeek ? stream.Position : 0;
-			prevLineBeginOffset = position;
-			lineBeginOffset = position;
-			preHeaderLength = 0;
-			headers.Clear ();
-			headerOffset = 0;
-			headerIndex = 0;
-			toplevel = false;
-			eos = false;
-
-			bounds.Clear ();
-			if (format == MimeFormat.Mbox) {
-				bounds.Add (Boundary.CreateMboxBoundary ());
-
-				if (mboxMarkerBuffer == null)
-					mboxMarkerBuffer = new byte[ReadAheadSize];
-			}
-
-			state = MimeParserState.Initialized;
-			boundary = BoundaryType.None;
+			if (format == MimeFormat.Mbox && mboxMarkerBuffer is null)
+				mboxMarkerBuffer = new byte[64];
 		}
 
 		/// <summary>
-		/// Sets the stream to parse.
+		/// Set the stream to parse.
 		/// </summary>
 		/// <remarks>
 		/// <para>Sets the stream to parse.</para>
-		/// <para>If <paramref name="persistent"/> is <c>true</c> and <paramref name="stream"/> is seekable, then
-		/// the <see cref="MimeParser"/> will not copy the content of <see cref="MimePart"/>s into memory. Instead,
-		/// it will use a <see cref="BoundStream"/> to reference a substream of <paramref name="stream"/>.
-		/// This has the potential to not only save memory usage, but also improve <see cref="MimeParser"/>
-		/// performance.</para>
-		/// <para>It should be noted, however, that disposing <paramref name="stream"/> will make it impossible
-		/// for <see cref="MimeContent"/> to read the content.</para>
-		/// </remarks>
-		/// <param name="options">The parser options.</param>
-		/// <param name="stream">The stream to parse.</param>
-		/// <param name="persistent"><c>true</c> if the stream is persistent; otherwise <c>false</c>.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
-		/// </exception>
-		public void SetStream (ParserOptions options, Stream stream, bool persistent = false)
-		{
-			SetStream (options, stream, MimeFormat.Default, persistent);
-		}
-
-		/// <summary>
-		/// Sets the stream to parse.
-		/// </summary>
-		/// <remarks>
-		/// <para>Sets the stream to parse.</para>
-		/// <para>If <paramref name="persistent"/> is <c>true</c> and <paramref name="stream"/> is seekable, then
-		/// the <see cref="MimeParser"/> will not copy the content of <see cref="MimePart"/>s into memory. Instead,
-		/// it will use a <see cref="BoundStream"/> to reference a substream of <paramref name="stream"/>.
-		/// This has the potential to not only save memory usage, but also improve <see cref="MimeParser"/>
-		/// performance.</para>
-		/// <para>It should be noted, however, that disposing <paramref name="stream"/> will make it impossible
-		/// for <see cref="MimeContent"/> to read the content.</para>
+		/// <para><see cref="MimeContentStorage.Memory"/> copies MIME part content into memory (the default).
+		/// <see cref="MimeContentStorage.Source"/> references content in the seekable input stream instead.
+		/// The caller owns the stream in both modes. With Source, keep it open and its contents unchanged
+		/// while the parsed content is in use. Disposing parsed messages or entities does not close the input stream.</para>
 		/// </remarks>
 		/// <param name="stream">The stream to parse.</param>
 		/// <param name="format">The format of the stream.</param>
-		/// <param name="persistent"><c>true</c> if the stream is persistent; otherwise <c>false</c>.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="stream"/> is <c>null</c>.
+		/// <param name="storage">The storage used for parsed MIME part content.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="format"/> or <paramref name="storage"/> is not a valid value.
 		/// </exception>
-		public void SetStream (Stream stream, MimeFormat format, bool persistent = false)
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="storage"/> is <see cref="MimeContentStorage.Source"/> and <paramref name="stream"/> is not seekable.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="stream"/> is <see langword="null"/>.
+		/// </exception>
+		public void SetStream (Stream stream, MimeFormat format, MimeContentStorage storage)
 		{
-			SetStream (ParserOptions.Default, stream, format, persistent);
+			ArgumentValidator.Validate (stream, format, storage);
+
+			reader.SetStream (stream, format);
+
+			OnSetStream (format, storage);
 		}
 
 		/// <summary>
-		/// Sets the stream to parse.
+		/// Set the stream to parse.
+		/// </summary>
+		/// <remarks>
+		/// Sets the stream to parse, copying MIME part content into memory.
+		/// </remarks>
+		/// <param name="stream">The stream to parse.</param>
+		/// <param name="format">The format of the stream.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="format"/> is not a valid value.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="stream"/> is <see langword="null"/>.
+		/// </exception>
+		public virtual void SetStream (Stream stream, MimeFormat format = MimeFormat.Default)
+		{
+			SetStream (stream, format, MimeContentStorage.Memory);
+		}
+
+		/// <summary>
+		/// Set the stream to parse.
 		/// </summary>
 		/// <remarks>
 		/// <para>Sets the stream to parse.</para>
-		/// <para>If <paramref name="persistent"/> is <c>true</c> and <paramref name="stream"/> is seekable, then
-		/// the <see cref="MimeParser"/> will not copy the content of <see cref="MimePart"/>s into memory. Instead,
-		/// it will use a <see cref="BoundStream"/> to reference a substream of <paramref name="stream"/>.
-		/// This has the potential to not only save memory usage, but also improve <see cref="MimeParser"/>
-		/// performance.</para>
-		/// <para>It should be noted, however, that disposing <paramref name="stream"/> will make it impossible
-		/// for <see cref="MimeContent"/> to read the content.</para>
+		/// <para><see cref="MimeContentStorage.Memory"/> copies MIME part content into memory (the default).
+		/// <see cref="MimeContentStorage.Source"/> references content in the seekable input stream instead.
+		/// The caller owns the stream in both modes. With Source, keep it open and its contents unchanged
+		/// while the parsed content is in use. Disposing parsed messages or entities does not close the input stream.</para>
 		/// </remarks>
 		/// <param name="stream">The stream to parse.</param>
-		/// <param name="persistent"><c>true</c> if the stream is persistent; otherwise <c>false</c>.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="stream"/> is <c>null</c>.
+		/// <param name="storage">The storage used for parsed MIME part content.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="storage"/> is not a valid value.
 		/// </exception>
-		public void SetStream (Stream stream, bool persistent = false)
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="storage"/> is <see cref="MimeContentStorage.Source"/> and <paramref name="stream"/> is not seekable.
+		/// </exception>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="stream"/> is <see langword="null"/>.
+		/// </exception>
+		public void SetStream (Stream stream, MimeContentStorage storage)
 		{
-			SetStream (ParserOptions.Default, stream, MimeFormat.Default, persistent);
+			SetStream (stream, MimeFormat.Default, storage);
 		}
 
-		/// <summary>
-		/// An event signifying the beginning of a new <see cref="MimeMessage"/> has been encountered.
-		/// </summary>
-		/// <remarks>
-		/// An event signifying the beginning of a new <see cref="MimeMessage"/> has been encountered.
-		/// </remarks>
-		public event EventHandler<MimeMessageBeginEventArgs> MimeMessageBegin;
-
-		/// <summary>
-		/// Invoked when the parser begins parsing a <see cref="MimeMessage"/>.
-		/// </summary>
-		/// <remarks>
-		/// Invoked when the parser begins parsing a <see cref="MimeMessage"/>.
-		/// </remarks>
-		/// <param name="args">The parsed state.</param>
-		protected virtual void OnMimeMessageBegin (MimeMessageBeginEventArgs args)
+		void PushEntity (MimeEntity entity)
 		{
-			MimeMessageBegin?.Invoke (this, args);
-		}
+			if (stack.Count > 0) {
+				var parent = stack.Peek ();
 
-		/// <summary>
-		/// An event signifying the end of a <see cref="MimeMessage"/> has been encountered.
-		/// </summary>
-		/// <remarks>
-		/// An event signifying the end of a <see cref="MimeMessage"/> has been encountered.
-		/// </remarks>
-		public event EventHandler<MimeMessageEndEventArgs> MimeMessageEnd;
-
-		/// <summary>
-		/// Invoked when the parser has completed parsing a <see cref="MimeMessage"/>.
-		/// </summary>
-		/// <remarks>
-		/// Invoked when the parser has completed parsing a <see cref="MimeMessage"/>.
-		/// </remarks>
-		/// <param name="args">The parsed state.</param>
-		protected virtual void OnMimeMessageEnd (MimeMessageEndEventArgs args)
-		{
-			MimeMessageEnd?.Invoke (this, args);
-		}
-
-		/// <summary>
-		/// An event signifying the beginning of a new <see cref="MimeEntity"/> has been encountered.
-		/// </summary>
-		/// <remarks>
-		/// An event signifying the beginning of a new <see cref="MimeEntity"/> has been encountered.
-		/// </remarks>
-		public event EventHandler<MimeEntityBeginEventArgs> MimeEntityBegin;
-
-		/// <summary>
-		/// Invoked when the parser begins parsing a <see cref="MimeEntity"/>.
-		/// </summary>
-		/// <remarks>
-		/// Invoked when the parser begins parsing a <see cref="MimeEntity"/>.
-		/// </remarks>
-		/// <param name="args">The parsed state.</param>
-		protected virtual void OnMimeEntityBegin (MimeEntityBeginEventArgs args)
-		{
-			MimeEntityBegin?.Invoke (this, args);
-		}
-
-		/// <summary>
-		/// An event signifying the end of a <see cref="MimeEntity"/> has been encountered.
-		/// </summary>
-		/// <remarks>
-		/// An event signifying the end of a <see cref="MimeEntity"/> has been encountered.
-		/// </remarks>
-		public event EventHandler<MimeEntityEndEventArgs> MimeEntityEnd;
-
-		/// <summary>
-		/// Invoked when the parser has completed parsing a <see cref="MimeEntity"/>.
-		/// </summary>
-		/// <remarks>
-		/// Invoked when the parser has completed parsing a <see cref="MimeEntity"/>.
-		/// </remarks>
-		/// <param name="args">The parsed state.</param>
-		protected virtual void OnMimeEntityEnd (MimeEntityEndEventArgs args)
-		{
-			MimeEntityEnd?.Invoke (this, args);
-		}
-
-#if DEBUG_PARSER
-		static string ConvertToCString (byte[] buffer, int startIndex, int length)
-		{
-			var cstr = new StringBuilder ();
-			cstr.AppendCString (buffer, startIndex, length);
-			return cstr.ToString ();
-		}
-#endif
-
-		static int NextAllocSize (int need)
-		{
-			return (need + 63) & ~63;
-		}
-
-		bool AlignReadAheadBuffer (int atleast, int save, out int left, out int start, out int end)
-		{
-			left = inputEnd - inputIndex;
-			start = inputStart;
-			end = inputEnd;
-
-			if (left >= atleast || eos)
-				return false;
-
-			left += save;
-
-			if (left > 0) {
-				int index = inputIndex - save;
-
-				// attempt to align the end of the remaining input with ReadAheadSize
-				if (index >= start) {
-					start -= Math.Min (ReadAheadSize, left);
-					Buffer.BlockCopy (input, index, input, start, left);
-					index = start;
-					start += left;
-				} else if (index > 0) {
-					int shift = Math.Min (index, end - start);
-					Buffer.BlockCopy (input, index, input, index - shift, left);
-					index -= shift;
-					start = index + left;
-				} else {
-					// we can't shift...
-					start = end;
-				}
-
-				inputIndex = index + save;
-				inputEnd = start;
-			} else {
-				inputIndex = start;
-				inputEnd = start;
-			}
-
-			end = input.Length - PadSize;
-
-			return true;
-		}
-
-		int ReadAhead (int atleast, int save, CancellationToken cancellationToken)
-		{
-			int nread, left, start, end;
-
-			if (!AlignReadAheadBuffer (atleast, save, out left, out start, out end))
-				return left;
-
-			// use the cancellable stream interface if available...
-			var cancellable = stream as ICancellableStream;
-			if (cancellable != null) {
-				nread = cancellable.Read (input, start, end - start, cancellationToken);
-			} else {
-				cancellationToken.ThrowIfCancellationRequested ();
-				nread = stream.Read (input, start, end - start);
-			}
-
-			if (nread > 0) {
-				inputEnd += nread;
-				position += nread;
-			} else {
-				eos = true;
-			}
-
-			return inputEnd - inputIndex;
-		}
-
-		long GetOffset (int index)
-		{
-			if (position == -1)
-				return -1;
-
-			return position - (inputEnd - index);
-		}
-
-		long GetEndOffset (int index)
-		{
-			if (boundary != BoundaryType.Eos && index > 1 && input[index - 1] == (byte) '\n') {
-				index--;
-
-				if (index > 1 && input[index - 1] == (byte) '\r')
-					index--;
-			}
-
-			return GetOffset (index);
-		}
-
-		int GetLineCount (int beginLineNumber, long beginOffset, long endOffset)
-		{
-			var lines = lineNumber - beginLineNumber;
-
-			if (lineBeginOffset >= beginOffset && endOffset > lineBeginOffset)
-				lines++;
-
-			if (boundary != BoundaryType.Eos && endOffset == prevLineBeginOffset)
-				lines--;
-
-			return lines;
-		}
-
-		static unsafe bool CStringsEqual (byte* str1, byte* str2, int length)
-		{
-			byte* se = str1 + length;
-			byte* s1 = str1;
-			byte* s2 = str2;
-
-			while (s1 < se) {
-				if (*s1++ != *s2++)
-					return false;
-			}
-
-			return true;
-		}
-
-		unsafe void StepByteOrderMark (byte* inbuf, ref int bomIndex)
-		{
-			byte* inptr = inbuf + inputIndex;
-			byte* inend = inbuf + inputEnd;
-
-			while (inptr < inend && bomIndex < UTF8ByteOrderMark.Length && *inptr == UTF8ByteOrderMark[bomIndex]) {
-				bomIndex++;
-				inptr++;
-			}
-
-			inputIndex = (int) (inptr - inbuf);
-		}
-
-		unsafe bool StepByteOrderMark (byte* inbuf, CancellationToken cancellationToken)
-		{
-			int bomIndex = 0;
-
-			do {
-				var available = ReadAhead (ReadAheadSize, 0, cancellationToken);
-
-				if (available <= 0) {
-					// failed to read any data... EOF
-					inputIndex = inputEnd;
-					return false;
-				}
-
-				StepByteOrderMark (inbuf, ref bomIndex);
-			} while (inputIndex == inputEnd);
-
-			return bomIndex == 0 || bomIndex == UTF8ByteOrderMark.Length;
-		}
-
-		static unsafe bool IsMboxMarker (byte* text, bool allowMunged = false)
-		{
-#if COMPARE_QWORD
-			const ulong FromMask = 0x000000FFFFFFFFFF;
-			const ulong From     = 0x000000206D6F7246;
-			ulong* qword = (ulong*) text;
-
-			return (*qword & FromMask) == From;
-#else
-			byte* inptr = text;
-
-			if (allowMunged && *inptr == (byte) '>')
-				inptr++;
-
-			return *inptr++ == (byte) 'F' && *inptr++ == (byte) 'r' && *inptr++ == (byte) 'o' && *inptr++ == (byte) 'm' && *inptr == (byte) ' ';
-#endif
-		}
-
-		unsafe bool StepMboxMarker (byte* inbuf, ref int left)
-		{
-			byte* inptr = inbuf + inputIndex;
-			byte* inend = inbuf + inputEnd;
-
-			*inend = (byte) '\n';
-
-			while (inptr < inend) {
-				int startIndex = inputIndex;
-				byte* start = inptr;
-
-				// scan for the end of the line
-				while (*inptr != (byte) '\n')
-					inptr++;
-
-				var markerLength = (int) (inptr - start);
-
-				if (inptr > start && *(inptr - 1) == (byte) '\r')
-					markerLength--;
-
-				// consume the '\n'
-				inptr++;
-
-				var lineLength = (int) (inptr - start);
-
-				if (inptr >= inend) {
-					// we don't have enough input data
-					left = lineLength;
-					return false;
-				}
-
-				inputIndex += lineLength;
-				prevLineBeginOffset = lineBeginOffset;
-				lineBeginOffset = GetOffset (inputIndex);
-				lineNumber++;
-
-				if (markerLength >= 5 && IsMboxMarker (start)) {
-					mboxMarkerOffset = GetOffset (startIndex);
-					mboxMarkerLength = markerLength;
-
-					if (mboxMarkerBuffer.Length < mboxMarkerLength)
-						Array.Resize (ref mboxMarkerBuffer, mboxMarkerLength);
-
-					Buffer.BlockCopy (input, startIndex, mboxMarkerBuffer, 0, markerLength);
-
-					return true;
+				if (parent is Multipart multipart) {
+					multipart.AddInternal (entity, rawBoundary);
+					rawBoundary = null;
+				} else if (parent is MimeMessage message) {
+					message.Body = entity;
 				}
 			}
 
-			left = 0;
-
-			return false;
+			stack.Push (entity);
 		}
 
-		unsafe void StepMboxMarker (byte* inbuf, CancellationToken cancellationToken)
+		void PopEntity ()
 		{
-			bool complete;
-			int left = 0;
+			if (stack.Count > 1)
+				stack.Pop ();
+		}
 
+		#region Mbox Events
+
+		/// <summary>
+		/// Called when an Mbox marker is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>When the stream is specified to be in <see cref="MimeFormat.Mbox"/> format, this method will be called whenever the parser encounters an Mbox marker.</para>
+		/// <para>It is not necessary to override this method unless it is desirable to track the offsets of mbox markers within a stream or to extract the mbox marker itself.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the mbox marker begins.</param>
+		/// <param name="lineNumber">The line number where the mbox marker exists within the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMboxMarkerBegin (long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+			mboxMarkerOffset = beginOffset;
 			mboxMarkerLength = 0;
-
-			do {
-				var available = ReadAhead (Math.Max (ReadAheadSize, left), 0, cancellationToken);
-
-				if (available <= left) {
-					// failed to find a From line; EOF reached
-					state = MimeParserState.Error;
-					inputIndex = inputEnd;
-					return;
-				}
-
-				complete = StepMboxMarker (inbuf, ref left);
-			} while (!complete);
-
-			state = MimeParserState.MessageHeaders;
 		}
 
-		void AppendRawHeaderData (int startIndex, int length)
+		/// <summary>
+		/// Called when an Mbox marker is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>When the stream is specified to be in <see cref="MimeFormat.Mbox"/> format, this method will be called whenever the parser encounters an Mbox marker.</para>
+		/// <para>It is not necessary to override this method unless it is desirable to track the offsets of mbox markers within a stream or to extract the mbox marker itself.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the mbox marker begins.</param>
+		/// <param name="lineNumber">The line number where the mbox marker exists within the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMboxMarkerBeginAsync (long beginOffset, int lineNumber, CancellationToken cancellationToken)
 		{
-			int left = headerBuffer.Length - headerIndex;
-
-			if (left < length)
-				Array.Resize (ref headerBuffer, NextAllocSize (headerIndex + length));
-
-			Buffer.BlockCopy (input, startIndex, headerBuffer, headerIndex, length);
-			headerIndex += length;
+			OnMboxMarkerBegin (beginOffset, lineNumber, cancellationToken);
+			return Task.CompletedTask;
 		}
 
-		void ResetRawHeaderData ()
+		/// <summary>
+		/// Called when an Mbox marker is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>When the stream is specified to be in <see cref="MimeFormat.Mbox"/> format, this method will be called whenever the parser encounters an Mbox marker.</para>
+		/// <para>It is not necessary to override this method unless it is desirable to track the offsets of mbox markers within a stream or to extract the mbox marker itself.</para>
+		/// </remarks>
+		/// <param name="buffer">The buffer containing the mbox marker.</param>
+		/// <param name="startIndex">The index denoting the starting position of the mbox marker within the buffer.</param>
+		/// <param name="count">The length of the mbox marker within the buffer, in bytes.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMboxMarkerRead (byte[] buffer, int startIndex, int count, CancellationToken cancellationToken)
 		{
-			preHeaderLength = 0;
-			headerIndex = 0;
+			int needed = mboxMarkerLength + count;
+
+			if (mboxMarkerBuffer!.Length < needed)
+				Array.Resize (ref mboxMarkerBuffer, needed);
+
+			Buffer.BlockCopy (buffer, startIndex, mboxMarkerBuffer, mboxMarkerLength, count);
+			mboxMarkerLength += count;
 		}
 
-		unsafe void ParseAndAppendHeader ()
+		/// <summary>
+		/// Called when an Mbox marker is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>When the stream is specified to be in <see cref="MimeFormat.Mbox"/> format, this method will be called whenever the parser encounters an Mbox marker.</para>
+		/// <para>It is not necessary to override this method unless it is desirable to track the offsets of mbox markers within a stream or to extract the mbox marker itself.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="buffer">The buffer containing the mbox marker.</param>
+		/// <param name="startIndex">The index denoting the starting position of the mbox marker within the buffer.</param>
+		/// <param name="count">The length of the mbox marker within the buffer, in bytes.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMboxMarkerReadAsync (byte[] buffer, int startIndex, int count, CancellationToken cancellationToken)
 		{
-			if (headerIndex == 0)
-				return;
-
-			fixed (byte* buf = headerBuffer) {
-				if (Header.TryParse (options, buf, headerIndex, false, out var header)) {
-					header.Offset = headerOffset;
-					headers.Add (header);
-					headerIndex = 0;
-				}
-			}
+			OnMboxMarkerRead (buffer, startIndex, count, cancellationToken);
+			return Task.CompletedTask;
 		}
 
-		static bool IsControl (byte c)
+		/// <summary>
+		/// Called when the end of an Mbox marker is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>When the stream is specified to be in <see cref="MimeFormat.Mbox"/> format, this method will be called whenever the parser encounters the end of an Mbox marker.</para>
+		/// <para>It is not necessary to override this method unless it is desirable to track the offsets of mbox markers within a stream or to extract the mbox marker itself.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the mbox marker begins.</param>
+		/// <param name="lineNumber">The line number where the mbox marker exists within the stream.</param>
+		/// <param name="endOffset">The offset into the stream where the mbox marker ends.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMboxMarkerEnd (long beginOffset, int lineNumber, long endOffset, CancellationToken cancellationToken)
 		{
-			return c.IsCtrl ();
 		}
 
-		static bool IsBlank (byte c)
+		/// <summary>
+		/// Called when the end of an Mbox marker is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>When the stream is specified to be in <see cref="MimeFormat.Mbox"/> format, this method will be called whenever the parser encounters the end of an Mbox marker.</para>
+		/// <para>It is not necessary to override this method unless it is desirable to track the offsets of mbox markers within a stream or to extract the mbox marker itself.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the mbox marker begins.</param>
+		/// <param name="lineNumber">The line number where the mbox marker exists within the stream.</param>
+		/// <param name="endOffset">The offset into the stream where the mbox marker ends.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMboxMarkerEndAsync (long beginOffset, int lineNumber, long endOffset, CancellationToken cancellationToken)
 		{
-			return c.IsBlank ();
+			OnMboxMarkerEnd (beginOffset, lineNumber, endOffset, cancellationToken);
+			return Task.CompletedTask;
 		}
 
-		static unsafe bool IsEoln (byte* text)
+		#endregion Mbox Events
+
+		#region Header Events
+
+		/// <summary>
+		/// Called when the beginning of a list of headers is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a list of headers is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnHeadersEnd"/> when the end of the list of headers are found.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the headers begin.</param>
+		/// <param name="beginLineNumber">The line number where the list of headers begin.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnHeadersBegin (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
 		{
-			if (*text == (byte) '\r')
-				text++;
-
-			return *text == (byte) '\n';
-		}
-
-		unsafe bool StepHeaders (byte* inbuf, ref bool scanningFieldName, ref bool checkFolded, ref bool midline, ref bool blank, ref bool valid, ref int left)
-		{
-			byte* inptr = inbuf + inputIndex;
-			byte* inend = inbuf + inputEnd;
-			bool needInput = false;
-			long length;
-			bool eoln;
-
-			*inend = (byte) '\n';
-
-			while (inptr < inend) {
-				byte* start = inptr;
-
-				// if we are scanning a new line, check for a folded header
-				if (!midline && checkFolded && !IsBlank (*inptr)) {
-					ParseAndAppendHeader ();
-
-					headerOffset = GetOffset ((int) (inptr - inbuf));
-					scanningFieldName = true;
-					checkFolded = false;
-					blank = false;
-					valid = true;
-				}
-
-				eoln = IsEoln (inptr);
-				if (scanningFieldName && !eoln) {
-					// scan and validate the field name
-					if (*inptr != (byte) ':') {
-						*inend = (byte) ':';
-
-						while (*inptr != (byte) ':') {
-							// Blank spaces are allowed between the field name and
-							// the ':', but field names themselves are not allowed
-							// to contain spaces.
-							if (IsBlank (*inptr)) {
-								blank = true;
-							} else if (blank || IsControl (*inptr)) {
-								valid = false;
-								break;
-							}
-
-							inptr++;
-						}
-
-						if (inptr == inend) {
-							// we don't have enough input data; restore state back to the beginning of the line
-							left = (int) (inend - start);
-							inputIndex = (int) (start - inbuf);
-							needInput = true;
-							break;
-						}
-
-						*inend = (byte) '\n';
-					} else {
-						valid = false;
-					}
-
-					if (!valid) {
-						length = inptr - start;
-
-						if (format == MimeFormat.Mbox && inputIndex >= contentEnd && length >= 5 && IsMboxMarker (start)) {
-							// we've found the start of the next message...
-							inputIndex = (int) (start - inbuf);
-							state = MimeParserState.Complete;
-							headerIndex = 0;
-							return false;
-						}
-
-						if (headers.Count == 0) {
-							if (state == MimeParserState.MessageHeaders) {
-								// ignore From-lines that might appear at the start of a message
-								if (toplevel && (length < 5 || !IsMboxMarker (start, true))) {
-									// not a From-line...
-									inputIndex = (int) (start - inbuf);
-									state = MimeParserState.Error;
-									headerIndex = 0;
-									return false;
-								}
-							} else if (toplevel && state == MimeParserState.Headers) {
-								inputIndex = (int) (start - inbuf);
-								state = MimeParserState.Error;
-								headerIndex = 0;
-								return false;
-							}
-						}
-					}
-				}
-
-				scanningFieldName = false;
-
-				while (*inptr != (byte) '\n')
-					inptr++;
-
-				if (inptr == inend) {
-					// we didn't manage to slurp up a full line, save what we have and refill our input buffer
-					length = inptr - start;
-
-					if (inptr > start) {
-						// Note: if the last byte we got was a '\r', rewind a byte
-						inptr--;
-						if (*inptr == (byte) '\r')
-							length--;
-						else
-							inptr++;
-					}
-
-					if (length > 0) {
-						AppendRawHeaderData ((int) (start - inbuf), (int) length);
-						midline = true;
-					}
-
-					inputIndex = (int) (inptr - inbuf);
-					left = (int) (inend - inptr);
-					needInput = true;
-					break;
-				}
-
-				prevLineBeginOffset = lineBeginOffset;
-				lineBeginOffset = GetOffset ((int) (inptr - inbuf) + 1);
-				lineNumber++;
-
-				// check to see if we've reached the end of the headers
-				if (!midline && IsEoln (start)) {
-					inputIndex = (int) (inptr - inbuf) + 1;
-					state = MimeParserState.Content;
-					ParseAndAppendHeader ();
-					headerIndex = 0;
-					return false;
-				}
-
-				length = (inptr + 1) - start;
-
-				if ((boundary = CheckBoundary ((int) (start - inbuf), start, (int) length)) != BoundaryType.None) {
-					inputIndex = (int) (start - inbuf);
-					state = MimeParserState.Boundary;
-					headerIndex = 0;
-					return false;
-				}
-
-				if (!valid && headers.Count == 0) {
-					if (length > 0 && preHeaderLength == 0) {
-						if (inptr[-1] == (byte) '\r')
-							length--;
-						length--;
-
-						preHeaderLength = (int) length;
-
-						if (preHeaderLength > preHeaderBuffer.Length)
-							Array.Resize (ref preHeaderBuffer, NextAllocSize (preHeaderLength));
-
-						Buffer.BlockCopy (input, (int) (start - inbuf), preHeaderBuffer, 0, preHeaderLength);
-					}
-					scanningFieldName = true;
-					checkFolded = false;
-					blank = false;
-					valid = true;
-				} else {
-					AppendRawHeaderData ((int) (start - inbuf), (int) length);
-					checkFolded = true;
-				}
-
-				midline = false;
-				inptr++;
-			}
-
-			if (!needInput) {
-				inputIndex = (int) (inptr - inbuf);
-				left = (int) (inend - inptr);
-			}
-
-			return true;
-		}
-
-		unsafe void StepHeaders (byte* inbuf, CancellationToken cancellationToken)
-		{
-			bool scanningFieldName = true;
-			bool checkFolded = false;
-			bool midline = false;
-			bool blank = false;
-			bool valid = true;
-			int left = 0;
-
-			headerBlockBegin = GetOffset (inputIndex);
-			boundary = BoundaryType.None;
-			ResetRawHeaderData ();
 			headers.Clear ();
-
-			ReadAhead (ReadAheadSize, 0, cancellationToken);
-
-			do {
-				if (!StepHeaders (inbuf, ref scanningFieldName, ref checkFolded, ref midline, ref blank, ref valid, ref left))
-					break;
-
-				var available = ReadAhead (left + 1, 0, cancellationToken);
-
-				if (available == left) {
-					// EOF reached before we reached the end of the headers...
-					if (scanningFieldName && left > 0) {
-						// EOF reached right in the middle of a header field name. Throw an error.
-						//
-						// See private email from Feb 8, 2018 which contained a sample message w/o
-						// any breaks between the header and message body. The file also did not
-						// end with a newline sequence.
-						state = MimeParserState.Error;
-					} else {
-						// EOF reached somewhere in the middle of the value.
-						//
-						// Append whatever data we've got left and pretend we found the end
-						// of the header value (and the header block).
-						//
-						// For more details, see https://github.com/jstedfast/MimeKit/pull/51
-						// and https://github.com/jstedfast/MimeKit/issues/348
-						if (left > 0) {
-							AppendRawHeaderData (inputIndex, left);
-							inputIndex = inputEnd;
-						}
-
-						ParseAndAppendHeader ();
-
-						state = MimeParserState.Content;
-					}
-					break;
-				}
-			} while (true);
-
-			headerBlockEnd = GetOffset (inputIndex);
+			preHeaderLength = 0;
+			hasBodySeparator = false;
 		}
 
-		unsafe bool SkipLine (byte* inbuf, bool consumeNewLine)
+		/// <summary>
+		/// Called when the beginning of a list of headers is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a list of headers is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnHeadersEndAsync"/> when the end of the list of headers are found.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the headers begin.</param>
+		/// <param name="beginLineNumber">The line number where the list of headers begin.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnHeadersBeginAsync (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
 		{
-			byte* inptr = inbuf + inputIndex;
-			byte* inend = inbuf + inputEnd;
-
-			*inend = (byte) '\n';
-
-			while (*inptr != (byte) '\n')
-				inptr++;
-
-			if (inptr < inend) {
-				inputIndex = (int) (inptr - inbuf);
-
-				if (consumeNewLine) {
-					inputIndex++;
-					lineNumber++;
-					prevLineBeginOffset = lineBeginOffset;
-					lineBeginOffset = GetOffset (inputIndex);
-				} else if (*(inptr - 1) == (byte) '\r') {
-					inputIndex--;
-				}
-
-				return true;
-			}
-
-			inputIndex = inputEnd;
-
-			return false;
+			OnHeadersBegin (beginOffset, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
 		}
 
-		unsafe bool SkipLine (byte* inbuf, bool consumeNewLine, CancellationToken cancellationToken)
+		/// <summary>
+		/// Called when a message or MIME part header is read from the stream.
+		/// </summary>
+		/// <remarks>
+		/// This method will be called whenever a message or MIME part header is encountered within the stream.
+		/// </remarks>
+		/// <param name="header">The header that was read from the stream.</param>
+		/// <param name="beginLineNumber">The line number where the header exists within the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnHeaderRead (Header header, int beginLineNumber, CancellationToken cancellationToken)
 		{
-			do {
-				if (SkipLine (inbuf, consumeNewLine))
-					return true;
-
-				if (ReadAhead (ReadAheadSize, 1, cancellationToken) <= 0)
-					return false;
-			} while (true);
-		}
-
-		unsafe MimeParserState Step (byte* inbuf, CancellationToken cancellationToken)
-		{
-			switch (state) {
-			case MimeParserState.Initialized:
-				if (!StepByteOrderMark (inbuf, cancellationToken)) {
-					state = MimeParserState.Eos;
-					break;
-				}
-
-				state = format == MimeFormat.Mbox ? MimeParserState.MboxMarker : MimeParserState.MessageHeaders;
-				break;
-			case MimeParserState.MboxMarker:
-				StepMboxMarker (inbuf, cancellationToken);
-				break;
-			case MimeParserState.MessageHeaders:
-			case MimeParserState.Headers:
-				StepHeaders (inbuf, cancellationToken);
-				toplevel = false;
-				break;
-			}
-
-			return state;
-		}
-
-		ContentType GetContentType (ContentType parent)
-		{
-			for (int i = 0; i < headers.Count; i++) {
-				if (!headers[i].Field.Equals ("Content-Type", StringComparison.OrdinalIgnoreCase))
-					continue;
-
-				var rawValue = headers[i].RawValue;
-				int index = 0;
-
-				if (!ContentType.TryParse (options, rawValue, ref index, rawValue.Length, false, out var type) && type == null) {
-					// if 'type' is null, then it means that even the mime-type was unintelligible
-					type = new ContentType ("application", "octet-stream");
-
-					// attempt to recover any parameters...
-					while (index < rawValue.Length && rawValue[index] != ';')
-						index++;
-
-					if (++index < rawValue.Length) {
-						if (ParameterList.TryParse (options, rawValue, ref index, rawValue.Length, false, out var parameters))
-							type.Parameters = parameters;
-					}
-				}
-
-				return type;
-			}
-
-			if (parent == null || !parent.IsMimeType ("multipart", "digest"))
-				return new ContentType ("text", "plain");
-
-			return new ContentType ("message", "rfc822");
-		}
-
-		unsafe bool IsPossibleBoundary (byte* text, int length)
-		{
-			if (length < 2)
-				return false;
-
-			if (*text == (byte) '-' && *(text + 1) == (byte) '-')
-				return true;
-
-			if (format == MimeFormat.Mbox && length >= 5 && IsMboxMarker (text))
-				return true;
-
-			return false;
-		}
-
-		static unsafe bool IsBoundary (byte* text, int length, byte[] boundary, int boundaryLength)
-		{
-			if (boundaryLength > length)
-				return false;
-
-			fixed (byte* boundaryptr = boundary) {
-				// make sure that the text matches the boundary
-				if (!CStringsEqual (text, boundaryptr, boundaryLength))
-					return false;
-
-				// if this is an mbox marker, we're done
-				if (IsMboxMarker (text))
-					return true;
-
-				// the boundary may optionally be followed by lwsp
-				byte* inptr = text + boundaryLength;
-				byte* inend = text + length;
-
-				while (inptr < inend) {
-					if (!(*inptr).IsWhitespace ())
-						return false;
-
-					inptr++;
-				}
-			}
-
-			return true;
-		}
-
-		unsafe BoundaryType CheckBoundary (int startIndex, byte* start, int length)
-		{
-			int count = bounds.Count;
-
-			if (!IsPossibleBoundary (start, length))
-				return BoundaryType.None;
-
-			if (contentEnd > 0) {
-				// We'll need to special-case checking for the mbox From-marker when respecting Content-Length
-				count--;
-			}
-
-			for (int i = 0; i < count; i++) {
-				var boundary = bounds[i];
-
-				if (IsBoundary (start, length, boundary.Marker, boundary.FinalLength))
-					return i == 0 ? BoundaryType.ImmediateEndBoundary : BoundaryType.ParentEndBoundary;
-
-				if (IsBoundary (start, length, boundary.Marker, boundary.Length))
-					return i == 0 ? BoundaryType.ImmediateBoundary : BoundaryType.ParentBoundary;
-			}
-
-			if (contentEnd > 0) {
-				// now it is time to check the mbox From-marker for the Content-Length case
-				long curOffset = GetOffset (startIndex);
-				var boundary = bounds[count];
-
-				if (curOffset >= contentEnd && IsBoundary (start, length, boundary.Marker, boundary.Length))
-					return BoundaryType.ImmediateEndBoundary;
-			}
-
-			return BoundaryType.None;
-		}
-
-		unsafe bool FoundImmediateBoundary (byte* inbuf, bool final)
-		{
-			int boundaryLength = final ? bounds[0].FinalLength : bounds[0].Length;
-			byte* start = inbuf + inputIndex;
-			byte* inend = inbuf + inputEnd;
-			byte* inptr = start;
-
-			*inend = (byte) '\n';
-
-			while (*inptr != (byte) '\n')
-				inptr++;
-
-			return IsBoundary (start, (int) (inptr - start), bounds[0].Marker, boundaryLength);
-		}
-
-		int GetMaxBoundaryLength ()
-		{
-			return bounds.Count > 0 ? bounds[0].MaxLength + 2 : 0;
-		}
-
-		unsafe void ScanContent (byte* inbuf, ref int contentIndex, ref int nleft, ref bool midline, ref bool[] formats)
-		{
-			int length = inputEnd - inputIndex;
-			byte* inptr = inbuf + inputIndex;
-			byte* inend = inbuf + inputEnd;
-			int startIndex = inputIndex;
-
-			contentIndex = inputIndex;
-
-			if (midline && length == nleft)
-				boundary = BoundaryType.Eos;
-
-			*inend = (byte) '\n';
-
-			while (inptr < inend) {
-				// Note: we can always depend on byte[] arrays being 4-byte aligned on 32bit and 64bit architectures
-				int alignment = (startIndex + 3) & ~3;
-				byte* aligned = inbuf + alignment;
-				byte* start = inptr;
-				byte c = *aligned;
-				uint mask;
-
-				*aligned = (byte) '\n';
-				while (*inptr != (byte) '\n')
-					inptr++;
-				*aligned = c;
-
-				if (inptr == aligned && c != (byte) '\n') {
-					// -funroll-loops, yippee ki-yay.
-					uint* dword = (uint*) inptr;
-
-					do {
-						mask = *dword++ ^ 0x0A0A0A0A;
-						mask = ((mask - 0x01010101) & (~mask & 0x80808080));
-					} while (mask == 0);
-
-					inptr = (byte*) (dword - 1);
-					while (*inptr != (byte) '\n')
-						inptr++;
-				}
-
-				length = (int) (inptr - start);
-
-				if (inptr < inend) {
-					if ((boundary = CheckBoundary (startIndex, start, length)) != BoundaryType.None)
-						break;
-
-					if (length > 0 && *(inptr - 1) == (byte) '\r')
-						formats[(int) NewLineFormat.Dos] = true;
-					else
-						formats[(int) NewLineFormat.Unix] = true;
-
-					lineNumber++;
-					length++;
-					inptr++;
-
-					prevLineBeginOffset = lineBeginOffset;
-					lineBeginOffset = GetOffset ((int) (inptr - inbuf));
-				} else {
-					// didn't find the end of the line...
-					midline = true;
-
-					if (boundary == BoundaryType.None) {
-						// not enough to tell if we found a boundary
-						break;
-					}
-
-					if ((boundary = CheckBoundary (startIndex, start, length)) != BoundaryType.None)
-						break;
-				}
-
-				startIndex += length;
-			}
-
-			inputIndex = startIndex;
-		}
-
-		class ScanContentResult
-		{
-			public readonly NewLineFormat? Format;
-			public readonly bool IsEmpty;
-
-			public ScanContentResult (bool[] formats, bool isEmpty)
-			{
-				if (formats[(int) NewLineFormat.Unix] && formats[(int) NewLineFormat.Dos])
-					Format = NewLineFormat.Mixed;
-				else if (formats[(int) NewLineFormat.Unix])
-					Format = NewLineFormat.Unix;
-				else if (formats[(int) NewLineFormat.Dos])
-					Format = NewLineFormat.Dos;
-				else
-					Format = null;
-				IsEmpty = isEmpty;
-			}
-		}
-
-		unsafe ScanContentResult ScanContent (byte* inbuf, Stream content, bool trimNewLine, CancellationToken cancellationToken)
-		{
-			int atleast = Math.Max (ReadAheadSize, GetMaxBoundaryLength ());
-			int contentIndex = inputIndex;
-			var formats = new bool[2];
-			bool midline = false;
-			int nleft;
-
-			do {
-				if (contentIndex < inputIndex)
-					content.Write (input, contentIndex, inputIndex - contentIndex);
-
-				nleft = inputEnd - inputIndex;
-				if (ReadAhead (atleast, 2, cancellationToken) <= 0) {
-					boundary = BoundaryType.Eos;
-					contentIndex = inputIndex;
-					break;
-				}
-
-				ScanContent (inbuf, ref contentIndex, ref nleft, ref midline, ref formats);
-			} while (boundary == BoundaryType.None);
-
-			if (contentIndex < inputIndex)
-				content.Write (input, contentIndex, inputIndex - contentIndex);
-
-			var isEmpty = content.Length == 0;
-
-			if (boundary != BoundaryType.Eos && trimNewLine) {
-				// the last \r\n belongs to the boundary
-				if (content.Length > 0) {
-					if (input[inputIndex - 2] == (byte) '\r')
-						content.SetLength (content.Length - 2);
-					else
-						content.SetLength (content.Length - 1);
-				}
-			}
-
-			return new ScanContentResult (formats, isEmpty);
-		}
-
-		unsafe void ConstructMimePart (MimePart part, MimeEntityEndEventArgs args, byte* inbuf, CancellationToken cancellationToken)
-		{
-			long endOffset, beginOffset = GetOffset (inputIndex);
-			var beginLineNumber = lineNumber;
-			ScanContentResult result;
-			Stream content;
-
-			if (persistent) {
-				using (var measured = new MeasuringStream ()) {
-					result = ScanContent (inbuf, measured, true, cancellationToken);
-					endOffset = beginOffset + measured.Length;
-				}
-
-				content = new BoundStream (stream, beginOffset, endOffset, true);
+			if (parsingMessageHeaders && header.IsInvalid && headers.Count == 0) {
+				if (preHeaderBuffer is null)
+					preHeaderBuffer = new byte[header.RawField.Length];
+				else if (header.RawField.Length + preHeaderLength > preHeaderBuffer.Length)
+					Array.Resize (ref preHeaderBuffer, header.RawField.Length + preHeaderLength);
+
+				Buffer.BlockCopy (header.RawField, 0, preHeaderBuffer, preHeaderLength, header.RawField.Length);
+				preHeaderLength += header.RawField.Length;
 			} else {
-				content = new MemoryBlockStream ();
-
-				try {
-					result = ScanContent (inbuf, content, true, cancellationToken);
-					content.Seek (0, SeekOrigin.Begin);
-				} catch {
-					content.Dispose ();
-					throw;
-				}
-
-				endOffset = beginOffset + content.Length;
+				headers.Add (header);
 			}
-
-			args.Lines = GetLineCount (beginLineNumber, beginOffset, endOffset);
-
-			if (!result.IsEmpty)
-				part.Content = new MimeContent (content, part.ContentTransferEncoding) { NewLineFormat = result.Format };
-			else
-				content.Dispose ();
 		}
 
-		unsafe void ConstructMessagePart (MessagePart rfc822, MimeEntityEndEventArgs args, byte* inbuf, int depth, CancellationToken cancellationToken)
+		/// <summary>
+		/// Called when a message or MIME part header is read from the stream.
+		/// </summary>
+		/// <remarks>
+		/// This method will be called whenever a message or MIME part header is encountered within the stream.
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="header">The header that was read from the stream.</param>
+		/// <param name="beginLineNumber">The line number where the header exists within the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnHeaderReadAsync (Header header, int beginLineNumber, CancellationToken cancellationToken)
 		{
-			var beginOffset = GetOffset (inputIndex);
-			var beginLineNumber = lineNumber;
+			OnHeaderRead (header, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
 
-			if (bounds.Count > 0) {
-				int atleast = Math.Max (ReadAheadSize, GetMaxBoundaryLength ());
+		/// <summary>
+		/// Called when the end of a list of headers is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a list of headers is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnHeadersBegin"/>.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the headers began.</param>
+		/// <param name="beginLineNumber">The line number where the list of headers began.</param>
+		/// <param name="endOffset">The offset into the stream where the list of headers ended.</param>
+		/// <param name="endLineNumber">The line number headers where the list of headers ended.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnHeadersEnd (long beginOffset, int beginLineNumber, long endOffset, int endLineNumber, CancellationToken cancellationToken)
+		{
+			parsingMessageHeaders = false;
+		}
 
-				if (ReadAhead (atleast, 0, cancellationToken) <= 0) {
-					boundary = BoundaryType.Eos;
-					return;
-				}
+		/// <summary>
+		/// Called when the end of a list of headers is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a list of headers is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnHeadersBeginAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the headers began.</param>
+		/// <param name="beginLineNumber">The line number where the list of headers began.</param>
+		/// <param name="endOffset">The offset into the stream where the list of headers ended.</param>
+		/// <param name="endLineNumber">The line number headers where the list of headers ended.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnHeadersEndAsync (long beginOffset, int beginLineNumber, long endOffset, int endLineNumber, CancellationToken cancellationToken)
+		{
+			OnHeadersEnd (beginOffset, beginLineNumber, endOffset, endLineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
 
-				byte* start = inbuf + inputIndex;
-				byte* inend = inbuf + inputEnd;
-				byte* inptr = start;
+		/// <summary>
+		/// Called when the body separator is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the body separator is encountered in the stream.</para>
+		/// <para>This method is always called before <see cref="OnHeadersEnd"/> if a body separator is found.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the body separator began.</param>
+		/// <param name="lineNumber">The line number where the body separator was found.</param>
+		/// <param name="endOffset">The offset into the stream where the body separator ended.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnBodySeparator (long beginOffset, int lineNumber, long endOffset, CancellationToken cancellationToken)
+		{
+			hasBodySeparator = true;
+		}
 
-				*inend = (byte) '\n';
+		/// <summary>
+		/// Called when the body separator is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the body separator is encountered in the stream.</para>
+		/// <para>This method is always called before <see cref="OnHeadersEndAsync"/> if a body separator is found.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the body separator began.</param>
+		/// <param name="lineNumber">The line number where the body separator was found.</param>
+		/// <param name="endOffset">The offset into the stream where the body separator ended.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnBodySeparatorAsync (long beginOffset, int lineNumber, long endOffset, CancellationToken cancellationToken)
+		{
+			OnBodySeparator (beginOffset, lineNumber, endOffset, cancellationToken);
+			return Task.CompletedTask;
+		}
 
-				while (*inptr != (byte) '\n')
-					inptr++;
+		#endregion Header Events
 
-				boundary = CheckBoundary (inputIndex, start, (int) (inptr - start));
+		#region MimeMessage Events
 
-				switch (boundary) {
-				case BoundaryType.ImmediateEndBoundary:
-				case BoundaryType.ImmediateBoundary:
-				case BoundaryType.ParentBoundary:
-					return;
-				case BoundaryType.ParentEndBoundary:
-					// ignore "From " boundaries, broken mailers tend to include these...
-					if (!IsMboxMarker (start)) {
-						return;
-					}
-					break;
-				}
-			}
+		/// <summary>
+		/// Called when the beginning of a message is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a message is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimeMessageEnd"/> when the end of the message is found.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the message begins.</param>
+		/// <param name="beginLineNumber">The line number where the message begins.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMimeMessageBegin (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			var message = new MimeMessage (Options, headers, RfcComplianceMode.Loose);
 
-			// parse the headers...
-			state = MimeParserState.MessageHeaders;
-			if (Step (inbuf, cancellationToken) == MimeParserState.Error) {
-				// Note: this either means that StepHeaders() found the end of the stream
-				// or an invalid header field name at the start of the message headers,
-				// which likely means that this is not a valid MIME stream?
-				boundary = BoundaryType.Eos;
-				return;
-			}
-
-			var message = new MimeMessage (options, headers, RfcComplianceMode.Loose);
-			var messageArgs = new MimeMessageEndEventArgs (message, rfc822) {
-				HeadersEndOffset = headerBlockEnd,
-				BeginOffset = headerBlockBegin,
-				LineNumber = beginLineNumber
-			};
-
-			OnMimeMessageBegin (messageArgs);
-
-			if (preHeaderBuffer.Length > 0) {
+			if (preHeaderLength > 0) {
 				message.MboxMarker = new byte[preHeaderLength];
-				Buffer.BlockCopy (preHeaderBuffer, 0, message.MboxMarker, 0, preHeaderLength);
+				Buffer.BlockCopy (preHeaderBuffer!, 0, message.MboxMarker, 0, preHeaderLength);
 			}
 
-			var type = GetContentType (null);
-			var entity = options.CreateEntity (type, headers, true, depth);
-			var entityArgs = new MimeEntityEndEventArgs (entity) {
-				HeadersEndOffset = headerBlockEnd,
-				BeginOffset = headerBlockBegin,
-				LineNumber = beginLineNumber
-			};
+			if (stack.Count > 0) {
+				var rfc822 = (MessagePart) stack.Peek ();
 
-			OnMimeEntityBegin (entityArgs);
-
-			message.Body = entity;
-
-			if (entity is Multipart)
-				ConstructMultipart ((Multipart) entity, entityArgs, inbuf, depth + 1, cancellationToken);
-			else if (entity is MessagePart)
-				ConstructMessagePart ((MessagePart) entity, entityArgs, inbuf, depth + 1, cancellationToken);
-			else
-				ConstructMimePart ((MimePart) entity, entityArgs, inbuf, cancellationToken);
-
-			rfc822.Message = message;
-
-			var endOffset = GetEndOffset (inputIndex);
-			messageArgs.HeadersEndOffset = entityArgs.HeadersEndOffset = Math.Min (entityArgs.HeadersEndOffset, endOffset);
-			messageArgs.EndOffset = entityArgs.EndOffset = endOffset;
-
-			OnMimeEntityEnd (entityArgs);
-			OnMimeMessageEnd (messageArgs);
-
-			args.Lines = GetLineCount (beginLineNumber, beginOffset, endOffset);
-		}
-
-		unsafe void MultipartScanPreamble (Multipart multipart, byte* inbuf, CancellationToken cancellationToken)
-		{
-			using (var memory = new MemoryStream ()) {
-				long offset = GetOffset (inputIndex);
-
-				//OnMultipartPreambleBegin (multipart, offset);
-				ScanContent (inbuf, memory, false, cancellationToken);
-				multipart.RawPreamble = memory.ToArray ();
-				//OnMultipartPreambleEnd (multipart, offset + memory.Length);
+				rfc822.Message = message;
 			}
+
+			stack.Push (message);
 		}
 
-		unsafe void MultipartScanEpilogue (Multipart multipart, byte* inbuf, CancellationToken cancellationToken)
+		/// <summary>
+		/// Called when the beginning of a message is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a message is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimeMessageEndAsync"/> when the end of the message is found.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the message begins.</param>
+		/// <param name="beginLineNumber">The line number where the message begins.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMimeMessageBeginAsync (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
 		{
-			using (var memory = new MemoryStream ()) {
-				long offset = GetOffset (inputIndex);
-
-				//OnMultipartEpilogueBegin (multipart, offset);
-				var result = ScanContent (inbuf, memory, true, cancellationToken);
-				multipart.RawEpilogue = result.IsEmpty ? null : memory.ToArray ();
-				//OnMultipartEpilogueEnd (multipart, offset + memory.Length);
-			}
+			OnMimeMessageBegin (beginOffset, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
 		}
 
-		unsafe void MultipartScanSubparts (Multipart multipart, byte* inbuf, int depth, CancellationToken cancellationToken)
+		/// <summary>
+		/// Called when the end of a message is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a message is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimeMessageBegin"/>.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the message began.</param>
+		/// <param name="beginLineNumber">The line number where the message began.</param>
+		/// <param name="headersEndOffset">The offset into the stream where the message headers ended and the content began.</param>
+		/// <param name="endOffset">The offset into the stream where the message ended.</param>
+		/// <param name="lines">The length of the message as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMimeMessageEnd (long beginOffset, int beginLineNumber, long headersEndOffset, long endOffset, int lines, CancellationToken cancellationToken)
 		{
-			//var beginOffset = GetOffset (inputIndex);
-
-			do {
-				//OnMultipartBoundaryBegin (multipart, beginOffset);
-
-				// skip over the boundary marker
-				if (!SkipLine (inbuf, true, cancellationToken)) {
-					//OnMultipartBoundaryEnd (multipart, GetOffset (inputIndex));
-					boundary = BoundaryType.Eos;
-					return;
-				}
-
-				//OnMultipartBoundaryEnd (multipart, GetOffset (inputIndex));
-
-				var beginLineNumber = lineNumber;
-
-				// parse the headers
-				state = MimeParserState.Headers;
-				if (Step (inbuf, cancellationToken) == MimeParserState.Error) {
-					boundary = BoundaryType.Eos;
-					return;
-				}
-
-				if (state == MimeParserState.Boundary) {
-					if (headers.Count == 0) {
-						if (boundary == BoundaryType.ImmediateBoundary) {
-							//beginOffset = GetOffset (inputIndex);
-							continue;
-						}
-						return;
-					}
-
-					// This part has no content, but that will be handled in ConstructMultipart()
-					// or ConstructMimePart().
-				}
-
-				//if (state == ParserState.Complete && headers.Count == 0)
-				//	return BoundaryType.EndBoundary;
-
-				var type = GetContentType (multipart.ContentType);
-				var entity = options.CreateEntity (type, headers, false, depth);
-				var entityArgs = new MimeEntityEndEventArgs (entity, multipart) {
-					HeadersEndOffset = headerBlockEnd,
-					BeginOffset = headerBlockBegin,
-					LineNumber = beginLineNumber
-				};
-
-				OnMimeEntityBegin (entityArgs);
-
-				if (entity is Multipart)
-					ConstructMultipart ((Multipart) entity, entityArgs, inbuf, depth + 1, cancellationToken);
-				else if (entity is MessagePart)
-					ConstructMessagePart ((MessagePart) entity, entityArgs, inbuf, depth + 1, cancellationToken);
-				else
-					ConstructMimePart ((MimePart) entity, entityArgs, inbuf, cancellationToken);
-
-				var endOffset = GetEndOffset (inputIndex);
-				entityArgs.HeadersEndOffset = Math.Min (entityArgs.HeadersEndOffset, endOffset);
-				entityArgs.EndOffset = endOffset;
-
-				OnMimeEntityEnd (entityArgs);
-
-				//beginOffset = endOffset;
-				multipart.Add (entity);
-			} while (boundary == BoundaryType.ImmediateBoundary);
+			if (stack.Count > 1)
+				stack.Pop ();
 		}
 
-		void PushBoundary (string boundary)
+		/// <summary>
+		/// Called when the end of a message is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a message is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimeMessageBeginAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the message began.</param>
+		/// <param name="beginLineNumber">The line number where the message began.</param>
+		/// <param name="headersEndOffset">The offset into the stream where the message headers ended and the content began.</param>
+		/// <param name="endOffset">The offset into the stream where the message ended.</param>
+		/// <param name="lines">The length of the message as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMimeMessageEndAsync (long beginOffset, int beginLineNumber, long headersEndOffset, long endOffset, int lines, CancellationToken cancellationToken)
 		{
-			if (bounds.Count > 0)
-				bounds.Insert (0, new Boundary (boundary, bounds[0].MaxLength));
-			else
-				bounds.Add (new Boundary (boundary, 0));
+			OnMimeMessageEnd (beginOffset, beginLineNumber, headersEndOffset, endOffset, lines, cancellationToken);
+			return Task.CompletedTask;
 		}
 
-		void PopBoundary ()
+		#endregion MimeMessage Events
+
+		#region MimePart Events
+
+		/// <summary>
+		/// Called when the beginning of a MIME part is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a MIME part is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimePartEnd"/> when the end of the MIME part is found.</para>
+		/// </remarks>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the MIME part.</param>
+		/// <param name="beginOffset">The offset into the stream where the MIME part begins.</param>
+		/// <param name="beginLineNumber">The line number where the MIME part begins.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMimePartBegin (ContentType contentType, long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
 		{
-			bounds.RemoveAt (0);
+			var toplevel = stack.Count > 0 && stack.Peek () is MimeMessage;
+			var part = Options.CreateEntity (contentType, headers, hasBodySeparator, toplevel, depth);
+
+			PushEntity (part);
 		}
 
-		unsafe void ConstructMultipart (Multipart multipart, MimeEntityEndEventArgs args, byte* inbuf, int depth, CancellationToken cancellationToken)
+		/// <summary>
+		/// Called when the beginning of a MIME part is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a MIME part is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimePartEndAsync"/> when the end of the MIME part is found.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the MIME part.</param>
+		/// <param name="beginOffset">The offset into the stream where the MIME part begins.</param>
+		/// <param name="beginLineNumber">The line number where the MIME part begins.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMimePartBeginAsync (ContentType contentType, long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
 		{
-			var beginOffset = GetOffset (inputIndex);
-			var beginLineNumber = lineNumber;
-			var marker = multipart.Boundary;
-			long endOffset;
+			OnMimePartBegin (contentType, beginOffset, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
 
-			if (marker == null) {
-#if DEBUG
-				Debug.WriteLine ("Multipart without a boundary encountered!");
-#endif
+		/// <summary>
+		/// Called when the beginning of a MIME part's content is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a MIME part's content is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimePartContentEnd"/>.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the MIME part content began.</param>
+		/// <param name="beginLineNumber">The line number where the MIME part content began.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMimePartContentBegin (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			content = storage == MimeContentStorage.Source ? null : new MemoryBlockStream ();
+		}
 
-				// Note: this will scan all content into the preamble...
-				MultipartScanPreamble (multipart, inbuf, cancellationToken);
+		/// <summary>
+		/// Called when the beginning of a MIME part's content is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a MIME part's content is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimePartContentEndAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the MIME part content began.</param>
+		/// <param name="beginLineNumber">The line number where the MIME part content began.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMimePartContentBeginAsync (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			OnMimePartContentBegin (beginOffset, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
 
-				endOffset = GetEndOffset (inputIndex);
-				args.Lines = GetLineCount (beginLineNumber, beginOffset, endOffset);
+		/// <summary>
+		/// Called when MIME part content is read from the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when MIME part content is read from the stream.</para>
+		/// </remarks>
+		/// <param name="buffer">A buffer containing the MIME part content.</param>
+		/// <param name="startIndex">The index denoting the starting position of the content within the buffer.</param>
+		/// <param name="count">The length of the content within the buffer, in bytes.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMimePartContentRead (byte[] buffer, int startIndex, int count, CancellationToken cancellationToken)
+		{
+			if (content is not null)
+				content.Write (buffer, startIndex, count);
+		}
+
+		/// <summary>
+		/// Called when MIME part content is read from the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when MIME part content is read from the stream.</para>
+		/// <para>The newline sequence that precedes a multipart boundary marker is considered to be part of the
+		/// boundary marker and is not included in the content passed to this method.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="buffer">A buffer containing the MIME part content.</param>
+		/// <param name="startIndex">The index denoting the starting position of the content within the buffer.</param>
+		/// <param name="count">The length of the content within the buffer, in bytes.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMimePartContentReadAsync (byte[] buffer, int startIndex, int count, CancellationToken cancellationToken)
+		{
+			OnMimePartContentRead (buffer, startIndex, count, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when the end of a MIME part's content is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a MIME part's content is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimePartContentBegin"/>.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the MIME part content began.</param>
+		/// <param name="beginLineNumber">The line number where the MIME part content began.</param>
+		/// <param name="endOffset">The offset into the stream where the MIME part content ended.</param>
+		/// <param name="lines">The length of the MIME part content as measured in lines.</param>
+		/// <param name="newLineFormat">The new-line format of the content, if known.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMimePartContentEnd (long beginOffset, int beginLineNumber, long endOffset, int lines, NewLineFormat? newLineFormat, CancellationToken cancellationToken)
+		{
+			if (endOffset <= beginOffset && !newLineFormat.HasValue) {
+				// Note: Leave the part's Content null when there is no body at all. This tells Multipart.WriteTo() that the part
+				// ends with its header block, whose new-line sequence doubles as the new-line sequence that precedes the next
+				// boundary marker (see MimeEntity.EndsWithDelimiterNewLine).
+				content?.Dispose ();
+				content = null;
 				return;
 			}
 
-			PushBoundary (marker);
+			var part = (MimePart) stack.Peek ();
 
-			MultipartScanPreamble (multipart, inbuf, cancellationToken);
-			if (boundary == BoundaryType.ImmediateBoundary)
-				MultipartScanSubparts (multipart, inbuf, depth, cancellationToken);
-
-			if (boundary == BoundaryType.ImmediateEndBoundary) {
-				//OnMultipartEndBoundaryBegin (multipart, GetEndOffset (inputIndex));
-
-				// consume the end boundary and read the epilogue (if there is one)
-				multipart.WriteEndBoundary = true;
-				SkipLine (inbuf, false, cancellationToken);
-				PopBoundary ();
-
-				//OnMultipartEndBoundaryEnd (multipart, GetOffset (inputIndex));
-
-				MultipartScanEpilogue (multipart, inbuf, cancellationToken);
-
-				endOffset = GetEndOffset (inputIndex);
-				args.Lines = GetLineCount (beginLineNumber, beginOffset, endOffset);
-				return;
+			if (content is null /* Source storage */) {
+				content = new BoundedStream (reader.stream, beginOffset, endOffset, true);
+			} else {
+				// Note: MimeReader only passes the bytes within [beginOffset, endOffset) to OnMimePartContentRead(), so this
+				// is normally a no-op. It is kept as a cheap safeguard so that the content always matches the reported offsets.
+				content.SetLength (endOffset - beginOffset);
+				content.Position = 0;
 			}
 
-			endOffset = GetEndOffset (inputIndex);
-			args.Lines = GetLineCount (beginLineNumber, beginOffset, endOffset);
-
-			multipart.WriteEndBoundary = false;
-
-			// We either found the end of the stream or we found a parent's boundary
-			PopBoundary ();
-
-			if (boundary == BoundaryType.ParentEndBoundary && FoundImmediateBoundary (inbuf, true))
-				boundary = BoundaryType.ImmediateEndBoundary;
-			else if (boundary == BoundaryType.ParentBoundary && FoundImmediateBoundary (inbuf, false))
-				boundary = BoundaryType.ImmediateBoundary;
+			part.Content = new MimeContent (content, part.ContentTransferEncoding) { NewLineFormat = newLineFormat };
+			content = null;
 		}
 
-		unsafe HeaderList ParseHeaders (byte* inbuf, CancellationToken cancellationToken)
+		/// <summary>
+		/// Called when the end of a MIME part's content is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a MIME part's content is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimePartContentBeginAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the MIME part content began.</param>
+		/// <param name="beginLineNumber">The line number where the MIME part content began.</param>
+		/// <param name="endOffset">The offset into the stream where the MIME part content ended.</param>
+		/// <param name="lines">The length of the MIME part content as measured in lines.</param>
+		/// <param name="newLineFormat">The new-line format of the content, if known.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMimePartContentEndAsync (long beginOffset, int beginLineNumber, long endOffset, int lines, NewLineFormat? newLineFormat, CancellationToken cancellationToken)
 		{
-			state = MimeParserState.Headers;
-			if (Step (inbuf, cancellationToken) == MimeParserState.Error)
-				throw new FormatException ("Failed to parse headers.");
+			OnMimePartContentEnd (beginOffset, beginLineNumber, endOffset, lines, newLineFormat, cancellationToken);
+			return Task.CompletedTask;
+		}
 
-			state = eos ? MimeParserState.Eos : MimeParserState.Complete;
+		/// <summary>
+		/// Called when the end of a MIME part is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a MIME part is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimePartBegin"/>.</para>
+		/// </remarks>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the MIME part.</param>
+		/// <param name="beginOffset">The offset into the stream where the MIME part began.</param>
+		/// <param name="beginLineNumber">The line number where the MIME part began.</param>
+		/// <param name="headersEndOffset">The offset into the stream where the MIME part headers ended and the content began.</param>
+		/// <param name="endOffset">The offset into the stream where the MIME part ends.</param>
+		/// <param name="lines">The length of the MIME part as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMimePartEnd (ContentType contentType, long beginOffset, int beginLineNumber, long headersEndOffset, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			PopEntity ();
+		}
 
-			var parsed = new HeaderList (options);
+		/// <summary>
+		/// Called when the end of a MIME part is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a MIME part is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMimePartBeginAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the MIME part.</param>
+		/// <param name="beginOffset">The offset into the stream where the MIME part began.</param>
+		/// <param name="beginLineNumber">The line number where the MIME part began.</param>
+		/// <param name="headersEndOffset">The offset into the stream where the MIME part headers ended and the content began.</param>
+		/// <param name="endOffset">The offset into the stream where the MIME part ends.</param>
+		/// <param name="lines">The length of the MIME part as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMimePartEndAsync (ContentType contentType, long beginOffset, int beginLineNumber, long headersEndOffset, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			OnMimePartEnd (contentType, beginOffset, beginLineNumber, headersEndOffset, endOffset, lines, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		#endregion MimePart Events
+
+		#region MessagePart Events
+
+		/// <summary>
+		/// Called when the beginning of a message part is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a message part is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMessagePartEnd"/> when the end of the message part is found.</para>
+		/// </remarks>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the MIME part.</param>
+		/// <param name="beginOffset">The offset into the stream where the message part begins.</param>
+		/// <param name="beginLineNumber">The line number where the message part begins.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMessagePartBegin (ContentType contentType, long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			var toplevel = stack.Count > 0 && stack.Peek () is MimeMessage;
+			var rfc822 = Options.CreateEntity (contentType, headers, hasBodySeparator, toplevel, depth);
+
+			parsingMessageHeaders = true;
+			PushEntity (rfc822);
+			depth++;
+		}
+
+		/// <summary>
+		/// Called when the beginning of a message part is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a message part is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMessagePartEndAsync"/> when the end of the message part is found.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the MIME part.</param>
+		/// <param name="beginOffset">The offset into the stream where the message part begins.</param>
+		/// <param name="beginLineNumber">The line number where the message part begins.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMessagePartBeginAsync (ContentType contentType, long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			OnMessagePartBegin (contentType, beginOffset, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when the end of a message part is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a message part is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMessagePartBegin"/>.</para>
+		/// </remarks>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the MIME part.</param>
+		/// <param name="beginOffset">The offset into the stream where the message part began.</param>
+		/// <param name="beginLineNumber">The line number where the message part began.</param>
+		/// <param name="headersEndOffset">The offset into the stream where the MIME part headers ended and the content began.</param>
+		/// <param name="endOffset">The offset into the stream where the MIME part ends.</param>
+		/// <param name="lines">The length of the MIME part as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMessagePartEnd (ContentType contentType, long beginOffset, int beginLineNumber, long headersEndOffset, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			PopEntity ();
+			depth--;
+		}
+
+		/// <summary>
+		/// Called when the end of a message part is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a message part is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMessagePartBeginAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the MIME part.</param>
+		/// <param name="beginOffset">The offset into the stream where the message part began.</param>
+		/// <param name="beginLineNumber">The line number where the message part began.</param>
+		/// <param name="headersEndOffset">The offset into the stream where the MIME part headers ended and the content began.</param>
+		/// <param name="endOffset">The offset into the stream where the MIME part ends.</param>
+		/// <param name="lines">The length of the MIME part as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMessagePartEndAsync (ContentType contentType, long beginOffset, int beginLineNumber, long headersEndOffset, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			OnMessagePartEnd (contentType, beginOffset, beginLineNumber, headersEndOffset, endOffset, lines, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		#endregion MessagePart Events
+
+		#region Multipart Events
+
+		/// <summary>
+		/// Called when the beginning of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartEnd"/> when the end of the multipart is found.</para>
+		/// </remarks>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the multipart.</param>
+		/// <param name="beginOffset">The offset into the stream where the multipart begins.</param>
+		/// <param name="beginLineNumber">The line number where the multipart begins.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartBegin (ContentType contentType, long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			var toplevel = stack.Count > 0 && stack.Peek () is MimeMessage;
+			var multipart = Options.CreateEntity (contentType, headers, hasBodySeparator, toplevel, depth);
+
+			PushEntity (multipart);
+			depth++;
+		}
+
+		/// <summary>
+		/// Called when the beginning of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartEndAsync"/> when the end of the multipart is found.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the multipart.</param>
+		/// <param name="beginOffset">The offset into the stream where the multipart begins.</param>
+		/// <param name="beginLineNumber">The line number where the multipart begins.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartBeginAsync (ContentType contentType, long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			OnMultipartBegin (contentType, beginOffset, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker was found in the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartBoundaryBegin (long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+		}
+
+		/// <summary>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker was found in the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartBoundaryBeginAsync (long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+			OnMultipartBoundaryBegin (beginOffset, lineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </remarks>
+		/// <param name="buffer">The buffer containing the boundary marker.</param>
+		/// <param name="startIndex">The index denoting the starting position of the boundary marker within the buffer.</param>
+		/// <param name="count">The length of the boundary marker within the buffer, in bytes.</param>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker exists within the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartBoundaryRead (byte[] buffer, int startIndex, int count, long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+			// Note: Each call to OnMultipartBoundaryRead will contain a full boundary marker. If rawBoundary is *not* null,
+			// then it means that we've encountered a "double boundary". In order to support this scenario, we append the
+			// second (or third, etc) boundary to the existing rawBoundary buffer.
+			int rawIndex;
+
+			if (rawBoundary != null) {
+				rawIndex = rawBoundary.Length;
+				Array.Resize (ref rawBoundary, rawIndex + count);
+			} else {
+				rawBoundary = new byte[count];
+				rawIndex = 0;
+			}
+
+			Buffer.BlockCopy (buffer, startIndex, rawBoundary, rawIndex, count);
+		}
+
+		/// <summary>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="buffer">The buffer containing the boundary marker.</param>
+		/// <param name="startIndex">The index denoting the starting position of the boundary marker within the buffer.</param>
+		/// <param name="count">The length of the boundary marker within the buffer, in bytes.</param>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker exists within the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartBoundaryReadAsync (byte[] buffer, int startIndex, int count, long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+			OnMultipartBoundaryRead (buffer, startIndex, count, beginOffset, lineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker was found in the stream.</param>
+		/// <param name="endOffset">The offset into the stream where the boundary marker ended.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartBoundaryEnd (long beginOffset, int lineNumber, long endOffset, CancellationToken cancellationToken)
+		{
+		}
+
+		/// <summary>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart boundary is encountered in the stream.
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker was found in the stream.</param>
+		/// <param name="endOffset">The offset into the stream where the boundary marker ended.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartBoundaryEndAsync (long beginOffset, int lineNumber, long endOffset, CancellationToken cancellationToken)
+		{
+			OnMultipartBoundaryEnd (beginOffset, lineNumber, endOffset, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker was found in the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartEndBoundaryBegin (long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+		}
+
+		/// <summary>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker was found in the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartEndBoundaryBeginAsync (long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+			OnMultipartEndBoundaryBegin (beginOffset, lineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </remarks>
+		/// <param name="buffer">The buffer containing the boundary marker.</param>
+		/// <param name="startIndex">The index denoting the starting position of the boundary marker within the buffer.</param>
+		/// <param name="count">The length of the boundary marker within the buffer, in bytes.</param>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker exists within the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartEndBoundaryRead (byte[] buffer, int startIndex, int count, long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+			var multipart = (Multipart) stack.Peek ();
+			var rawEndBoundary = new byte[count];
+
+			Buffer.BlockCopy (buffer, startIndex, rawEndBoundary, 0, count);
+
+			multipart.RawEndBoundary = rawEndBoundary;
+		}
+
+		/// <summary>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="buffer">The buffer containing the boundary marker.</param>
+		/// <param name="startIndex">The index denoting the starting position of the boundary marker within the buffer.</param>
+		/// <param name="count">The length of the boundary marker within the buffer, in bytes.</param>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker exists within the stream.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartEndBoundaryReadAsync (byte[] buffer, int startIndex, int count, long beginOffset, int lineNumber, CancellationToken cancellationToken)
+		{
+			OnMultipartEndBoundaryRead (buffer, startIndex, count, beginOffset, lineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker was found in the stream.</param>
+		/// <param name="endOffset">The offset into the stream where the boundary marker ended.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartEndBoundaryEnd (long beginOffset, int lineNumber, long endOffset, CancellationToken cancellationToken)
+		{
+		}
+
+		/// <summary>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// Called when a multipart end boundary is encountered in the stream.
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the boundary marker began.</param>
+		/// <param name="lineNumber">The line number where the boundary marker was found in the stream.</param>
+		/// <param name="endOffset">The offset into the stream where the boundary marker ended.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartEndBoundaryEndAsync (long beginOffset, int lineNumber, long endOffset, CancellationToken cancellationToken)
+		{
+			OnMultipartEndBoundaryEnd (beginOffset, lineNumber, endOffset, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when the beginning of the preamble of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of the preamble of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartPreambleEnd"/>.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the preamble began.</param>
+		/// <param name="beginLineNumber">The line number where the preamble began.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartPreambleBegin (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			content = new MemoryStream ();
+		}
+
+		/// <summary>
+		/// Called when the beginning of the preamble of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of the preamble of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartPreambleEndAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the preamble began.</param>
+		/// <param name="beginLineNumber">The line number where the preamble began.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartPreambleBeginAsync (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			OnMultipartPreambleBegin (beginOffset, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when multipart preamble text is read from the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when multipart preamble text is read from the stream.</para>
+		/// </remarks>
+		/// <param name="buffer">A buffer containing the multipart preamble text.</param>
+		/// <param name="startIndex">The index denoting the starting position of the content within the buffer.</param>
+		/// <param name="count">The length of the content within the buffer, in bytes.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartPreambleRead (byte[] buffer, int startIndex, int count, CancellationToken cancellationToken)
+		{
+			content!.Write (buffer, startIndex, count);
+		}
+
+		/// <summary>
+		/// Called when multipart preamble text is read from the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when multipart preamble text is read from the stream.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="buffer">A buffer containing the multipart preamble text.</param>
+		/// <param name="startIndex">The index denoting the starting position of the content within the buffer.</param>
+		/// <param name="count">The length of the content within the buffer, in bytes.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartPreambleReadAsync (byte[] buffer, int startIndex, int count, CancellationToken cancellationToken)
+		{
+			OnMultipartPreambleRead (buffer, startIndex, count, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when the end of the preamble of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of the preamble of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartPreambleBegin"/>.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the multipart preamble began.</param>
+		/// <param name="beginLineNumber">The line number where the multipart preamble began.</param>
+		/// <param name="endOffset">The offset into the stream where the multipart preamble ended.</param>
+		/// <param name="lines">The length of the multipart preamble as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartPreambleEnd (long beginOffset, int beginLineNumber, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			var multipart = (Multipart) stack.Peek ();
+
+			// Note: MimeReader only passes the bytes within [beginOffset, endOffset) to OnMultipartPreambleRead(), so this
+			// is normally a no-op. It is kept as a cheap safeguard so that the preamble always matches the reported offsets.
+			content!.SetLength (endOffset - beginOffset);
+
+			multipart.RawPreamble = ((MemoryStream) content).ToArray ();
+			content.Dispose ();
+			content = null;
+		}
+
+		/// <summary>
+		/// Called when the end of the preamble of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of the preamble of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartPreambleBeginAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the multipart preamble began.</param>
+		/// <param name="beginLineNumber">The line number where the multipart preamble began.</param>
+		/// <param name="endOffset">The offset into the stream where the multipart preamble ended.</param>
+		/// <param name="lines">The length of the multipart preamble as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartPreambleEndAsync (long beginOffset, int beginLineNumber, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			OnMultipartPreambleEnd (beginOffset, beginLineNumber, endOffset, lines, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when the beginning of the epilogue of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of the epilogue of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartEpilogueEnd"/>.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the epilogue began.</param>
+		/// <param name="beginLineNumber">The line number where the epilogue began.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartEpilogueBegin (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			content = new MemoryStream ();
+		}
+
+		/// <summary>
+		/// Called when the beginning of the epilogue of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the beginning of the epilogue of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartEpilogueEndAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the epilogue began.</param>
+		/// <param name="beginLineNumber">The line number where the epilogue began.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartEpilogueBeginAsync (long beginOffset, int beginLineNumber, CancellationToken cancellationToken)
+		{
+			OnMultipartEpilogueBegin (beginOffset, beginLineNumber, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when multipart epilogue text is read from the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when multipart epilogue text is read from the stream.</para>
+		/// </remarks>
+		/// <param name="buffer">A buffer containing the multipart epilogue text.</param>
+		/// <param name="startIndex">The index denoting the starting position of the content within the buffer.</param>
+		/// <param name="count">The length of the content within the buffer, in bytes.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartEpilogueRead (byte[] buffer, int startIndex, int count, CancellationToken cancellationToken)
+		{
+			content!.Write (buffer, startIndex, count);
+		}
+
+		/// <summary>
+		/// Called when multipart epilogue text is read from the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when multipart epilogue text is read from the stream.</para>
+		/// <para>The newline sequence that precedes a multipart boundary marker is considered to be part of the
+		/// boundary marker and is not included in the content passed to this method.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="buffer">A buffer containing the multipart epilogue text.</param>
+		/// <param name="startIndex">The index denoting the starting position of the content within the buffer.</param>
+		/// <param name="count">The length of the content within the buffer, in bytes.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartEpilogueReadAsync (byte[] buffer, int startIndex, int count, CancellationToken cancellationToken)
+		{
+			OnMultipartEpilogueRead (buffer, startIndex, count, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when the end of the epilogue of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of the epilogue of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartEpilogueBegin"/>.</para>
+		/// </remarks>
+		/// <param name="beginOffset">The offset into the stream where the multipart epilogue began.</param>
+		/// <param name="beginLineNumber">The line number where the multipart epilogue began.</param>
+		/// <param name="endOffset">The offset into the stream where the multipart epilogue ended.</param>
+		/// <param name="lines">The length of the multipart epilogue as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartEpilogueEnd (long beginOffset, int beginLineNumber, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			var multipart = (Multipart) stack.Peek ();
+
+			// Note: MimeReader only passes the bytes within [beginOffset, endOffset) to OnMultipartEpilogueRead(), so this
+			// is normally a no-op. It is kept as a cheap safeguard so that the epilogue always matches the reported offsets.
+			content!.SetLength (endOffset - beginOffset);
+
+			multipart.RawEpilogue = ((MemoryStream) content).ToArray ();
+			content.Dispose ();
+			content = null;
+		}
+
+		/// <summary>
+		/// Called when the end of the epilogue of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of the epilogue of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartEpilogueBeginAsync"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="beginOffset">The offset into the stream where the multipart epilogue began.</param>
+		/// <param name="beginLineNumber">The line number where the multipart epilogue began.</param>
+		/// <param name="endOffset">The offset into the stream where the multipart epilogue ended.</param>
+		/// <param name="lines">The length of the multipart epilogue as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartEpilogueEndAsync (long beginOffset, int beginLineNumber, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			OnMultipartEpilogueEnd (beginOffset, beginLineNumber, endOffset, lines, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		/// <summary>
+		/// Called when the end of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartBegin"/>.</para>
+		/// </remarks>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the multipart.</param>
+		/// <param name="beginOffset">The offset into the stream where the multipart began.</param>
+		/// <param name="beginLineNumber">The line number where the multipart began.</param>
+		/// <param name="headersEndOffset">The offset into the stream where the multipart headers ended and the content began.</param>
+		/// <param name="endOffset">The offset into the stream where the multipart ends.</param>
+		/// <param name="lines">The length of the multipart as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual void OnMultipartEnd (ContentType contentType, long beginOffset, int beginLineNumber, long headersEndOffset, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			var multipart = (Multipart) stack.Peek ();
+
+			// If the multipart was truncated (no end boundary), preserve any boundary marker that was not followed by a MIME part.
+			if (multipart.RawEndBoundary != null && multipart.RawEndBoundary.Length == 0)
+				multipart.RawTrailingBoundary = rawBoundary;
+
+			rawBoundary = null;
+
+			PopEntity ();
+			depth--;
+		}
+
+		/// <summary>
+		/// Called when the end of a multipart is encountered in the stream.
+		/// </summary>
+		/// <remarks>
+		/// <para>Called when the end of a multipart is encountered in the stream.</para>
+		/// <para>This method is always paired with a corresponding call to <see cref="OnMultipartBegin"/>.</para>
+		/// </remarks>
+		/// <returns>An asynchronous task context.</returns>
+		/// <param name="contentType">The parsed <c>Content-Type</c> header of the multipart.</param>
+		/// <param name="beginOffset">The offset into the stream where the multipart began.</param>
+		/// <param name="beginLineNumber">The line number where the multipart began.</param>
+		/// <param name="headersEndOffset">The offset into the stream where the multipart headers ended and the content began.</param>
+		/// <param name="endOffset">The offset into the stream where the multipart ends.</param>
+		/// <param name="lines">The length of the multipart as measured in lines.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		protected virtual Task OnMultipartEndAsync (ContentType contentType, long beginOffset, int beginLineNumber, long headersEndOffset, long endOffset, int lines, CancellationToken cancellationToken)
+		{
+			OnMultipartEnd (contentType, beginOffset, beginLineNumber, headersEndOffset, endOffset, lines, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		#endregion Multipart Events
+
+		void Reset ()
+		{
+			while (stack.Count > 0) {
+				var item = (IDisposable) stack.Pop ();
+				item.Dispose ();
+			}
+
+			content?.Dispose ();
+			content = null;
+		}
+
+		void Initialize (bool parsingMessageHeaders)
+		{
+			// Note: if a previously parsed MimePart's content has been read,
+			// then the stream position will have moved and will need to be
+			// reset.
+			if (storage == MimeContentStorage.Source && reader.stream.Position != reader.position)
+				reader.stream.Seek (reader.position, SeekOrigin.Begin);
+
+			this.parsingMessageHeaders = parsingMessageHeaders;
+			mboxMarkerOffset = -1;
+			stack.Clear ();
+			depth = 0;
+		}
+
+		/// <summary>
+		/// Parse a single message/delivery-status status group from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Parses a single message/delivery-status status group from the stream.
+		/// </remarks>
+		/// <returns>The parsed status group or <see langword="null" /> if there are no more status
+		/// groups to be found in the stream.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the status group.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		internal HeaderList? ParseStatusGroup (CancellationToken cancellationToken = default)
+		{
+			Initialize (false);
+
+			try {
+				// Note: Status groups are separated by 1 or more blank lines. If we run out of input
+				// while skipping them, then there are no more status groups to parse.
+				if (!reader.SkipBlankLines (cancellationToken))
+					return null;
+
+				reader.ReadHeaders (cancellationToken);
+			} catch {
+				Reset ();
+				throw;
+			}
+
+			if (headers.Count == 0) {
+				// Note: If we didn't parse any headers, then there was no status group. This can happen if
+				// the remainder of the stream consists of nothing more than a stray byte or two (such as a
+				// lone CR) that SkipBlankLines() could not consume.
+				return null;
+			}
+
+			var parsed = new HeaderList (Options, headers.Count);
 			foreach (var header in headers)
 				parsed.Add (header);
+
+			parsed.HasBodySeparator = hasBodySeparator;
 
 			return parsed;
 		}
 
 		/// <summary>
-		/// Parses a list of headers from the stream.
+		/// Parse a list of headers from the stream.
 		/// </summary>
 		/// <remarks>
 		/// Parses a list of headers from the stream.
@@ -1702,67 +1647,65 @@ namespace MimeKit {
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
-		public HeaderList ParseHeaders (CancellationToken cancellationToken = default (CancellationToken))
+		public HeaderList ParseHeaders (CancellationToken cancellationToken = default)
 		{
-			unsafe {
-				fixed (byte* inbuf = input) {
-					return ParseHeaders (inbuf, cancellationToken);
-				}
+			Initialize (false);
+
+			try {
+				reader.ReadHeaders (cancellationToken);
+			} catch {
+				Reset ();
+				throw;
 			}
-		}
 
-		unsafe MimeEntity ParseEntity (byte* inbuf, CancellationToken cancellationToken)
-		{
-			// Note: if a previously parsed MimePart's content has been read,
-			// then the stream position will have moved and will need to be
-			// reset.
-			if (persistent && stream.Position != position)
-				stream.Seek (position, SeekOrigin.Begin);
+			var parsed = new HeaderList (Options, headers.Count);
+			foreach (var header in headers)
+				parsed.Add (header);
 
-			var beginLineNumber = lineNumber;
+			parsed.HasBodySeparator = hasBodySeparator;
 
-			state = MimeParserState.Headers;
-			toplevel = true;
-
-			if (Step (inbuf, cancellationToken) == MimeParserState.Error)
-				throw new FormatException ("Failed to parse entity headers.");
-
-			var type = GetContentType (null);
-
-			// Note: we pass 'false' as the 'toplevel' argument here because
-			// we want the entity to consume all of the headers.
-			var entity = options.CreateEntity (type, headers, false, 0);
-			var entityArgs = new MimeEntityEndEventArgs (entity) {
-				HeadersEndOffset = headerBlockEnd,
-				BeginOffset = headerBlockBegin,
-				LineNumber = beginLineNumber
-			};
-
-			OnMimeEntityBegin (entityArgs);
-
-			if (entity is Multipart)
-				ConstructMultipart ((Multipart) entity, entityArgs, inbuf, 0, cancellationToken);
-			else if (entity is MessagePart)
-				ConstructMessagePart ((MessagePart) entity, entityArgs, inbuf, 0, cancellationToken);
-			else
-				ConstructMimePart ((MimePart) entity, entityArgs, inbuf, cancellationToken);
-
-			var endOffset = GetEndOffset (inputIndex);
-			entityArgs.HeadersEndOffset = Math.Min (entityArgs.HeadersEndOffset, endOffset);
-			entityArgs.EndOffset = endOffset;
-
-			if (boundary != BoundaryType.Eos)
-				state = MimeParserState.Complete;
-			else
-				state = MimeParserState.Eos;
-
-			OnMimeEntityEnd (entityArgs);
-
-			return entity;
+			return parsed;
 		}
 
 		/// <summary>
-		/// Parses an entity from the stream.
+		/// Asynchronously parse a list of headers from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Asynchronously parses a list of headers from the stream.
+		/// </remarks>
+		/// <returns>The parsed list of headers.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the headers.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		public async Task<HeaderList> ParseHeadersAsync (CancellationToken cancellationToken = default)
+		{
+			Initialize (false);
+
+			try {
+				await reader.ReadHeadersAsync (cancellationToken).ConfigureAwait (false);
+			} catch {
+				Reset ();
+				throw;
+			}
+
+			var parsed = new HeaderList (Options, headers.Count);
+			foreach (var header in headers)
+				parsed.Add (header);
+
+			parsed.HasBodySeparator = hasBodySeparator;
+
+			return parsed;
+		}
+
+		/// <summary>
+		/// Parse an entity from the stream.
 		/// </summary>
 		/// <remarks>
 		/// Parses an entity from the stream.
@@ -1778,109 +1721,53 @@ namespace MimeKit {
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
-		public MimeEntity ParseEntity (CancellationToken cancellationToken = default (CancellationToken))
+		public MimeEntity ParseEntity (CancellationToken cancellationToken = default)
 		{
-			unsafe {
-				fixed (byte* inbuf = input) {
-					return ParseEntity (inbuf, cancellationToken);
-				}
-			}
-		}
+			Initialize (false);
 
-		unsafe MimeMessage ParseMessage (byte* inbuf, CancellationToken cancellationToken)
-		{
-			// Note: if a previously parsed MimePart's content has been read,
-			// then the stream position will have moved and will need to be
-			// reset.
-			if (persistent && stream.Position != position)
-				stream.Seek (position, SeekOrigin.Begin);
-
-			// scan the from-line if we are parsing an mbox
-			while (state != MimeParserState.MessageHeaders) {
-				switch (Step (inbuf, cancellationToken)) {
-				case MimeParserState.Error:
-					throw new FormatException ("Failed to find mbox From marker.");
-				case MimeParserState.Eos:
-					throw new FormatException ("End of stream.");
-				}
+			try {
+				reader.ReadEntity (cancellationToken);
+			} catch {
+				Reset ();
+				throw;
 			}
 
-			toplevel = true;
-
-			// parse the headers
-			var beginLineNumber = lineNumber;
-			if (state < MimeParserState.Content && Step (inbuf, cancellationToken) == MimeParserState.Error)
-				throw new FormatException ("Failed to parse message headers.");
-
-			var message = new MimeMessage (options, headers, RfcComplianceMode.Loose);
-			var messageArgs = new MimeMessageEndEventArgs (message) {
-				HeadersEndOffset = headerBlockEnd,
-				BeginOffset = headerBlockBegin,
-				LineNumber = beginLineNumber
-			};
-
-			OnMimeMessageBegin (messageArgs);
-
-			contentEnd = 0;
-			if (format == MimeFormat.Mbox && options.RespectContentLength) {
-				for (int i = 0; i < headers.Count; i++) {
-					if (headers[i].Id != HeaderId.ContentLength)
-						continue;
-
-					var value = headers[i].RawValue;
-					int index = 0;
-
-					if (!ParseUtils.SkipWhiteSpace (value, ref index, value.Length))
-						continue;
-
-					if (!ParseUtils.TryParseInt32 (value, ref index, value.Length, out int length))
-						continue;
-
-					contentEnd = GetOffset (inputIndex) + length;
-					break;
-				}
-			}
-
-			var type = GetContentType (null);
-			var entity = options.CreateEntity (type, headers, true, 0);
-			var entityArgs = new MimeEntityEndEventArgs (entity) {
-				HeadersEndOffset = headerBlockEnd,
-				BeginOffset = headerBlockBegin,
-				LineNumber = beginLineNumber
-			};
-
-			OnMimeEntityBegin (entityArgs);
-
-			message.Body = entity;
-
-			if (entity is Multipart multipart)
-				ConstructMultipart (multipart, entityArgs, inbuf, 0, cancellationToken);
-			else if (entity is MessagePart rfc822)
-				ConstructMessagePart (rfc822, entityArgs, inbuf, 0, cancellationToken);
-			else
-				ConstructMimePart ((MimePart) entity, entityArgs, inbuf, cancellationToken);
-
-			var endOffset = GetEndOffset (inputIndex);
-			messageArgs.HeadersEndOffset = entityArgs.HeadersEndOffset = Math.Min (entityArgs.HeadersEndOffset, endOffset);
-			messageArgs.EndOffset = entityArgs.EndOffset = endOffset;
-
-			if (boundary != BoundaryType.Eos) {
-				if (format == MimeFormat.Mbox)
-					state = MimeParserState.MboxMarker;
-				else
-					state = MimeParserState.Complete;
-			} else {
-				state = MimeParserState.Eos;
-			}
-
-			OnMimeEntityEnd (entityArgs);
-			OnMimeMessageEnd (messageArgs);
-
-			return message;
+			return (MimeEntity) stack.Pop ();
 		}
 
 		/// <summary>
-		/// Parses a message from the stream.
+		/// Asynchronously parse an entity from the stream.
+		/// </summary>
+		/// <remarks>
+		/// Asynchronously parses an entity from the stream.
+		/// </remarks>
+		/// <returns>The parsed entity.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the entity.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		public async Task<MimeEntity> ParseEntityAsync (CancellationToken cancellationToken = default)
+		{
+			Initialize (false);
+
+			try {
+				await reader.ReadEntityAsync (cancellationToken).ConfigureAwait (false);
+			} catch {
+				Reset ();
+				throw;
+			}
+
+			return (MimeEntity) stack.Pop ();
+		}
+
+		/// <summary>
+		/// Parse a message from the stream.
 		/// </summary>
 		/// <remarks>
 		/// Parses a message from the stream.
@@ -1896,48 +1783,54 @@ namespace MimeKit {
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
-		public MimeMessage ParseMessage (CancellationToken cancellationToken = default (CancellationToken))
+		public MimeMessage ParseMessage (CancellationToken cancellationToken = default)
 		{
-			unsafe {
-				fixed (byte* inbuf = input) {
-					return ParseMessage (inbuf, cancellationToken);
-				}
+			Initialize (true);
+
+			try {
+				reader.ReadMessage (cancellationToken);
+			} catch {
+				Reset ();
+				throw;
 			}
-		}
 
-		#region IEnumerable implementation
+			return (MimeMessage) stack.Pop ();
+		}
 
 		/// <summary>
-		/// Enumerates the messages in the stream.
+		/// Asynchronously parse a message from the stream.
 		/// </summary>
 		/// <remarks>
-		/// This is mostly useful when parsing mbox-formatted streams.
+		/// Asynchronously parses a message from the stream.
 		/// </remarks>
-		/// <returns>The enumerator.</returns>
-		public IEnumerator<MimeMessage> GetEnumerator ()
+		/// <returns>The parsed message.</returns>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.FormatException">
+		/// There was an error parsing the message.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		public async Task<MimeMessage> ParseMessageAsync (CancellationToken cancellationToken = default)
 		{
-			while (!IsEndOfStream)
-				yield return ParseMessage ();
+			Initialize (true);
 
-			yield break;
+			try {
+				await reader.ReadMessageAsync (cancellationToken).ConfigureAwait (false);
+			} catch {
+				Reset ();
+				throw;
+			}
+
+			return (MimeMessage) stack.Pop ();
 		}
 
-		#endregion
-
-		#region IEnumerable implementation
-
-		/// <summary>
-		/// Enumerates the messages in the stream.
-		/// </summary>
-		/// <remarks>
-		/// This is mostly useful when parsing mbox-formatted streams.
-		/// </remarks>
-		/// <returns>The enumerator.</returns>
-		IEnumerator IEnumerable.GetEnumerator ()
+		internal Stream ReadToEos ()
 		{
-			return GetEnumerator ();
+			return reader.ReadToEos ();
 		}
-
-		#endregion
 	}
 }

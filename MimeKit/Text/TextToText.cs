@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -79,16 +79,16 @@ namespace MimeKit.Text {
 		/// <param name="reader">The text reader.</param>
 		/// <param name="writer">The text writer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="reader"/> is <c>null</c>.</para>
+		/// <para><paramref name="reader"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="writer"/> is <c>null</c>.</para>
+		/// <para><paramref name="writer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public override void Convert (TextReader reader, TextWriter writer)
 		{
-			if (reader == null)
+			if (reader is null)
 				throw new ArgumentNullException (nameof (reader));
 
-			if (writer == null)
+			if (writer is null)
 				throw new ArgumentNullException (nameof (writer));
 
 			if (!string.IsNullOrEmpty (Header))

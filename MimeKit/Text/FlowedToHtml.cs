@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,8 @@ using System;
 using System.IO;
 using System.Text;
 using System.Collections.Generic;
+
+using MimeKit.Utils;
 
 namespace MimeKit.Text {
 	/// <summary>
@@ -86,13 +88,13 @@ namespace MimeKit.Text {
 		/// <para>Gets or sets whether the trailing space on a wrapped line should be deleted.</para>
 		/// <para>The flowed text format defines a Content-Type parameter called "delsp" which can
 		/// have a value of "yes" or "no". If the parameter exists and the value is "yes", then
-		/// <see cref="DeleteSpace"/> should be set to <c>true</c>, otherwise <see cref="DeleteSpace"/>
-		/// should be set to <c>false</c>.</para>
+		/// <see cref="DeleteSpace"/> should be set to <see langword="true" />, otherwise <see cref="DeleteSpace"/>
+		/// should be set to <see langword="false" />.</para>
 		/// </remarks>
 		/// <example>
 		/// <code language="c#" source="Examples\MimeVisitorExamples.cs" region="HtmlPreviewVisitor" />
 		/// </example>
-		/// <value><c>true</c> if the trailing space on a wrapped line should be deleted; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the trailing space on a wrapped line should be deleted; otherwise, <see langword="false" />.</value>
 		public bool DeleteSpace {
 			get; set;
 		}
@@ -128,25 +130,29 @@ namespace MimeKit.Text {
 		/// filtering of HTML tags and content.
 		/// </remarks>
 		/// <value>The html tag callback.</value>
-		public HtmlTagCallback HtmlTagCallback {
+		public HtmlTagCallback? HtmlTagCallback {
 			get; set;
 		}
 
 		/// <summary>
-		/// Get or set whether or not the converter should only output an HTML fragment.
+		/// Get or set whether the converter should only output an HTML fragment.
 		/// </summary>
 		/// <remarks>
-		/// Gets or sets whether or not the converter should only output an entire
-		/// HTML document or just a fragment of the HTML body content.
+		/// <para>Gets or sets whether the converter should output an entire HTML document or just a fragment
+		/// of the HTML body content.</para>
+		/// <para>When <see langword="false" />, the output (including the <see cref="TextConverter.Header"/> and
+		/// <see cref="TextConverter.Footer"/>) is wrapped in <c>&lt;html&gt;&lt;body&gt;</c> and
+		/// <c>&lt;/body&gt;&lt;/html&gt;</c> tags. When <see langword="true" />, these tags are omitted so that
+		/// the output can be embedded within another HTML document.</para>
 		/// </remarks>
-		/// <value><c>true</c> if the converter should only output an HTML fragment; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the converter should only output an HTML fragment; otherwise, <see langword="false" />.</value>
 		public bool OutputHtmlFragment {
 			get; set;
 		}
 
 		class FlowedToHtmlTagContext : HtmlTagContext
 		{
-			HtmlAttributeCollection attrs;
+			readonly HtmlAttributeCollection attrs;
 			bool isEndTag;
 
 			public FlowedToHtmlTagContext (HtmlTagId tag, HtmlAttribute attr) : base (tag)
@@ -186,7 +192,7 @@ namespace MimeKit.Text {
 			tagContext.WriteTag (htmlWriter, true);
 		}
 
-		static string Unquote (string line, out int quoteDepth)
+		static ReadOnlySpan<char> Unquote (ReadOnlySpan<char> line, out int quoteDepth)
 		{
 			int index = 0;
 
@@ -203,17 +209,28 @@ namespace MimeKit.Text {
 			if (index > 0 && index < line.Length && line[index] == ' ')
 				index++;
 
-			return index > 0 ? line.Substring (index) : line;
+			return index > 0 ? line.Slice (index) : line;
 		}
 
-		static bool SuppressContent (IList<FlowedToHtmlTagContext> stack)
+		// Note: suppressed is the index of the element on the stack that suppresses its inner content (or -1 if none do).
+		static void PopEndTag (HtmlWriter htmlWriter, HtmlTagCallback callback, List<FlowedToHtmlTagContext> stack, ref int suppressed)
 		{
-			for (int i = stack.Count; i > 0; i--) {
-				if (stack[i - 1].SuppressInnerContent)
-					return true;
-			}
+			var ctx = stack[stack.Count - 1];
 
-			return false;
+			stack.RemoveAt (stack.Count - 1);
+
+			if (suppressed == stack.Count)
+				suppressed = -1;
+
+			if (suppressed != -1 || ctx.DeleteEndTag)
+				return;
+
+			ctx.SetIsEndTag (true);
+
+			if (ctx.InvokeCallbackForEndTag)
+				callback (ctx, htmlWriter);
+			else
+				ctx.WriteTag (htmlWriter);
 		}
 
 		void WriteText (HtmlWriter htmlWriter, string text)
@@ -222,13 +239,12 @@ namespace MimeKit.Text {
 			var content = text.ToCharArray ();
 			int endIndex = content.Length;
 			int startIndex = 0;
-			UrlMatch match;
 			int count;
 
 			do {
 				count = endIndex - startIndex;
 
-				if (scanner.Scan (content, startIndex, count, out match)) {
+				if (scanner.Scan (content, startIndex, count, out var match)) {
 					count = match.EndIndex - match.StartIndex;
 
 					if (match.StartIndex > startIndex) {
@@ -260,36 +276,31 @@ namespace MimeKit.Text {
 			} while (startIndex < endIndex);
 		}
 
-		void WriteParagraph (HtmlWriter htmlWriter, IList<FlowedToHtmlTagContext> stack, ref int currentQuoteDepth, StringBuilder para, int quoteDepth)
+		void WriteParagraph (HtmlWriter htmlWriter, List<FlowedToHtmlTagContext> stack, ref int currentQuoteDepth, ref int suppressed, StringBuilder para, int quoteDepth)
 		{
 			var callback = HtmlTagCallback ?? DefaultHtmlTagCallback;
 			FlowedToHtmlTagContext ctx;
 
 			while (currentQuoteDepth < quoteDepth) {
 				ctx = new FlowedToHtmlTagContext (HtmlTagId.BlockQuote);
-				callback (ctx, htmlWriter);
+
+				if (suppressed == -1) {
+					callback (ctx, htmlWriter);
+
+					if (ctx.SuppressInnerContent)
+						suppressed = stack.Count;
+				}
+
 				currentQuoteDepth++;
 				stack.Add (ctx);
 			}
 
 			while (quoteDepth < currentQuoteDepth) {
-				ctx = stack[stack.Count - 1];
-				stack.RemoveAt (stack.Count - 1);
-
-				if (!SuppressContent (stack) && !ctx.DeleteEndTag) {
-					ctx.SetIsEndTag (true);
-
-					if (ctx.InvokeCallbackForEndTag)
-						callback (ctx, htmlWriter);
-					else
-						ctx.WriteTag (htmlWriter);
-				}
-
-				if (ctx.TagId == HtmlTagId.BlockQuote)
-					currentQuoteDepth--;
+				PopEndTag (htmlWriter, callback, stack, ref suppressed);
+				currentQuoteDepth--;
 			}
 
-			if (SuppressContent (stack))
+			if (suppressed != -1)
 				return;
 
 			ctx = new FlowedToHtmlTagContext (para.Length == 0 ? HtmlTagId.Br : HtmlTagId.P);
@@ -324,16 +335,16 @@ namespace MimeKit.Text {
 		/// <param name="reader">The text reader.</param>
 		/// <param name="writer">The text writer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="reader"/> is <c>null</c>.</para>
+		/// <para><paramref name="reader"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="writer"/> is <c>null</c>.</para>
+		/// <para><paramref name="writer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public override void Convert (TextReader reader, TextWriter writer)
 		{
-			if (reader == null)
+			if (reader is null)
 				throw new ArgumentNullException (nameof (reader));
 
-			if (writer == null)
+			if (writer is null)
 				throw new ArgumentNullException (nameof (writer));
 
 			if (!OutputHtmlFragment)
@@ -350,22 +361,22 @@ namespace MimeKit.Text {
 				}
 			}
 
-			using (var htmlWriter = new HtmlWriter (writer)) {
+			using (var htmlWriter = new HtmlWriter (writer, true)) {
 				var callback = HtmlTagCallback ?? DefaultHtmlTagCallback;
 				var stack = new List<FlowedToHtmlTagContext> ();
 				var para = new StringBuilder ();
 				int currentQuoteDepth = 0;
 				int paraQuoteDepth = -1;
-				int quoteDepth;
-				string line;
+				int suppressed = -1;
+				string? line;
 
 				while ((line = reader.ReadLine ()) != null) {
 					// unquote the line
-					line = Unquote (line, out quoteDepth);
+					var unquoted = Unquote (line.AsSpan (), out int quoteDepth);
 
-					// remove space-stuffing
-					if (line.Length > 0 && line[0] == ' ')
-						line = line.Substring (1);
+					// if there is a leading space, it was stuffed
+					if (quoteDepth == 0 && unquoted.Length > 0 && unquoted[0] == ' ')
+						unquoted = unquoted.Slice (1);
 
 					if (para.Length == 0) {
 						paraQuoteDepth = quoteDepth;
@@ -373,16 +384,16 @@ namespace MimeKit.Text {
 						// Note: according to rfc3676, when a folded line has a different quote
 						// depth than the previous line, then quote-depth rules win and we need
 						// to treat this as a new paragraph.
-						WriteParagraph (htmlWriter, stack, ref currentQuoteDepth, para, paraQuoteDepth);
+						WriteParagraph (htmlWriter, stack, ref currentQuoteDepth, ref suppressed, para, paraQuoteDepth);
 						paraQuoteDepth = quoteDepth;
 						para.Length = 0;
 					}
 
-					para.Append (line);
+					para.Append (unquoted);
 
-					if (line.Length == 0 || line[line.Length - 1] != ' ') {
+					if (unquoted.Length == 0 || unquoted[unquoted.Length - 1] != ' ') {
 						// line did not end with a space, so the next line will start a new paragraph
-						WriteParagraph (htmlWriter, stack, ref currentQuoteDepth, para, paraQuoteDepth);
+						WriteParagraph (htmlWriter, stack, ref currentQuoteDepth, ref suppressed, para, paraQuoteDepth);
 						paraQuoteDepth = 0;
 						para.Length = 0;
 					} else if (DeleteSpace) {
@@ -391,16 +402,12 @@ namespace MimeKit.Text {
 					}
 				}
 
-				for (int i = stack.Count; i > 0; i--) {
-					var ctx = stack[i - 1];
+				// Flush any remaining paragraph text.
+				if (para.Length > 0)
+					WriteParagraph (htmlWriter, stack, ref currentQuoteDepth, ref suppressed, para, paraQuoteDepth);
 
-					ctx.SetIsEndTag (true);
-
-					if (ctx.InvokeCallbackForEndTag)
-						callback (ctx, htmlWriter);
-					else
-						ctx.WriteTag (htmlWriter);
-				}
+				while (stack.Count > 0)
+					PopEndTag (htmlWriter, callback, stack, ref suppressed);
 
 				htmlWriter.Flush ();
 			}

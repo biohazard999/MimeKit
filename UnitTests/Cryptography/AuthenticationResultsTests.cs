@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,7 @@
 // THE SOFTWARE.
 //
 
-using System;
 using System.Text;
-
-using NUnit.Framework;
 
 using MimeKit;
 using MimeKit.Cryptography;
@@ -57,10 +54,10 @@ namespace UnitTests.Cryptography {
 			Assert.Throws<ArgumentOutOfRangeException> (() => AuthenticationResults.Parse (buffer, -1, 0));
 			Assert.Throws<ArgumentOutOfRangeException> (() => AuthenticationResults.Parse (buffer, 0, -1));
 
-			Assert.Throws<ArgumentNullException> (() => AuthenticationResults.TryParse (null, out authres));
-			Assert.Throws<ArgumentNullException> (() => AuthenticationResults.TryParse (null, 0, 0, out authres));
-			Assert.Throws<ArgumentOutOfRangeException> (() => AuthenticationResults.TryParse (buffer, -1, 0, out authres));
-			Assert.Throws<ArgumentOutOfRangeException> (() => AuthenticationResults.TryParse (buffer, 0, -1, out authres));
+			Assert.That (AuthenticationResults.TryParse (null, out authres), Is.False);
+			Assert.That (AuthenticationResults.TryParse (null, 0, 0, out authres), Is.False);
+			Assert.That (AuthenticationResults.TryParse (buffer, -1, 0, out authres), Is.False);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, -1, out authres), Is.False);
 		}
 
 		[Test]
@@ -79,7 +76,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, encoded.Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -99,7 +96,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, encoded.Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -117,7 +114,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, encoded.Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -137,7 +134,49 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, encoded.Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestEncodeVeryLongResultMethodWithVersion ()
+		{
+			const string method = "really-really-really-really-really-really-really-long-method";
+			const string expected = "Authentication-Results: lists.example.com 1;\n\t" + method + "\n\t/2147483647=pass\n";
+			var encoded = new StringBuilder ("Authentication-Results:");
+			var authres = new AuthenticationResults ("lists.example.com");
+			var options = FormatOptions.Default.Clone ();
+
+			authres.Results.Add (new AuthenticationMethodResult (method, "pass") {
+				Version = int.MaxValue
+			});
+			authres.Version = 1;
+
+			options.NewLineFormat = NewLineFormat.Unix;
+			options.MaxLineLength = 60;
+
+			authres.Encode (options, encoded, encoded.Length);
+
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestEncodeVeryLongResultMethodWithoutVersion ()
+		{
+			const string method = "really-really-really-really-really-really-really-long-method";
+			const string expected = "Authentication-Results: lists.example.com 1;\n\t" + method + "\n\t=pass\n";
+			var encoded = new StringBuilder ("Authentication-Results:");
+			var authres = new AuthenticationResults ("lists.example.com");
+			var options = FormatOptions.Default.Clone ();
+
+			authres.Results.Add (new AuthenticationMethodResult (method, "pass"));
+			authres.Version = 1;
+
+			options.NewLineFormat = NewLineFormat.Unix;
+			options.MaxLineLength = 60;
+
+			authres.Encode (options, encoded, encoded.Length);
+
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -157,7 +196,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, encoded.Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -178,7 +217,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, encoded.Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -201,7 +240,78 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, encoded.Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestEncodeVeryLongReasonActionAndPropertyTokens ()
+		{
+			var encoded = new StringBuilder ("Authentication-Results:");
+			var authres = new AuthenticationResults ("lists.example.com");
+			var options = FormatOptions.Default.Clone ();
+
+			authres.Results.Add (new AuthenticationMethodResult ("spf", "fail") {
+				Reason = "this is a really really really really really long reason"
+			});
+			authres.Results[0].Properties.Add (new AuthenticationMethodProperty ("really-really-really-really-long-ptype", "really-really-really-really-long-property", "value"));
+			authres.Results.Add (new AuthenticationMethodResult ("dmarc", "fail") {
+				Action = "this is a really really really really really long action"
+			});
+			authres.Version = 1;
+
+			options.NewLineFormat = NewLineFormat.Unix;
+			options.MaxLineLength = 60;
+
+			authres.Encode (options, encoded, encoded.Length);
+
+			const string expected = "Authentication-Results: lists.example.com 1; spf=fail\n" +
+				"\treason=\n" +
+				"\t\"this is a really really really really really long reason\"\n" +
+				"\treally-really-really-really-long-ptype.\n" +
+				"\treally-really-really-really-long-property=value; dmarc=fail\n" +
+				"\taction=\n" +
+				"\t\"this is a really really really really really long action\"\n";
+
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestAuthenticationMethodPropertyToString ()
+		{
+			var property = new AuthenticationMethodProperty ("smtp", "mailfrom", "example.com");
+
+			Assert.That (property.ToString (), Is.EqualTo ("smtp.mailfrom=example.com"));
+		}
+
+		[Test]
+		public void TestEncodeLongOffice365RandomDomainTokensAndAction ()
+		{
+			const string expected = "Authentication-Results: lists.example.com 1;\n\tspf=fail (sender IP is 1.1.1.1) smtp.mailfrom=eu-west-1.amazonses.com;\n\treally-really-long-receivingdomain.com; dkim=pass (signature was verified)\n\theader.d=domain.com; another-really-really-long-receivingdomain.com;\n\tdmarc=bestguesspass action=\"none\" header.from=domain.com\n";
+			var encoded = new StringBuilder ("Authentication-Results:");
+			var authres = new AuthenticationResults ("lists.example.com");
+			var options = FormatOptions.Default.Clone ();
+
+			authres.Results.Add (new AuthenticationMethodResult ("spf", "fail") {
+				ResultComment = "sender IP is 1.1.1.1",
+			});
+			authres.Results[0].Properties.Add (new AuthenticationMethodProperty ("smtp", "mailfrom", "eu-west-1.amazonses.com"));
+			authres.Results.Add (new AuthenticationMethodResult ("dkim", "pass") {
+				Office365AuthenticationServiceIdentifier = "really-really-long-receivingdomain.com",
+				ResultComment = "signature was verified",
+			});
+			authres.Results[1].Properties.Add (new AuthenticationMethodProperty ("header", "d", "domain.com"));
+			authres.Results.Add (new AuthenticationMethodResult ("dmarc", "bestguesspass") {
+				Office365AuthenticationServiceIdentifier = "another-really-really-long-receivingdomain.com",
+				Action = "none",
+			});
+			authres.Results[2].Properties.Add (new AuthenticationMethodProperty ("header", "from", "domain.com"));
+			authres.Version = 1;
+
+			options.NewLineFormat = NewLineFormat.Unix;
+
+			authres.Encode (options, encoded, encoded.Length);
+
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -211,14 +321,14 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Instance.Value, "instance");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("foo", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Instance.Value, Is.EqualTo (1), "instance");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("foo"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " i=1; example.com; foo=pass\n";
 			var encoded = new StringBuilder ();
@@ -227,7 +337,32 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "ARC-Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestParseQuotedAuthServId ()
+		{
+			const string input = "\"example.com\"; foo=pass";
+			var buffer = Encoding.ASCII.GetBytes (input);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out var authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("foo"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+		}
+
+		[Test]
+		public void TestParseInvalidComments ()
+		{
+			var buffer = Encoding.ASCII.GetBytes ("example.com; gateway.spf (unterminated");
+
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out _), Is.False, "dotted method comment");
+
+			buffer = Encoding.ASCII.GetBytes ("\"example.com\" (unterminated");
+
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out _), Is.False, "authserv-id comment");
 		}
 
 		[Test]
@@ -236,10 +371,17 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes ("example.org");
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.org", authres.AuthenticationServiceIdentifier, "authserv-id");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.org"), "authserv-id");
+			Assert.That (authres.ToString (), Is.EqualTo ("example.org; none"));
 
-			Assert.AreEqual ("example.org; none", authres.ToString ());
+			authres = AuthenticationResults.Parse (buffer, 0, buffer.Length);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.org"), "authserv-id");
+			Assert.That (authres.ToString (), Is.EqualTo ("example.org; none"));
+
+			authres = AuthenticationResults.Parse (buffer);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.org"), "authserv-id");
+			Assert.That (authres.ToString (), Is.EqualTo ("example.org; none"));
 
 			const string expected = " example.org; none\n";
 			var encoded = new StringBuilder ();
@@ -248,7 +390,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -257,10 +399,10 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes ("example.org;");
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.org", authres.AuthenticationServiceIdentifier, "authserv-id");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.org"), "authserv-id");
 
-			Assert.AreEqual ("example.org; none", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("example.org; none"));
 
 			const string expected = " example.org; none\n";
 			var encoded = new StringBuilder ();
@@ -269,7 +411,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -279,11 +421,11 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.org", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Version.Value, "authres-version");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.org"), "authserv-id");
+			Assert.That (authres.Version.Value, Is.EqualTo (1), "authres-version");
 
-			Assert.AreEqual ("example.org 1; none", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("example.org 1; none"));
 
 			const string expected = " example.org 1; none\n";
 			var encoded = new StringBuilder ();
@@ -292,7 +434,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -301,11 +443,11 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes ("example.org 1;");
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.org", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Version.Value, "authres-version");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.org"), "authserv-id");
+			Assert.That (authres.Version.Value, Is.EqualTo (1), "authres-version");
 
-			Assert.AreEqual ("example.org 1; none", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("example.org 1; none"));
 
 			const string expected = " example.org 1; none\n";
 			var encoded = new StringBuilder ();
@@ -314,7 +456,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -324,34 +466,34 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.IsNull (authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (3, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("fail", authres.Results[0].Result);
-			Assert.AreEqual ("sender IP is 1.1.1.1", authres.Results[0].ResultComment);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "spf properties");
-			Assert.AreEqual ("smtp", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("eu-west-1.amazonses.com", authres.Results[0].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.Null, "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (3), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("fail"));
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo ("sender IP is 1.1.1.1"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "spf properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("eu-west-1.amazonses.com"));
 
-			Assert.AreEqual ("dkim", authres.Results[1].Method);
-			Assert.AreEqual ("pass", authres.Results[1].Result);
-			Assert.AreEqual ("signature was verified", authres.Results[1].ResultComment);
-			Assert.AreEqual (1, authres.Results[1].Properties.Count, "dkim properties");
-			Assert.AreEqual ("header", authres.Results[1].Properties[0].PropertyType);
-			Assert.AreEqual ("d", authres.Results[1].Properties[0].Property);
-			Assert.AreEqual ("domain.com", authres.Results[1].Properties[0].Value);
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[1].ResultComment, Is.EqualTo ("signature was verified"));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (1), "dkim properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("d"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("domain.com"));
 
-			Assert.AreEqual ("dmarc", authres.Results[2].Method);
-			Assert.AreEqual ("bestguesspass", authres.Results[2].Result);
-			Assert.AreEqual (null, authres.Results[2].ResultComment);
-			Assert.AreEqual (1, authres.Results[2].Properties.Count, "dmarc properties");
-			Assert.AreEqual ("header", authres.Results[2].Properties[0].PropertyType);
-			Assert.AreEqual ("from", authres.Results[2].Properties[0].Property);
-			Assert.AreEqual ("domain.com", authres.Results[2].Properties[0].Value);
+			Assert.That (authres.Results[2].Method, Is.EqualTo ("dmarc"));
+			Assert.That (authres.Results[2].Result, Is.EqualTo ("bestguesspass"));
+			Assert.That (authres.Results[2].ResultComment, Is.EqualTo (null));
+			Assert.That (authres.Results[2].Properties.Count, Is.EqualTo (1), "dmarc properties");
+			Assert.That (authres.Results[2].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[2].Properties[0].Property, Is.EqualTo ("from"));
+			Assert.That (authres.Results[2].Properties[0].Value, Is.EqualTo ("domain.com"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = "\n\tspf=fail (sender IP is 1.1.1.1) smtp.mailfrom=eu-west-1.amazonses.com;\n\tdkim=pass (signature was verified) header.d=domain.com;\n\tdmarc=bestguesspass header.from=domain.com\n";
 			var encoded = new StringBuilder ();
@@ -360,7 +502,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -369,12 +511,12 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes ("example.org 1; none");
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.org", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Version.Value, "authres-version");
-			Assert.AreEqual (0, authres.Results.Count, "no-results");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.org"), "authserv-id");
+			Assert.That (authres.Version.Value, Is.EqualTo (1), "authres-version");
+			Assert.That (authres.Results.Count, Is.EqualTo (0), "no-results");
 
-			Assert.AreEqual ("example.org 1; none", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("example.org 1; none"));
 
 			const string expected = " example.org 1; none\n";
 			var encoded = new StringBuilder ();
@@ -383,7 +525,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -393,13 +535,13 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("foo", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("foo"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com; foo=pass\n";
 			var encoded = new StringBuilder ();
@@ -408,7 +550,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -418,14 +560,14 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("foo", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual ("2 of 3 tests OK", authres.Results[0].ResultComment);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("foo"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo ("2 of 3 tests OK"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com; foo=pass (2 of 3 tests OK)\n";
 			var encoded = new StringBuilder ();
@@ -434,7 +576,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -444,17 +586,17 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "properties");
-			Assert.AreEqual ("smtp", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("example.net", authres.Results[0].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("example.net"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com; spf=pass smtp.mailfrom=example.net\n";
 			var encoded = new StringBuilder ();
@@ -463,7 +605,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -473,17 +615,17 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "properties");
-			Assert.AreEqual ("smtp", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("@example.net", authres.Results[0].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("@example.net"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com; spf=pass smtp.mailfrom=@example.net\n";
 			var encoded = new StringBuilder ();
@@ -492,7 +634,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -502,17 +644,17 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "properties");
-			Assert.AreEqual ("smtp", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("local-part@example.net", authres.Results[0].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("local-part@example.net"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com;\n\tspf=pass smtp.mailfrom=local-part@example.net\n";
 			var encoded = new StringBuilder ();
@@ -521,7 +663,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -531,17 +673,17 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("method", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "properties");
-			Assert.AreEqual ("ptype", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("prop", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("value1;value2", authres.Results[0].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("method"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("ptype"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("prop"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("value1;value2"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com; method=pass ptype.prop=\"value1;value2\"\n";
 			var encoded = new StringBuilder ();
@@ -550,7 +692,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -560,15 +702,15 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual ("good", authres.Results[0].Reason);
-			Assert.AreEqual (0, authres.Results[0].Properties.Count, "properties");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Reason, Is.EqualTo ("good"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (0), "properties");
 
-			Assert.AreEqual ("example.com; spf=pass reason=\"good\"", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("example.com; spf=pass reason=\"good\""));
 
 			const string expected = " example.com; spf=pass reason=\"good\"\n";
 			var encoded = new StringBuilder ();
@@ -577,7 +719,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -587,15 +729,15 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual ("good", authres.Results[0].Reason);
-			Assert.AreEqual (0, authres.Results[0].Properties.Count, "properties");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Reason, Is.EqualTo ("good"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (0), "properties");
 
-			Assert.AreEqual ("example.com; spf=pass reason=\"good\"", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("example.com; spf=pass reason=\"good\""));
 
 			const string expected = " example.com; spf=pass reason=\"good\"\n";
 			var encoded = new StringBuilder ();
@@ -604,7 +746,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -614,15 +756,15 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual ("good stuff", authres.Results[0].Reason);
-			Assert.AreEqual (0, authres.Results[0].Properties.Count, "properties");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Reason, Is.EqualTo ("good stuff"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (0), "properties");
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com; spf=pass reason=\"good stuff\"\n";
 			var encoded = new StringBuilder ();
@@ -631,7 +773,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -641,15 +783,15 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input + "; ");
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual ("good stuff", authres.Results[0].Reason);
-			Assert.AreEqual (0, authres.Results[0].Properties.Count, "properties");
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Reason, Is.EqualTo ("good stuff"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (0), "properties");
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com; spf=pass reason=\"good stuff\"\n";
 			var encoded = new StringBuilder ();
@@ -658,7 +800,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -668,20 +810,20 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual (2, authres.Results[0].Properties.Count, "properties");
-			Assert.AreEqual ("ptype1", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("prop1", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("value1", authres.Results[0].Properties[0].Value);
-			Assert.AreEqual ("ptype2", authres.Results[0].Properties[1].PropertyType);
-			Assert.AreEqual ("prop2", authres.Results[0].Properties[1].Property);
-			Assert.AreEqual ("value2", authres.Results[0].Properties[1].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (2), "properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("ptype1"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("prop1"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("value1"));
+			Assert.That (authres.Results[0].Properties[1].PropertyType, Is.EqualTo ("ptype2"));
+			Assert.That (authres.Results[0].Properties[1].Property, Is.EqualTo ("prop2"));
+			Assert.That (authres.Results[0].Properties[1].Value, Is.EqualTo ("value2"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com;\n\tspf=pass ptype1.prop1=value1 ptype2.prop2=value2\n";
 			var encoded = new StringBuilder ();
@@ -690,7 +832,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -700,30 +842,30 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (3, authres.Results.Count, "methods");
-			Assert.AreEqual ("auth", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual ("cram-md5", authres.Results[0].ResultComment);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "auth properties");
-			Assert.AreEqual ("smtp", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("auth", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("sender@example.net", authres.Results[0].Properties[0].Value);
-			Assert.AreEqual ("spf", authres.Results[1].Method);
-			Assert.AreEqual ("pass", authres.Results[1].Result);
-			Assert.AreEqual (1, authres.Results[1].Properties.Count, "spf properties");
-			Assert.AreEqual ("smtp", authres.Results[1].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[1].Properties[0].Property);
-			Assert.AreEqual ("example.net", authres.Results[1].Properties[0].Value);
-			Assert.AreEqual ("sender-id", authres.Results[2].Method);
-			Assert.AreEqual ("pass", authres.Results[2].Result);
-			Assert.AreEqual (1, authres.Results[2].Properties.Count, "sender-id properties");
-			Assert.AreEqual ("header", authres.Results[2].Properties[0].PropertyType);
-			Assert.AreEqual ("from", authres.Results[2].Properties[0].Property);
-			Assert.AreEqual ("example.net", authres.Results[2].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (3), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("auth"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo ("cram-md5"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "auth properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("auth"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("sender@example.net"));
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (1), "spf properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("example.net"));
+			Assert.That (authres.Results[2].Method, Is.EqualTo ("sender-id"));
+			Assert.That (authres.Results[2].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[2].Properties.Count, Is.EqualTo (1), "sender-id properties");
+			Assert.That (authres.Results[2].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[2].Properties[0].Property, Is.EqualTo ("from"));
+			Assert.That (authres.Results[2].Properties[0].Value, Is.EqualTo ("example.net"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com;\n\tauth=pass (cram-md5) smtp.auth=sender@example.net;\n\tspf=pass smtp.mailfrom=example.net; sender-id=pass header.from=example.net\n";
 			var encoded = new StringBuilder ();
@@ -732,7 +874,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -742,25 +884,25 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("example.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (2, authres.Results.Count, "methods");
-			Assert.AreEqual ("dkim", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual ("good signature", authres.Results[0].Reason);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "dkim properties");
-			Assert.AreEqual ("header", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("i", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("@mail-router.example.net", authres.Results[0].Properties[0].Value);
-			Assert.AreEqual ("dkim", authres.Results[1].Method);
-			Assert.AreEqual ("fail", authres.Results[1].Result);
-			Assert.AreEqual ("bad signature", authres.Results[1].Reason);
-			Assert.AreEqual (1, authres.Results[1].Properties.Count, "dkim properties");
-			Assert.AreEqual ("header", authres.Results[1].Properties[0].PropertyType);
-			Assert.AreEqual ("i", authres.Results[1].Properties[0].Property);
-			Assert.AreEqual ("@newyork.example.com", authres.Results[1].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("example.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (2), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Reason, Is.EqualTo ("good signature"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "dkim properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("i"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("@mail-router.example.net"));
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("fail"));
+			Assert.That (authres.Results[1].Reason, Is.EqualTo ("bad signature"));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (1), "dkim properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("i"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("@newyork.example.com"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " example.com;\n\tdkim=pass reason=\"good signature\" header.i=@mail-router.example.net;\n\tdkim=fail reason=\"bad signature\" header.i=@newyork.example.com\n";
 			var encoded = new StringBuilder ();
@@ -769,7 +911,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -778,19 +920,19 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes ("foo.example.net (foobar) 1 (baz); dkim (Because I like it) / 1 (One yay) = (wait for it) fail policy (A dot can go here) . (like that) expired (this surprised me) = (as I wasn't expecting it) 1362471462");
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("foo.example.net", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (1, authres.Version.Value, "authres-version");
-			Assert.AreEqual (1, authres.Results.Count, "methods");
-			Assert.AreEqual ("dkim", authres.Results[0].Method);
-			Assert.AreEqual (1, authres.Results[0].Version.Value, "method-version");
-			Assert.AreEqual ("fail", authres.Results[0].Result);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "dkim properties");
-			Assert.AreEqual ("policy", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("expired", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("1362471462", authres.Results[0].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("foo.example.net"), "authserv-id");
+			Assert.That (authres.Version.Value, Is.EqualTo (1), "authres-version");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[0].Version.Value, Is.EqualTo (1), "method-version");
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("fail"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "dkim properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("policy"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("expired"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("1362471462"));
 
-			Assert.AreEqual ("foo.example.net 1; dkim/1=fail policy.expired=1362471462", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("foo.example.net 1; dkim/1=fail policy.expired=1362471462"));
 
 			const string expected = " foo.example.net 1;\n\tdkim/1=fail policy.expired=1362471462\n";
 			var encoded = new StringBuilder ();
@@ -799,7 +941,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		// Tests work-around for https://github.com/jstedfast/MimeKit/issues/518
@@ -810,39 +952,39 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("test.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (3, authres.Results.Count, "methods");
-			Assert.AreEqual ("dkim", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual (3, authres.Results[0].Properties.Count, "dkim properties");
-			Assert.AreEqual ("header", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("d", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("test.com", authres.Results[0].Properties[0].Value);
-			Assert.AreEqual ("header", authres.Results[0].Properties[1].PropertyType);
-			Assert.AreEqual ("s", authres.Results[0].Properties[1].Property);
-			Assert.AreEqual ("selector1", authres.Results[0].Properties[1].Value);
-			Assert.AreEqual ("header", authres.Results[0].Properties[2].PropertyType);
-			Assert.AreEqual ("b", authres.Results[0].Properties[2].Property);
-			Assert.AreEqual ("Iww3/TIUS", authres.Results[0].Properties[2].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("test.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (3), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (3), "dkim properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("d"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("test.com"));
+			Assert.That (authres.Results[0].Properties[1].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[1].Property, Is.EqualTo ("s"));
+			Assert.That (authres.Results[0].Properties[1].Value, Is.EqualTo ("selector1"));
+			Assert.That (authres.Results[0].Properties[2].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[2].Property, Is.EqualTo ("b"));
+			Assert.That (authres.Results[0].Properties[2].Value, Is.EqualTo ("Iww3/TIUS"));
 
-			Assert.AreEqual ("dmarc", authres.Results[1].Method);
-			Assert.AreEqual ("pass", authres.Results[1].Result);
-			Assert.AreEqual ("policy=reject", authres.Results[1].ResultComment);
-			Assert.AreEqual (1, authres.Results[1].Properties.Count, "dmarc properties");
-			Assert.AreEqual ("header", authres.Results[1].Properties[0].PropertyType);
-			Assert.AreEqual ("from", authres.Results[1].Properties[0].Property);
-			Assert.AreEqual ("test.com", authres.Results[1].Properties[0].Value);
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("dmarc"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[1].ResultComment, Is.EqualTo ("policy=reject"));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (1), "dmarc properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("from"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("test.com"));
 
-			Assert.AreEqual ("spf", authres.Results[2].Method);
-			Assert.AreEqual ("pass", authres.Results[2].Result);
-			Assert.AreEqual ("test.com: domain of no-reply@test.com designates 1.1.1.1 as permitted sender", authres.Results[2].ResultComment);
-			Assert.AreEqual (1, authres.Results[2].Properties.Count, "spf properties");
-			Assert.AreEqual ("smtp", authres.Results[2].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[2].Properties[0].Property);
-			Assert.AreEqual ("no-reply@test.com", authres.Results[2].Properties[0].Value);
+			Assert.That (authres.Results[2].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[2].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[2].ResultComment, Is.EqualTo ("test.com: domain of no-reply@test.com designates 1.1.1.1 as permitted sender"));
+			Assert.That (authres.Results[2].Properties.Count, Is.EqualTo (1), "spf properties");
+			Assert.That (authres.Results[2].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[2].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[2].Properties[0].Value, Is.EqualTo ("no-reply@test.com"));
 
-			Assert.AreEqual (input, authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 
 			const string expected = " i=2; test.com;\n\tdkim=pass header.d=test.com header.s=selector1 header.b=Iww3/TIUS;\n\tdmarc=pass (policy=reject) header.from=test.com; spf=pass\n\t(test.com: domain of no-reply@test.com designates 1.1.1.1 as permitted sender)\n\tsmtp.mailfrom=no-reply@test.com\n";
 			var encoded = new StringBuilder ();
@@ -851,7 +993,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		// Tests work-around for https://github.com/jstedfast/MimeKit/issues/490
@@ -861,37 +1003,37 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes ("spf=fail (sender IP is 1.1.1.1) smtp.mailfrom=eu-west-1.amazonses.com; receivingdomain.com; dkim=pass (signature was verified) header.d=domain.com;domain1.com; dmarc=bestguesspass action=none header.from=domain.com;");
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.IsNull (authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (3, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("fail", authres.Results[0].Result);
-			Assert.AreEqual ("sender IP is 1.1.1.1", authres.Results[0].ResultComment);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "spf properties");
-			Assert.AreEqual ("smtp", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("eu-west-1.amazonses.com", authres.Results[0].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.Null, "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (3), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("fail"));
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo ("sender IP is 1.1.1.1"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "spf properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("eu-west-1.amazonses.com"));
 
-			Assert.AreEqual ("receivingdomain.com", authres.Results[1].Office365AuthenticationServiceIdentifier);
-			Assert.AreEqual ("dkim", authres.Results[1].Method);
-			Assert.AreEqual ("pass", authres.Results[1].Result);
-			Assert.AreEqual ("signature was verified", authres.Results[1].ResultComment);
-			Assert.AreEqual (1, authres.Results[1].Properties.Count, "dkim properties");
-			Assert.AreEqual ("header", authres.Results[1].Properties[0].PropertyType);
-			Assert.AreEqual ("d", authres.Results[1].Properties[0].Property);
-			Assert.AreEqual ("domain.com", authres.Results[1].Properties[0].Value);
+			Assert.That (authres.Results[1].Office365AuthenticationServiceIdentifier, Is.EqualTo ("receivingdomain.com"));
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[1].ResultComment, Is.EqualTo ("signature was verified"));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (1), "dkim properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("d"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("domain.com"));
 
-			Assert.AreEqual ("domain1.com", authres.Results[2].Office365AuthenticationServiceIdentifier);
-			Assert.AreEqual ("dmarc", authres.Results[2].Method);
-			Assert.AreEqual ("bestguesspass", authres.Results[2].Result);
-			Assert.AreEqual (null, authres.Results[2].ResultComment);
-			Assert.AreEqual ("none", authres.Results[2].Action);
-			Assert.AreEqual (1, authres.Results[2].Properties.Count, "dmarc properties");
-			Assert.AreEqual ("header", authres.Results[2].Properties[0].PropertyType);
-			Assert.AreEqual ("from", authres.Results[2].Properties[0].Property);
-			Assert.AreEqual ("domain.com", authres.Results[2].Properties[0].Value);
+			Assert.That (authres.Results[2].Office365AuthenticationServiceIdentifier, Is.EqualTo ("domain1.com"));
+			Assert.That (authres.Results[2].Method, Is.EqualTo ("dmarc"));
+			Assert.That (authres.Results[2].Result, Is.EqualTo ("bestguesspass"));
+			Assert.That (authres.Results[2].ResultComment, Is.EqualTo (null));
+			Assert.That (authres.Results[2].Action, Is.EqualTo ("none"));
+			Assert.That (authres.Results[2].Properties.Count, Is.EqualTo (1), "dmarc properties");
+			Assert.That (authres.Results[2].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[2].Properties[0].Property, Is.EqualTo ("from"));
+			Assert.That (authres.Results[2].Properties[0].Value, Is.EqualTo ("domain.com"));
 
-			Assert.AreEqual ("spf=fail (sender IP is 1.1.1.1) smtp.mailfrom=eu-west-1.amazonses.com; receivingdomain.com; dkim=pass (signature was verified) header.d=domain.com; domain1.com; dmarc=bestguesspass action=\"none\" header.from=domain.com", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("spf=fail (sender IP is 1.1.1.1) smtp.mailfrom=eu-west-1.amazonses.com; receivingdomain.com; dkim=pass (signature was verified) header.d=domain.com; domain1.com; dmarc=bestguesspass action=\"none\" header.from=domain.com"));
 
 			const string expected = "\n\tspf=fail (sender IP is 1.1.1.1) smtp.mailfrom=eu-west-1.amazonses.com;\n\treceivingdomain.com; dkim=pass (signature was verified) header.d=domain.com;\n\tdomain1.com; dmarc=bestguesspass action=\"none\" header.from=domain.com\n";
 			var encoded = new StringBuilder ();
@@ -900,7 +1042,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		// Tests work-around for https://github.com/jstedfast/MimeKit/issues/527
@@ -911,46 +1053,87 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual (null, authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (3, authres.Results.Count, "methods");
-			Assert.AreEqual ("spf", authres.Results[0].Method);
-			Assert.AreEqual ("temperror", authres.Results[0].Result);
-			Assert.AreEqual ("sender IP is 1.1.1.1", authres.Results[0].ResultComment);
-			Assert.AreEqual (1, authres.Results[0].Properties.Count, "spf properties");
-			Assert.AreEqual ("smtp", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("helo", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("tes.test.ru", authres.Results[0].Properties[0].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo (null), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (3), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("temperror"));
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo ("sender IP is 1.1.1.1"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "spf properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("helo"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("tes.test.ru"));
 
-			Assert.AreEqual ("mydomain.com", authres.Results[1].Office365AuthenticationServiceIdentifier);
-			Assert.AreEqual ("dkim", authres.Results[1].Method);
-			Assert.AreEqual ("none", authres.Results[1].Result);
-			Assert.AreEqual ("message not signed", authres.Results[1].ResultComment);
-			Assert.AreEqual (1, authres.Results[1].Properties.Count, "dkim properties");
-			Assert.AreEqual ("header", authres.Results[1].Properties[0].PropertyType);
-			Assert.AreEqual ("d", authres.Results[1].Properties[0].Property);
-			Assert.AreEqual ("none", authres.Results[1].Properties[0].Value);
+			Assert.That (authres.Results[1].Office365AuthenticationServiceIdentifier, Is.EqualTo ("mydomain.com"));
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("none"));
+			Assert.That (authres.Results[1].ResultComment, Is.EqualTo ("message not signed"));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (1), "dkim properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("d"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("none"));
 
-			Assert.AreEqual ("mydomain.com", authres.Results[2].Office365AuthenticationServiceIdentifier);
-			Assert.AreEqual ("dmarc", authres.Results[2].Method);
-			Assert.AreEqual ("none", authres.Results[2].Result);
-			Assert.AreEqual (null, authres.Results[2].ResultComment);
-			Assert.AreEqual ("none", authres.Results[2].Action);
-			Assert.AreEqual (1, authres.Results[2].Properties.Count, "dmarc properties");
-			Assert.AreEqual ("header", authres.Results[2].Properties[0].PropertyType);
-			Assert.AreEqual ("from", authres.Results[2].Properties[0].Property);
-			Assert.AreEqual ("", authres.Results[2].Properties[0].Value);
+			Assert.That (authres.Results[2].Office365AuthenticationServiceIdentifier, Is.EqualTo ("mydomain.com"));
+			Assert.That (authres.Results[2].Method, Is.EqualTo ("dmarc"));
+			Assert.That (authres.Results[2].Result, Is.EqualTo ("none"));
+			Assert.That (authres.Results[2].ResultComment, Is.EqualTo (null));
+			Assert.That (authres.Results[2].Action, Is.EqualTo ("none"));
+			Assert.That (authres.Results[2].Properties.Count, Is.EqualTo (1), "dmarc properties");
+			Assert.That (authres.Results[2].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[2].Properties[0].Property, Is.EqualTo ("from"));
+			Assert.That (authres.Results[2].Properties[0].Value, Is.EqualTo (""));
 
-			Assert.AreEqual ("spf=temperror (sender IP is 1.1.1.1) smtp.helo=tes.test.ru; mydomain.com; dkim=none (message not signed) header.d=none; mydomain.com; dmarc=none action=\"none\" header.from=", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("spf=temperror (sender IP is 1.1.1.1) smtp.helo=tes.test.ru; mydomain.com; dkim=none (message not signed) header.d=none; mydomain.com; dmarc=none action=\"none\" header.from=\"\""));
 
-			const string expected = "\n\tspf=temperror (sender IP is 1.1.1.1) smtp.helo=tes.test.ru;\n\tmydomain.com; dkim=none (message not signed) header.d=none;\n\tmydomain.com; dmarc=none action=\"none\" header.from=\n";
+			const string expected = "\n\tspf=temperror (sender IP is 1.1.1.1) smtp.helo=tes.test.ru;\n\tmydomain.com; dkim=none (message not signed) header.d=none;\n\tmydomain.com; dmarc=none action=\"none\" header.from=\"\"\n";
 			var encoded = new StringBuilder ();
 			var options = FormatOptions.Default.Clone ();
 			options.NewLineFormat = NewLineFormat.Unix;
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
+		}
+
+		// Tests work-around for https://github.com/jstedfast/MimeKit/pull/1208
+		[Test]
+		public void TestParseGmailAuthenticationResults ()
+		{
+			const string input = "mx.google.com; dkim=pass header.i=@sender.com header.s=15ca3b75e6386151 header.b=qsGI6Y43; gateway.spf=pass (google.com: domain receiver.com configured 1.2.3.4 as internal address) smtp.mailfrom=mail@from.com smtp.remote-ip=1.2.3.4 policy.d=receiver.com";
+			var buffer = Encoding.ASCII.GetBytes (input);
+			AuthenticationResults authres;
+
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("mx.google.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (2), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (3), "dkim properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("i"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("@sender.com"));
+			Assert.That (authres.Results[0].Properties[1].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[1].Property, Is.EqualTo ("s"));
+			Assert.That (authres.Results[0].Properties[1].Value, Is.EqualTo ("15ca3b75e6386151"));
+			Assert.That (authres.Results[0].Properties[2].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[2].Property, Is.EqualTo ("b"));
+			Assert.That (authres.Results[0].Properties[2].Value, Is.EqualTo ("qsGI6Y43"));
+
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("gateway.spf"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[1].ResultComment, Is.EqualTo ("google.com: domain receiver.com configured 1.2.3.4 as internal address"));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (3), "spf properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("mail@from.com"));
+			Assert.That (authres.Results[1].Properties[1].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[1].Properties[1].Property, Is.EqualTo ("remote-ip"));
+			Assert.That (authres.Results[1].Properties[1].Value, Is.EqualTo ("1.2.3.4"));
+			Assert.That (authres.Results[1].Properties[2].PropertyType, Is.EqualTo ("policy"));
+			Assert.That (authres.Results[1].Properties[2].Property, Is.EqualTo ("d"));
+			Assert.That (authres.Results[1].Properties[2].Value, Is.EqualTo ("receiver.com"));
+
+			Assert.That (authres.ToString (), Is.EqualTo (input));
 		}
 
 		// Tests work-around for https://github.com/jstedfast/MimeKit/issues/584
@@ -961,37 +1144,37 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual ("atlas122.free.mail.gq1.yahoo.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (3, authres.Results.Count, "methods");
-			Assert.AreEqual ("dkim", authres.Results[0].Method);
-			Assert.AreEqual ("dkim_pass", authres.Results[0].Result);
-			Assert.AreEqual (null, authres.Results[0].ResultComment);
-			Assert.AreEqual (2, authres.Results[0].Properties.Count, "dkim properties");
-			Assert.AreEqual ("header", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("i", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("@news.aegeanair.com", authres.Results[0].Properties[0].Value);
-			Assert.AreEqual ("header", authres.Results[0].Properties[1].PropertyType);
-			Assert.AreEqual ("s", authres.Results[0].Properties[1].Property);
-			Assert.AreEqual ("@aegeanair2", authres.Results[0].Properties[1].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("atlas122.free.mail.gq1.yahoo.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (3), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("dkim_pass"));
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo (null));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (2), "dkim properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("i"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("@news.aegeanair.com"));
+			Assert.That (authres.Results[0].Properties[1].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[1].Property, Is.EqualTo ("s"));
+			Assert.That (authres.Results[0].Properties[1].Value, Is.EqualTo ("@aegeanair2"));
 
-			Assert.AreEqual ("spf", authres.Results[1].Method);
-			Assert.AreEqual ("pass", authres.Results[1].Result);
-			Assert.AreEqual (null, authres.Results[1].ResultComment);
-			Assert.AreEqual (1, authres.Results[1].Properties.Count, "spf properties");
-			Assert.AreEqual ("smtp", authres.Results[1].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[1].Properties[0].Property);
-			Assert.AreEqual ("news.aegeanair.com", authres.Results[1].Properties[0].Value);
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[1].ResultComment, Is.EqualTo (null));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (1), "spf properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("news.aegeanair.com"));
 
-			Assert.AreEqual ("dmarc", authres.Results[2].Method);
-			Assert.AreEqual ("success", authres.Results[2].Result);
-			Assert.AreEqual ("p=REJECT", authres.Results[2].ResultComment);
-			Assert.AreEqual (1, authres.Results[2].Properties.Count, "dmarc properties");
-			Assert.AreEqual ("header", authres.Results[2].Properties[0].PropertyType);
-			Assert.AreEqual ("from", authres.Results[2].Properties[0].Property);
-			Assert.AreEqual ("news.aegeanair.com", authres.Results[2].Properties[0].Value);
+			Assert.That (authres.Results[2].Method, Is.EqualTo ("dmarc"));
+			Assert.That (authres.Results[2].Result, Is.EqualTo ("success"));
+			Assert.That (authres.Results[2].ResultComment, Is.EqualTo ("p=REJECT"));
+			Assert.That (authres.Results[2].Properties.Count, Is.EqualTo (1), "dmarc properties");
+			Assert.That (authres.Results[2].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[2].Properties[0].Property, Is.EqualTo ("from"));
+			Assert.That (authres.Results[2].Properties[0].Value, Is.EqualTo ("news.aegeanair.com"));
 
-			Assert.AreEqual ("atlas122.free.mail.gq1.yahoo.com; dkim=dkim_pass header.i=@news.aegeanair.com header.s=@aegeanair2; spf=pass smtp.mailfrom=news.aegeanair.com; dmarc=success (p=REJECT) header.from=news.aegeanair.com", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("atlas122.free.mail.gq1.yahoo.com; dkim=dkim_pass header.i=@news.aegeanair.com header.s=@aegeanair2; spf=pass smtp.mailfrom=news.aegeanair.com; dmarc=success (p=REJECT) header.from=news.aegeanair.com"));
 
 			const string expected = " atlas122.free.mail.gq1.yahoo.com;\n\tdkim=dkim_pass header.i=@news.aegeanair.com header.s=@aegeanair2;\n\tspf=pass smtp.mailfrom=news.aegeanair.com;\n\tdmarc=success (p=REJECT) header.from=news.aegeanair.com\n";
 			var encoded = new StringBuilder ();
@@ -1000,7 +1183,7 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		// Tests work-around for https://github.com/jstedfast/MimeKit/issues/590
@@ -1011,41 +1194,41 @@ namespace UnitTests.Cryptography {
 			var buffer = Encoding.ASCII.GetBytes (input);
 			AuthenticationResults authres;
 
-			Assert.IsTrue (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres));
-			Assert.AreEqual (1, authres.Instance.Value, "i");
-			Assert.AreEqual ("relay.mailrelay.com", authres.AuthenticationServiceIdentifier, "authserv-id");
-			Assert.AreEqual (3, authres.Results.Count, "methods");
-			Assert.AreEqual ("dkim", authres.Results[0].Method);
-			Assert.AreEqual ("pass", authres.Results[0].Result);
-			Assert.AreEqual (null, authres.Results[0].ResultComment);
-			Assert.AreEqual (3, authres.Results[0].Properties.Count, "dkim properties");
-			Assert.AreEqual ("header", authres.Results[0].Properties[0].PropertyType);
-			Assert.AreEqual ("d", authres.Results[0].Properties[0].Property);
-			Assert.AreEqual ("domaina.com", authres.Results[0].Properties[0].Value);
-			Assert.AreEqual ("header", authres.Results[0].Properties[1].PropertyType);
-			Assert.AreEqual ("s", authres.Results[0].Properties[1].Property);
-			Assert.AreEqual ("sfdc", authres.Results[0].Properties[1].Value);
-			Assert.AreEqual ("header", authres.Results[0].Properties[2].PropertyType);
-			Assert.AreEqual ("b", authres.Results[0].Properties[2].Property);
-			Assert.AreEqual ("abcefg", authres.Results[0].Properties[2].Value);
+			Assert.That (AuthenticationResults.TryParse (buffer, 0, buffer.Length, out authres), Is.True);
+			Assert.That (authres.Instance.Value, Is.EqualTo (1), "i");
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("relay.mailrelay.com"), "authserv-id");
+			Assert.That (authres.Results.Count, Is.EqualTo (3), "methods");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("dkim"));
+			Assert.That (authres.Results[0].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo (null));
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (3), "dkim properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("d"));
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo ("domaina.com"));
+			Assert.That (authres.Results[0].Properties[1].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[1].Property, Is.EqualTo ("s"));
+			Assert.That (authres.Results[0].Properties[1].Value, Is.EqualTo ("sfdc"));
+			Assert.That (authres.Results[0].Properties[2].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[0].Properties[2].Property, Is.EqualTo ("b"));
+			Assert.That (authres.Results[0].Properties[2].Value, Is.EqualTo ("abcefg"));
 
-			Assert.AreEqual ("dmarc", authres.Results[1].Method);
-			Assert.AreEqual ("pass", authres.Results[1].Result);
-			Assert.AreEqual ("policy=quarantine", authres.Results[1].ResultComment);
-			Assert.AreEqual (1, authres.Results[1].Properties.Count, "spf properties");
-			Assert.AreEqual ("header", authres.Results[1].Properties[0].PropertyType);
-			Assert.AreEqual ("from", authres.Results[1].Properties[0].Property);
-			Assert.AreEqual ("domaina.com", authres.Results[1].Properties[0].Value);
+			Assert.That (authres.Results[1].Method, Is.EqualTo ("dmarc"));
+			Assert.That (authres.Results[1].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[1].ResultComment, Is.EqualTo ("policy=quarantine"));
+			Assert.That (authres.Results[1].Properties.Count, Is.EqualTo (1), "spf properties");
+			Assert.That (authres.Results[1].Properties[0].PropertyType, Is.EqualTo ("header"));
+			Assert.That (authres.Results[1].Properties[0].Property, Is.EqualTo ("from"));
+			Assert.That (authres.Results[1].Properties[0].Value, Is.EqualTo ("domaina.com"));
 
-			Assert.AreEqual ("spf", authres.Results[2].Method);
-			Assert.AreEqual ("pass", authres.Results[2].Result);
-			Assert.AreEqual ("relay.mailrelay.com: domain of support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com designates 1.1.1.1 as permitted sender", authres.Results[2].ResultComment);
-			Assert.AreEqual (1, authres.Results[2].Properties.Count, "dmarc properties");
-			Assert.AreEqual ("smtp", authres.Results[2].Properties[0].PropertyType);
-			Assert.AreEqual ("mailfrom", authres.Results[2].Properties[0].Property);
-			Assert.AreEqual ("support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com", authres.Results[2].Properties[0].Value);
+			Assert.That (authres.Results[2].Method, Is.EqualTo ("spf"));
+			Assert.That (authres.Results[2].Result, Is.EqualTo ("pass"));
+			Assert.That (authres.Results[2].ResultComment, Is.EqualTo ("relay.mailrelay.com: domain of support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com designates 1.1.1.1 as permitted sender"));
+			Assert.That (authres.Results[2].Properties.Count, Is.EqualTo (1), "dmarc properties");
+			Assert.That (authres.Results[2].Properties[0].PropertyType, Is.EqualTo ("smtp"));
+			Assert.That (authres.Results[2].Properties[0].Property, Is.EqualTo ("mailfrom"));
+			Assert.That (authres.Results[2].Properties[0].Value, Is.EqualTo ("support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com"));
 
-			Assert.AreEqual ("i=1; relay.mailrelay.com; dkim=pass header.d=domaina.com header.s=sfdc header.b=abcefg; dmarc=pass (policy=quarantine) header.from=domaina.com; spf=pass (relay.mailrelay.com: domain of support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com designates 1.1.1.1 as permitted sender) smtp.mailfrom=support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com", authres.ToString ());
+			Assert.That (authres.ToString (), Is.EqualTo ("i=1; relay.mailrelay.com; dkim=pass header.d=domaina.com header.s=sfdc header.b=abcefg; dmarc=pass (policy=quarantine) header.from=domaina.com; spf=pass (relay.mailrelay.com: domain of support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com designates 1.1.1.1 as permitted sender) smtp.mailfrom=support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com"));
 
 			const string expected = " i=1; relay.mailrelay.com;\n\tdkim=pass header.d=domaina.com header.s=sfdc header.b=abcefg;\n\tdmarc=pass (policy=quarantine) header.from=domaina.com; spf=pass\n\t(relay.mailrelay.com: domain of support=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com designates 1.1.1.1 as permitted sender)\n\tsmtp.mailfrom=\n\tsupport=domaina.com__0-1q6woix34obtbu@823lwd90ky2ahf.mail_sender.com\n";
 			var encoded = new StringBuilder ();
@@ -1054,29 +1237,29 @@ namespace UnitTests.Cryptography {
 
 			authres.Encode (options, encoded, "Authentication-Results:".Length);
 
-			Assert.AreEqual (expected, encoded.ToString ());
+			Assert.That (encoded.ToString (), Is.EqualTo (expected));
 		}
 
 		static void AssertParseFailure (string input, int tokenIndex, int errorIndex)
 		{
 			var buffer = Encoding.ASCII.GetBytes (input);
 
-			Assert.IsFalse (AuthenticationResults.TryParse (buffer, out AuthenticationResults authres));
+			Assert.That (AuthenticationResults.TryParse (buffer, out AuthenticationResults authres), Is.False);
 
 			try {
 				AuthenticationResults.Parse (buffer);
 				Assert.Fail ("Expected parse error.");
 			} catch (ParseException ex) {
-				Assert.AreEqual (tokenIndex, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (errorIndex, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (tokenIndex), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (errorIndex), "ErrorIndex");
 			}
 
 			try {
 				AuthenticationResults.Parse (buffer, 0, buffer.Length);
 				Assert.Fail ("Expected parse error.");
 			} catch (ParseException ex) {
-				Assert.AreEqual (tokenIndex, ex.TokenIndex, "TokenIndex");
-				Assert.AreEqual (errorIndex, ex.ErrorIndex, "ErrorIndex");
+				Assert.That (ex.TokenIndex, Is.EqualTo (tokenIndex), "TokenIndex");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (errorIndex), "ErrorIndex");
 			}
 		}
 
@@ -1392,17 +1575,227 @@ namespace UnitTests.Cryptography {
 			AssertParseFailure ("authserv-id; method=pass ptype.prop", 25, 35);
 		}
 
-		// Note: TestParseFailureIncompleteProperty4 and 5 are commented out because of
+		[Test]
+		public void TestParseEmptyPropertyValueAtEndOfInput ()
+		{
+			// Note: Empty property values are accepted because of https://github.com/jstedfast/MimeKit/issues/527
+			// where we have "header.from=;", so they must also be accepted at the end of the input. When
+			// serialized, empty values are always quoted so that a following property is never mistaken for one.
+			var buffer = Encoding.ASCII.GetBytes ("authserv-id; method=pass ptype.prop=");
+
+			Assert.That (AuthenticationResults.TryParse (buffer, out var authres), Is.True, "TryParse");
+			Assert.That (authres.Results.Count, Is.EqualTo (1), "Results");
+			Assert.That (authres.Results[0].Properties.Count, Is.EqualTo (1), "Properties");
+			Assert.That (authres.Results[0].Properties[0].PropertyType, Is.EqualTo ("ptype"), "PropertyType");
+			Assert.That (authres.Results[0].Properties[0].Property, Is.EqualTo ("prop"), "Property");
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo (string.Empty), "Value");
+			Assert.That (authres.ToString (), Is.EqualTo ("authserv-id; method=pass ptype.prop=\"\""));
+
+			// Make sure that the result is the same whether or not the property value is at the end of the buffer
+			var padded = Encoding.ASCII.GetBytes ("authserv-id; method=pass ptype.prop=;;;;");
+
+			Assert.That (AuthenticationResults.TryParse (padded, 0, buffer.Length, out authres), Is.True, "TryParse subrange");
+			Assert.That (authres.ToString (), Is.EqualTo ("authserv-id; method=pass ptype.prop=\"\""), "subrange");
+
+			authres = AuthenticationResults.Parse (buffer);
+			Assert.That (authres.ToString (), Is.EqualTo ("authserv-id; method=pass ptype.prop=\"\""), "Parse");
+		}
+
+		[Test]
+		public void TestParseOffice365EmptyPropertyValueRoundTrip ()
+		{
+			const string input = "spf=temperror (sender IP is 1.1.1.1) smtp.helo=tes.test.ru; mydomain.com; dkim=none (message not signed) header.d=none;mydomain.com; dmarc=none action=none header.from=;";
+			var buffer = Encoding.ASCII.GetBytes (input);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, out var authres), Is.True, "TryParse");
+
+			var serialized = authres.ToString ();
+			buffer = Encoding.ASCII.GetBytes (serialized);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, out var reparsed), Is.True, "TryParse serialized");
+			Assert.That (reparsed.ToString (), Is.EqualTo (serialized));
+		}
+
+		[TestCase ("", "\"\"", TestName = "TestSerializeEmptyPropertyValue")]
+		[TestCase ("a b", "\"a b\"", TestName = "TestSerializePropertyValueWithSpace")]
+		[TestCase ("a\tb", "\"a\tb\"", TestName = "TestSerializePropertyValueWithTab")]
+		[TestCase ("a;b", "\"a;b\"", TestName = "TestSerializePropertyValueWithSemicolon")]
+		[TestCase ("selector", "selector", TestName = "TestSerializePropertyValueToken")]
+		public void TestSerializePropertyValueRoundTrip (string value, string serialized)
+		{
+			var authres = new AuthenticationResults ("example.com");
+			var result = new AuthenticationMethodResult ("dkim", "pass");
+
+			result.Properties.Add (new AuthenticationMethodProperty ("header", "s", value));
+			result.Properties.Add (new AuthenticationMethodProperty ("header", "b", "abcdefgh"));
+			authres.Results.Add (result);
+
+			var expected = $"example.com; dkim=pass header.s={serialized} header.b=abcdefgh";
+			Assert.That (authres.ToString (), Is.EqualTo (expected), "ToString");
+
+			var encoded = new StringBuilder ();
+			authres.Encode (FormatOptions.Default, encoded, "Authentication-Results:".Length);
+			Assert.That (encoded.ToString (), Does.Contain ($"header.s={serialized} "), "Encode");
+
+			var reparsed = AuthenticationResults.Parse (Encoding.UTF8.GetBytes (encoded.ToString ()));
+			Assert.That (reparsed.Results.Count, Is.EqualTo (1), "Results");
+			Assert.That (reparsed.Results[0].Properties.Count, Is.EqualTo (2), "Properties");
+			Assert.That (reparsed.Results[0].Properties[0].Value, Is.EqualTo (value.Replace ('\t', ' ')), "header.s");
+			Assert.That (reparsed.Results[0].Properties[1].Value, Is.EqualTo ("abcdefgh"), "header.b");
+			Assert.That (reparsed.ToString (), Is.EqualTo (authres.ToString ().Replace ('\t', ' ')), "reparsed");
+		}
+
+		[Test]
+		public void TestParseOffice365SubrangeRewind ()
+		{
+			// The Office 365 fallback must rewind to the start of the subrange, not the start of the buffer.
+			const string prefix = "garbage; i=1; authserv-id; ";
+			const string input = "dkim=pass header.d=example.com; dmarc=pass header.from=example.com";
+			var buffer = Encoding.ASCII.GetBytes (prefix + input);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, prefix.Length, input.Length, out var authres), Is.True, "TryParse");
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.Null, "authserv-id");
+			Assert.That (authres.Instance, Is.Null, "Instance");
+			Assert.That (authres.Results.Count, Is.EqualTo (2), "Results");
+			Assert.That (authres.ToString (), Is.EqualTo (input));
+
+			authres = AuthenticationResults.Parse (buffer, prefix.Length, input.Length);
+			Assert.That (authres.ToString (), Is.EqualTo (input), "Parse");
+		}
+
+		[TestCase ("example.com; spf=pass (comment\\ ) smtp.mailfrom=example.com", "comment", TestName = "TestParseResultCommentEndingWithEscapedSpace")]
+		[TestCase ("example.com; spf=pass (comment\\\t) smtp.mailfrom=example.com", "comment", TestName = "TestParseResultCommentEndingWithEscapedTab")]
+		[TestCase ("example.com; spf=pass (comment\\ \\ ) smtp.mailfrom=example.com", "comment", TestName = "TestParseResultCommentEndingWithEscapedSpaces")]
+		[TestCase ("example.com; spf=pass (comment\\\\ ) smtp.mailfrom=example.com", "comment\\\\", TestName = "TestParseResultCommentEndingWithEscapedBackslash")]
+		[TestCase ("example.com; spf=pass (\\ ) smtp.mailfrom=example.com", "", TestName = "TestParseResultCommentOnlyEscapedSpace")]
+		[TestCase ("example.com; spf=pass (a(\\\r)b) smtp.mailfrom=example.com", "a()b", TestName = "TestParseResultCommentWithEscapedCarriageReturn")]
+		[TestCase ("example.com; spf=pass (a(\\\n)b) smtp.mailfrom=example.com", "a()b", TestName = "TestParseResultCommentWithEscapedLineFeed")]
+		[TestCase ("example.com; spf=pass (a\\\\\r\n b) smtp.mailfrom=example.com", "a\\\\ b", TestName = "TestParseResultCommentWithEscapedBackslashBeforeFold")]
+		public void TestParseResultCommentEndingWithQuotedPair (string input, string comment)
+		{
+			var buffer = Encoding.ASCII.GetBytes (input);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, out var authres), Is.True, "TryParse");
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo (comment), "TryParse");
+
+			authres = AuthenticationResults.Parse (buffer);
+			Assert.That (authres.Results[0].ResultComment, Is.EqualTo (comment), "Parse");
+
+			var serialized = authres.ToString ();
+
+			Assert.That (AuthenticationResults.TryParse (Encoding.ASCII.GetBytes (serialized), out var reparsed), Is.True, "TryParse serialized");
+			Assert.That (reparsed.ToString (), Is.EqualTo (serialized));
+		}
+
+		[TestCase ("example.com; gateway.spf =pass", TestName = "TestParseDottedMethodFollowedByWhiteSpace")]
+		[TestCase ("example.com; gateway.spf\r\n\t=pass", TestName = "TestParseDottedMethodFollowedByFoldingWhiteSpace")]
+		[TestCase ("example.com; gateway.spf (comment) =pass", TestName = "TestParseDottedMethodFollowedByComment")]
+		public void TestParseDottedMethodFollowedByCFWS (string input)
+		{
+			var buffer = Encoding.ASCII.GetBytes (input);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, out var authres), Is.True, "TryParse");
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("gateway.spf"), "TryParse");
+
+			authres = AuthenticationResults.Parse (buffer);
+			Assert.That (authres.Results[0].Method, Is.EqualTo ("gateway.spf"), "Parse");
+			Assert.That (authres.ToString (), Is.EqualTo ("example.com; gateway.spf=pass"));
+		}
+
+		[TestCase ("example.com; receivingdomain.com ; spf=pass", TestName = "TestParseOffice365AuthServIdFollowedByWhiteSpace")]
+		[TestCase ("example.com; receivingdomain.com\r\n\t; spf=pass", TestName = "TestParseOffice365AuthServIdFollowedByFoldingWhiteSpace")]
+		[TestCase ("example.com; receivingdomain.com (comment); spf=pass", TestName = "TestParseOffice365AuthServIdFollowedByComment")]
+		public void TestParseOffice365AuthServIdFollowedByCFWS (string input)
+		{
+			var buffer = Encoding.ASCII.GetBytes (input);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, out var authres), Is.True, "TryParse");
+			Assert.That (authres.Results[0].Office365AuthenticationServiceIdentifier, Is.EqualTo ("receivingdomain.com"), "TryParse");
+
+			authres = AuthenticationResults.Parse (buffer);
+			Assert.That (authres.Results[0].Office365AuthenticationServiceIdentifier, Is.EqualTo ("receivingdomain.com"), "Parse");
+			Assert.That (authres.ToString (), Is.EqualTo ("example.com; receivingdomain.com; spf=pass"));
+		}
+
+		[Test]
+		public void TestEncodeLongDottedMethodRoundTrip ()
+		{
+			var method = new string ('l', 67) + ".llllll";
+			var authres = AuthenticationResults.Parse (Encoding.ASCII.GetBytes ($"example.com; {method}=pass reason=^ooe;"));
+			var options = FormatOptions.Default.Clone ();
+			var builder = new StringBuilder ();
+
+			options.NewLineFormat = NewLineFormat.Unix;
+			options.MaxLineLength = 60;
+
+			authres.Encode (options, builder, "ARC-Authentication-Results:".Length);
+
+			var encoded = builder.ToString ();
+
+			Assert.That (encoded, Does.Contain ("\n\t="), "The method name should be folded before the '='");
+
+			var reparsed = AuthenticationResults.Parse (Encoding.ASCII.GetBytes (encoded));
+
+			Assert.That (reparsed.Results[0].Method, Is.EqualTo (method));
+			Assert.That (reparsed.ToString (), Is.EqualTo (authres.ToString ()));
+		}
+
+		[Test]
+		public void TestQuotedAuthServIdRoundTrip ()
+		{
+			const string input = "\"this is a really long authserv-id\"";
+			var buffer = Encoding.ASCII.GetBytes (input);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, out var authres), Is.True, "TryParse");
+			Assert.That (authres.AuthenticationServiceIdentifier, Is.EqualTo ("this is a really long authserv-id"), "authserv-id");
+			Assert.That (authres.ToString (), Is.EqualTo (input + "; none"), "ToString");
+
+			buffer = Encoding.ASCII.GetBytes (authres.ToString ());
+			Assert.That (AuthenticationResults.TryParse (buffer, out var reparsed), Is.True, "TryParse serialized");
+			Assert.That (reparsed.AuthenticationServiceIdentifier, Is.EqualTo (authres.AuthenticationServiceIdentifier), "reparsed authserv-id");
+
+			var encoded = new StringBuilder ();
+			authres.Encode (FormatOptions.Default, encoded, "Authentication-Results:".Length);
+			Assert.That (encoded.ToString (), Is.EqualTo (" " + input + "; none" + FormatOptions.Default.NewLine), "Encode");
+
+			authres = new AuthenticationResults ("example.com");
+			Assert.That (authres.ToString (), Is.EqualTo ("example.com; none"), "token authserv-id");
+
+			authres = new AuthenticationResults ("ex\"ample.com");
+			Assert.That (authres.ToString (), Is.EqualTo ("\"ex\\\"ample.com\"; none"), "authserv-id with quote");
+
+			authres = new AuthenticationResults (string.Empty);
+			Assert.That (authres.ToString (), Is.EqualTo ("\"\"; none"), "empty authserv-id");
+		}
+
+		[Test]
+		public void TestEncodeFoldedPropertyValueOfFormFeeds ()
+		{
+			var input = "e=l()p.m=" + new string ('\f', 100);
+			var buffer = Encoding.ASCII.GetBytes (input);
+
+			Assert.That (AuthenticationResults.TryParse (buffer, out var authres), Is.True, "TryParse");
+			Assert.That (authres.Results[0].Properties[0].Value, Is.EqualTo (new string ('\f', 100)), "Value");
+
+			var encoded = new StringBuilder ();
+			authres.Encode (FormatOptions.Default, encoded, "Authentication-Results:".Length);
+
+			buffer = Encoding.ASCII.GetBytes (encoded.ToString ());
+			Assert.That (AuthenticationResults.TryParse (buffer, out var reparsed), Is.True, "TryParse encoded");
+			Assert.That (reparsed.Results[0].Properties[0].Value, Is.EqualTo (authres.Results[0].Properties[0].Value), "reparsed Value");
+		}
+
+		[Test]
+		public void TestParseFailureIncompleteProperty5 ()
+		{
+			AssertParseFailure ("authserv-id; method=pass ptype.prop=\"incomplete qstring", 25, 55);
+		}
+
+		// Note: TestParseFailureIncompleteProperty6 is commented out because of
 		// https://github.com/jstedfast/MimeKit/issues/527 where we have "header.from=;"
 
 		//[Test]
-		//public void TestParseFailureIncompleteProperty4 ()
-		//{
-		//	AssertParseFailure ("authserv-id; method=pass ptype.prop=", 25, 36);
-		//}
-
-		//[Test]
-		//public void TestParseFailureIncompleteProperty5 ()
+		//public void TestParseFailureIncompleteProperty6 ()
 		//{
 		//	AssertParseFailure ("authserv-id; method=pass ptype.prop=;", 25, 36);
 		//}

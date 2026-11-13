@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using MimeKit.IO;
+using MimeKit.Utils;
 
 namespace MimeKit {
 	/// <summary>
@@ -38,17 +39,21 @@ namespace MimeKit {
 	/// <remarks>
 	/// Represents MIME entities such as those with a Content-Type of message/rfc822 or message/news.
 	/// </remarks>
-	public class MessagePart : MimeEntity
+	/// <example>
+	/// <code language="c#" source="Examples\MultipartExamples.cs" region="ExtractAttachedMessages"/>
+	/// <code language="c#" source="Examples\ForwardExamples.cs" region="ForwardAttached"/>
+	/// </example>
+	public class MessagePart : MimeEntity, IMessagePart
 	{
 		/// <summary>
 		/// Initialize a new instance of the <see cref="MessagePart"/> class.
 		/// </summary>
 		/// <remarks>
-		/// This constructor is used by <see cref="MimeParser"/>.
+		/// This constructor is used by <see cref="IMimeParser"/>.
 		/// </remarks>
 		/// <param name="args">Information used by the constructor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="args"/> is <c>null</c>.
+		/// <paramref name="args"/> is <see langword="null"/>.
 		/// </exception>
 		public MessagePart (MimeEntityConstructorArgs args) : base (args)
 		{
@@ -63,9 +68,9 @@ namespace MimeKit {
 		/// <param name="subtype">The message subtype.</param>
 		/// <param name="args">An array of initialization parameters: headers and message parts.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="subtype"/> is <c>null</c>.</para>
+		/// <para><paramref name="subtype"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="args"/> is <c>null</c>.</para>
+		/// <para><paramref name="args"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <para><paramref name="args"/> contains more than one <see cref="MimeMessage"/>.</para>
@@ -74,13 +79,13 @@ namespace MimeKit {
 		/// </exception>
 		public MessagePart (string subtype, params object[] args) : this (subtype)
 		{
-			if (args == null)
+			if (args is null)
 				throw new ArgumentNullException (nameof (args));
 
-			MimeMessage message = null;
+			MimeMessage? message = null;
 
 			foreach (object obj in args) {
-				if (obj == null || TryInit (obj))
+				if (obj is null || TryInit (obj))
 					continue;
 
 				if (obj is MimeMessage mesg) {
@@ -107,9 +112,9 @@ namespace MimeKit {
 		/// <param name="mediaType">The media type.</param>
 		/// <param name="mediaSubtype">The media subtype.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="mediaType"/> is <c>null</c>.</para>
+		/// <para><paramref name="mediaType"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="mediaSubtype"/> is <c>null</c>.</para>
+		/// <para><paramref name="mediaSubtype"/> is <see langword="null"/>.</para>
 		/// </exception>
 		protected MessagePart (string mediaType, string mediaSubtype) : base (mediaType, mediaSubtype)
 		{
@@ -123,7 +128,7 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="subtype">The message subtype.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="subtype"/> is <c>null</c>.
+		/// <paramref name="subtype"/> is <see langword="null"/>.
 		/// </exception>
 		public MessagePart (string subtype) : this ("message", subtype)
 		{
@@ -139,6 +144,11 @@ namespace MimeKit {
 		{
 		}
 
+		void CheckDisposed ()
+		{
+			CheckDisposed (nameof (MessagePart));
+		}
+
 		/// <summary>
 		/// Gets or sets the message content.
 		/// </summary>
@@ -146,8 +156,17 @@ namespace MimeKit {
 		/// Gets or sets the message content.
 		/// </remarks>
 		/// <value>The message content.</value>
-		public MimeMessage Message {
+		public MimeMessage? Message {
 			get; set;
+		}
+
+		internal override bool EndsWithDelimiterNewLine {
+			get { return Message?.Body is null || Message.Body.EndsWithDelimiterNewLine; }
+		}
+
+		private protected override IMimeDisposable? GetChildForDisposal (int index)
+		{
+			return index == 0 ? Message : null;
 		}
 
 		/// <summary>
@@ -163,12 +182,17 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="visitor">The visitor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="visitor"/> is <c>null</c>.
+		/// <paramref name="visitor"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="MessagePart"/> has been disposed.
 		/// </exception>
 		public override void Accept (MimeVisitor visitor)
 		{
-			if (visitor == null)
+			if (visitor is null)
 				throw new ArgumentNullException (nameof (visitor));
+
+			CheckDisposed ();
 
 			visitor.VisitMessagePart (this);
 		}
@@ -186,103 +210,17 @@ namespace MimeKit {
 		/// <para>-or-</para>
 		/// <para><paramref name="constraint"/> is not a valid value.</para>
 		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="MessagePart"/> has been disposed.
+		/// </exception>
 		public override void Prepare (EncodingConstraint constraint, int maxLineLength = 78)
 		{
 			if (maxLineLength < FormatOptions.MinimumLineLength || maxLineLength > FormatOptions.MaximumLineLength)
 				throw new ArgumentOutOfRangeException (nameof (maxLineLength));
 
-			if (Message != null)
-				Message.Prepare (constraint, maxLineLength);
-		}
+			CheckDisposed ();
 
-		/// <summary>
-		/// Write the <see cref="MessagePart"/> to the output stream.
-		/// </summary>
-		/// <remarks>
-		/// Writes the MIME entity and its message to the output stream.
-		/// </remarks>
-		/// <param name="options">The formatting options.</param>
-		/// <param name="stream">The output stream.</param>
-		/// <param name="contentOnly"><c>true</c> if only the content should be written; otherwise, <c>false</c>.</param>
-		/// <param name="cancellationToken">The cancellation token.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.OperationCanceledException">
-		/// The operation was canceled via the cancellation token.
-		/// </exception>
-		/// <exception cref="System.IO.IOException">
-		/// An I/O error occurred.
-		/// </exception>
-		public override void WriteTo (FormatOptions options, Stream stream, bool contentOnly, CancellationToken cancellationToken = default (CancellationToken))
-		{
-			base.WriteTo (options, stream, contentOnly, cancellationToken);
-
-			if (Message == null)
-				return;
-
-			if (Message.MboxMarker != null && Message.MboxMarker.Length != 0) {
-				var cancellable = stream as ICancellableStream;
-
-				if (cancellable != null) {
-					cancellable.Write (Message.MboxMarker, 0, Message.MboxMarker.Length, cancellationToken);
-					cancellable.Write (options.NewLineBytes, 0, options.NewLineBytes.Length, cancellationToken);
-				} else {
-					stream.Write (Message.MboxMarker, 0, Message.MboxMarker.Length);
-					stream.Write (options.NewLineBytes, 0, options.NewLineBytes.Length);
-				}
-			}
-
-			if (options.EnsureNewLine) {
-				options = options.Clone ();
-				options.EnsureNewLine = false;
-			}
-
-			Message.WriteTo (options, stream, cancellationToken);
-		}
-
-		/// <summary>
-		/// Asynchronously write the <see cref="MessagePart"/> to the output stream.
-		/// </summary>
-		/// <remarks>
-		/// Asynchronously writes the MIME entity and its message to the output stream.
-		/// </remarks>
-		/// <returns>An awaitable task.</returns>
-		/// <param name="options">The formatting options.</param>
-		/// <param name="stream">The output stream.</param>
-		/// <param name="contentOnly"><c>true</c> if only the content should be written; otherwise, <c>false</c>.</param>
-		/// <param name="cancellationToken">The cancellation token.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.OperationCanceledException">
-		/// The operation was canceled via the cancellation token.
-		/// </exception>
-		/// <exception cref="System.IO.IOException">
-		/// An I/O error occurred.
-		/// </exception>
-		public override async Task WriteToAsync (FormatOptions options, Stream stream, bool contentOnly, CancellationToken cancellationToken = default (CancellationToken))
-		{
-			await base.WriteToAsync (options, stream, contentOnly, cancellationToken).ConfigureAwait (false);
-
-			if (Message == null)
-				return;
-
-			if (Message.MboxMarker != null && Message.MboxMarker.Length != 0) {
-				await stream.WriteAsync (Message.MboxMarker, 0, Message.MboxMarker.Length, cancellationToken).ConfigureAwait (false);
-				await stream.WriteAsync (options.NewLineBytes, 0, options.NewLineBytes.Length, cancellationToken).ConfigureAwait (false);
-			}
-
-			if (options.EnsureNewLine) {
-				options = options.Clone ();
-				options.EnsureNewLine = false;
-			}
-
-			await Message.WriteToAsync (options, stream, cancellationToken).ConfigureAwait (false);
+			Message?.Prepare (constraint, maxLineLength);
 		}
 	}
 }

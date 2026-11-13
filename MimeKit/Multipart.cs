@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,14 +25,19 @@
 //
 
 using System;
-using System.IO;
 using System.Text;
-using System.Threading;
 using System.Collections;
-using System.Threading.Tasks;
+using System.Diagnostics;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 
-using MimeKit.IO;
+#if NET5_0_OR_GREATER
+using System.Buffers.Text;
+#endif
+
+using MimeKit.Text;
 using MimeKit.Utils;
 using MimeKit.Encodings;
 
@@ -61,24 +66,35 @@ namespace MimeKit {
 	/// inter-related MIME parts which typically reference each other via URIs based on the Content-Id and/or
 	/// Content-Location headers.</para>
 	/// </remarks>
-	public class Multipart : MimeEntity, ICollection<MimeEntity>, IList<MimeEntity>
+	/// <example>
+	/// <code language="c#" source="Examples\MultipartExamples.cs" region="CreateMultipartMixed"/>
+	/// <code language="c#" source="Examples\MultipartExamples.cs" region="RemoveAttachments"/>
+	/// </example>
+	public class Multipart : MimeEntity, IMultipart
 	{
 		readonly List<MimeEntity> children;
-		string preamble, epilogue;
+		internal List<byte[]?>? rawBoundaries;
+		string? preamble, epilogue;
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="Multipart"/> class.
 		/// </summary>
 		/// <remarks>
-		/// This constructor is used by <see cref="MimeParser"/>.
+		/// This constructor is used by <see cref="IMimeParser"/>.
 		/// </remarks>
 		/// <param name="args">Information used by the constructor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="args"/> is <c>null</c>.
+		/// <paramref name="args"/> is <see langword="null"/>.
 		/// </exception>
 		public Multipart (MimeEntityConstructorArgs args) : base (args)
 		{
+			ContentType.Parameters.BoundaryChanged += BoundaryChanged;
+			rawBoundaries = new List<byte[]?> ();
 			children = new List<MimeEntity> ();
+
+			// Since this .ctor only ever gets called by the parser, we default the end boundary to an empty
+			// byte[] and wait for the parser to set the real end boundary marker when it encounters it.
+			RawEndBoundary = Array.Empty<byte> ();
 		}
 
 		/// <summary>
@@ -87,23 +103,23 @@ namespace MimeKit {
 		/// <remarks>
 		/// Creates a new <see cref="Multipart"/> with the specified subtype.
 		/// </remarks>
-		/// <param name="subtype">The multipart media sub-type.</param>
+		/// <param name="subtype">The multipart media subtype.</param>
 		/// <param name="args">An array of initialization parameters: headers and MIME entities.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="subtype"/> is <c>null</c>.</para>
+		/// <para><paramref name="subtype"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="args"/> is <c>null</c>.</para>
+		/// <para><paramref name="args"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <paramref name="args"/> contains one or more arguments of an unknown type.
 		/// </exception>
 		public Multipart (string subtype, params object[] args) : this (subtype)
 		{
-			if (args == null)
+			if (args is null)
 				throw new ArgumentNullException (nameof (args));
 
 			foreach (object obj in args) {
-				if (obj == null || TryInit (obj))
+				if (obj is null || TryInit (obj))
 					continue;
 
 				if (obj is MimeEntity entity) {
@@ -121,15 +137,14 @@ namespace MimeKit {
 		/// <remarks>
 		/// Creates a new <see cref="Multipart"/> with the specified subtype.
 		/// </remarks>
-		/// <param name="subtype">The multipart media sub-type.</param>
+		/// <param name="subtype">The multipart media subtype.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="subtype"/> is <c>null</c>.
+		/// <paramref name="subtype"/> is <see langword="null"/>.
 		/// </exception>
 		public Multipart (string subtype) : base ("multipart", subtype)
 		{
 			ContentType.Boundary = GenerateBoundary ();
 			children = new List<MimeEntity> ();
-			WriteEndBoundary = true;
 		}
 
 		/// <summary>
@@ -142,18 +157,43 @@ namespace MimeKit {
 		{
 		}
 
+		void CheckDisposed ()
+		{
+			CheckDisposed (nameof (Multipart));
+		}
+
+#if NET5_0_OR_GREATER
+		[SkipLocalsInit]
+#endif
 		static string GenerateBoundary ()
 		{
-			var base64 = new Base64Encoder (true);
+#if NET5_0_OR_GREATER
+			Span<byte> buffer = stackalloc byte[24];
+			Span<byte> digest = stackalloc byte[16];
+			Span<char> boundary  = stackalloc char[26];
+
+			RandomNumberGenerator.Fill (digest);
+
+			Base64.EncodeToUtf8 (digest, buffer, out _, out int length);
+
+			boundary[0] = '=';
+			boundary[1] = '-';
+			Encoding.ASCII.GetChars (buffer.Slice (0, length), boundary.Slice (2, length));
+
+			return new string (boundary.Slice (0, length + 2));
+#else
 			var digest = new byte[16];
-			var buf = new byte[24];
+			var boundary = new char[26];
 			int length;
 
 			MimeUtils.GetRandomBytes (digest);
 
-			length = base64.Flush (digest, 0, digest.Length, buf);
+			boundary[0] = '=';
+			boundary[1] = '-';
+			length = Convert.ToBase64CharArray (digest, 0, digest.Length, boundary, 2);
 
-			return "=-" + Encoding.ASCII.GetString (buf, 0, length);
+			return new string (boundary, 0, length + 2);
+#endif
 		}
 
 		/// <summary>
@@ -164,22 +204,26 @@ namespace MimeKit {
 		/// </remarks>
 		/// <value>The boundary.</value>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
-		public string Boundary {
+		[DisallowNull]
+		public string? Boundary {
 			get { return ContentType.Boundary; }
 			set {
-				if (value == null)
+				if (value is null)
 					throw new ArgumentNullException (nameof (value));
+
+				// TODO: Consider validating the boundary according to rfc2046 (i.e. 1-70 characters long
+				// and only containing bchars, not ending with a space) and throw ArgumentException if invalid.
 
 				if (Boundary == value)
 					return;
 
-				ContentType.Boundary = value.Trim ();
+				ContentType.Boundary = value;
 			}
 		}
 
-		internal byte[] RawPreamble {
+		internal byte[]? RawPreamble {
 			get; set;
 		}
 
@@ -194,14 +238,21 @@ namespace MimeKit {
 		/// it correctly.
 		/// </remarks>
 		/// <value>The preamble.</value>
-		public string Preamble {
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public string? Preamble {
 			get {
-				if (preamble == null && RawPreamble != null)
+				CheckDisposed ();
+
+				if (preamble is null && RawPreamble != null)
 					preamble = CharsetUtils.ConvertToUnicode (Headers.Options, RawPreamble, 0, RawPreamble.Length);
 
 				return preamble;
 			}
 			set {
+				CheckDisposed ();
+
 				if (Preamble == value)
 					return;
 
@@ -213,12 +264,20 @@ namespace MimeKit {
 					RawPreamble = null;
 					preamble = null;
 				}
-
-				WriteEndBoundary = true;
 			}
 		}
 
-		internal byte[] RawEpilogue {
+		internal byte[]? RawEndBoundary {
+			get; set;
+		}
+
+		internal byte[]? RawEpilogue {
+			get; set;
+		}
+
+		// A boundary marker that the parser read at the very end of the stream that was not followed by a MIME part.
+		// This is only written when RawEndBoundary is empty (i.e. the multipart was truncated).
+		internal byte[]? RawTrailingBoundary {
 			get; set;
 		}
 
@@ -231,16 +290,21 @@ namespace MimeKit {
 		/// character sequence.
 		/// </remarks>
 		/// <value>The epilogue.</value>
-		public string Epilogue {
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public string? Epilogue {
 			get {
-				if (epilogue == null && RawEpilogue != null) {
+				CheckDisposed ();
+
+				if (epilogue is null && RawEpilogue != null) {
 					int index = 0;
 
 					// Note: In practice, the RawEpilogue contains the CRLF belonging to the end-boundary, but
 					// for sanity, we pretend that it doesn't.
 					if ((RawEpilogue.Length > 1 && RawEpilogue[0] == (byte) '\r' && RawEpilogue[1] == (byte) '\n'))
 						index += 2;
-					else if (RawEpilogue.Length > 1 && RawEpilogue[0] == (byte) '\n')
+					else if (RawEpilogue.Length > 0 && RawEpilogue[0] == (byte) '\n')
 						index++;
 
 					epilogue = CharsetUtils.ConvertToUnicode (Headers.Options, RawEpilogue, index, RawEpilogue.Length - index);
@@ -249,10 +313,16 @@ namespace MimeKit {
 				return epilogue;
 			}
 			set {
+				CheckDisposed ();
+
 				if (Epilogue == value)
 					return;
 
 				if (value != null) {
+					// if we are setting an epilogue and the RawEndBoundary is empty, then reset it back to the default
+					if (RawEndBoundary != null && RawEndBoundary.Length == 0)
+						RawEndBoundary = null;
+
 					var folded = FoldPreambleOrEpilogue (FormatOptions.Default, value, true);
 					RawEpilogue = Encoding.UTF8.GetBytes (folded);
 					epilogue = null;
@@ -260,8 +330,6 @@ namespace MimeKit {
 					RawEpilogue = null;
 					epilogue = null;
 				}
-
-				WriteEndBoundary = true;
 			}
 		}
 
@@ -271,9 +339,30 @@ namespace MimeKit {
 		/// <remarks>
 		/// Gets or sets whether the end boundary should be written.
 		/// </remarks>
-		/// <value><c>true</c> if the end boundary should be written; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the end boundary should be written; otherwise, <see langword="false" />.</value>
 		internal bool WriteEndBoundary {
-			get; set;
+			get { return RawEndBoundary == null || RawEndBoundary.Length > 0; }
+		}
+
+		internal bool IsTruncated {
+			get { return RawEndBoundary != null && RawEndBoundary.Length == 0; }
+		}
+
+		// A truncated multipart ends with whatever was written last: its trailing boundary marker (if any), its last child or
+		// its preamble (which retains the new-line sequence that precedes the parent's boundary marker).
+		internal override bool EndsWithDelimiterNewLine {
+			get {
+				if (!IsTruncated)
+					return false;
+
+				if (RawTrailingBoundary != null)
+					return EndsWithNewLine (RawTrailingBoundary);
+
+				if (children.Count == 0)
+					return true;
+
+				return children[children.Count - 1].EndsWithDelimiterNewLine;
+			}
 		}
 
 		/// <summary>
@@ -289,19 +378,69 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="visitor">The visitor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="visitor"/> is <c>null</c>.
+		/// <paramref name="visitor"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
 		/// </exception>
 		public override void Accept (MimeVisitor visitor)
 		{
-			if (visitor == null)
+			if (visitor is null)
 				throw new ArgumentNullException (nameof (visitor));
+
+			CheckDisposed ();
 
 			visitor.VisitMultipart (this);
 		}
 
+		/// <summary>
+		/// Get the preferred message body if it exists.
+		/// </summary>
+		/// <remarks>
+		/// Gets the preferred message body if it exists.
+		/// </remarks>
+		/// <param name="format">The preferred text format.</param>
+		/// <param name="body">The MIME part containing the message body in the preferred text format.</param>
+		/// <returns><see langword="true" /> if the body part is found; otherwise, <see langword="false" />.</returns>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public virtual bool TryGetValue (TextFormat format, [NotNullWhen (true)] out TextPart? body)
+		{
+			CheckDisposed ();
+
+			for (int i = 0; i < Count; i++) {
+				// Descend into nested multiparts if there are any...
+				if (this[i] is Multipart multipart) {
+					if (multipart.TryGetValue (format, out body))
+						return true;
+
+					// The text body should never come after a multipart.
+					break;
+				}
+
+				// Look for the first non-attachment text part (realistically, the body text will
+				// precede any attachments, but I'm not sure that we can rely on that assumption).
+				if (this[i] is TextPart text && !text.IsAttachment) {
+					if (text.IsFormat (format)) {
+						body = text;
+						return true;
+					}
+
+					// Note: the first text/* part in a multipart/mixed is the text body.
+					// If it's not in the format we're looking for, then it doesn't exist.
+					break;
+				}
+			}
+
+			body = null;
+
+			return false;
+		}
+
 		internal static string FoldPreambleOrEpilogue (FormatOptions options, string text, bool isEpilogue)
 		{
-			var builder = new StringBuilder ();
+			using var builder = new ValueStringBuilder (256);
 			int startIndex, wordIndex;
 			int lineLength = 0;
 			int index = 0;
@@ -340,7 +479,7 @@ namespace MimeKit {
 				}
 
 				if (length > 0) {
-					builder.Append (text, startIndex, length);
+					builder.Append (text.AsSpan (startIndex, length));
 					lineLength += length;
 				}
 			}
@@ -349,32 +488,6 @@ namespace MimeKit {
 				builder.Append (options.NewLine);
 
 			return builder.ToString ();
-		}
-
-		static void WriteBytes (FormatOptions options, Stream stream, byte[] bytes, bool ensureNewLine, CancellationToken cancellationToken)
-		{
-			var cancellable = stream as ICancellableStream;
-			var filter = options.CreateNewLineFilter (ensureNewLine);
-			int index, length;
-
-			var output = filter.Flush (bytes, 0, bytes.Length, out index, out length);
-
-			if (cancellable != null) {
-				cancellable.Write (output, index, length, cancellationToken);
-			} else {
-				cancellationToken.ThrowIfCancellationRequested ();
-				stream.Write (output, index, length);
-			}
-		}
-
-		static Task WriteBytesAsync (FormatOptions options, Stream stream, byte[] bytes, bool ensureNewLine, CancellationToken cancellationToken)
-		{
-			var filter = options.CreateNewLineFilter (ensureNewLine);
-			int index, length;
-
-			var output = filter.Flush (bytes, 0, bytes.Length, out index, out length);
-
-			return stream.WriteAsync (output, index, length, cancellationToken);
 		}
 
 		/// <summary>
@@ -390,196 +503,30 @@ namespace MimeKit {
 		/// <para>-or-</para>
 		/// <para><paramref name="constraint"/> is not a valid value.</para>
 		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
 		public override void Prepare (EncodingConstraint constraint, int maxLineLength = 78)
 		{
 			if (maxLineLength < FormatOptions.MinimumLineLength || maxLineLength > FormatOptions.MaximumLineLength)
 				throw new ArgumentOutOfRangeException (nameof (maxLineLength));
 
+			CheckDisposed ();
+
 			for (int i = 0; i < children.Count; i++)
 				children[i].Prepare (constraint, maxLineLength);
 		}
 
-		/// <summary>
-		/// Write the <see cref="Multipart"/> to the specified output stream.
-		/// </summary>
-		/// <remarks>
-		/// Writes the multipart MIME entity and its subparts to the output stream.
-		/// </remarks>
-		/// <param name="options">The formatting options.</param>
-		/// <param name="stream">The output stream.</param>
-		/// <param name="contentOnly"><c>true</c> if only the content should be written; otherwise, <c>false</c>.</param>
-		/// <param name="cancellationToken">The cancellation token.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.OperationCanceledException">
-		/// The operation was canceled via the cancellation token.
-		/// </exception>
-		/// <exception cref="System.IO.IOException">
-		/// An I/O error occurred.
-		/// </exception>
-		public override void WriteTo (FormatOptions options, Stream stream, bool contentOnly, CancellationToken cancellationToken = default (CancellationToken))
+		internal static bool EndsWithNewLine (byte[] buffer)
 		{
-			base.WriteTo (options, stream, contentOnly, cancellationToken);
-
-			if (ContentType.IsMimeType ("multipart", "signed")) {
-				// don't reformat the headers or content of any children of a multipart/signed
-				if (options.International || options.HiddenHeaders.Count > 0) {
-					options = options.Clone ();
-					options.HiddenHeaders.Clear ();
-					options.International = false;
-				}
-			}
-
-			var cancellable = stream as ICancellableStream;
-
-			if (RawPreamble != null && RawPreamble.Length > 0)
-				WriteBytes (options, stream, RawPreamble, children.Count > 0 || EnsureNewLine, cancellationToken);
-
-			var boundary = Encoding.ASCII.GetBytes ("--" + Boundary + "--");
-
-			if (cancellable != null) {
-				for (int i = 0; i < children.Count; i++) {
-					var msg = children[i] as MessagePart;
-					var multi = children[i] as Multipart;
-					var part = children[i] as MimePart;
-
-					cancellable.Write (boundary, 0, boundary.Length - 2, cancellationToken);
-					cancellable.Write (options.NewLineBytes, 0, options.NewLineBytes.Length, cancellationToken);
-					children[i].WriteTo (options, stream, false, cancellationToken);
-
-					if (msg != null && msg.Message != null && msg.Message.Body != null) {
-						multi = msg.Message.Body as Multipart;
-						part = msg.Message.Body as MimePart;
-					}
-
-					if ((part != null && part.Content == null) ||
-						(multi != null && !multi.WriteEndBoundary))
-						continue;
-
-					cancellable.Write (options.NewLineBytes, 0, options.NewLineBytes.Length, cancellationToken);
-				}
-
-				if (!WriteEndBoundary)
-					return;
-
-				cancellable.Write (boundary, 0, boundary.Length, cancellationToken);
-
-				if (RawEpilogue == null)
-					cancellable.Write (options.NewLineBytes, 0, options.NewLineBytes.Length, cancellationToken);
-			} else {
-				for (int i = 0; i < children.Count; i++) {
-					var rfc822 = children[i] as MessagePart;
-					var multi = children[i] as Multipart;
-					var part = children[i] as MimePart;
-
-					cancellationToken.ThrowIfCancellationRequested ();
-					stream.Write (boundary, 0, boundary.Length - 2);
-					stream.Write (options.NewLineBytes, 0, options.NewLineBytes.Length);
-					children[i].WriteTo (options, stream, false, cancellationToken);
-
-					if (rfc822 != null && rfc822.Message != null && rfc822.Message.Body != null) {
-						multi = rfc822.Message.Body as Multipart;
-						part = rfc822.Message.Body as MimePart;
-					}
-
-					if ((part != null && part.Content == null) ||
-						(multi != null && !multi.WriteEndBoundary))
-						continue;
-
-					cancellationToken.ThrowIfCancellationRequested ();
-					stream.Write (options.NewLineBytes, 0, options.NewLineBytes.Length);
-				}
-
-				if (!WriteEndBoundary)
-					return;
-
-				cancellationToken.ThrowIfCancellationRequested ();
-				stream.Write (boundary, 0, boundary.Length);
-
-				if (RawEpilogue == null) {
-					cancellationToken.ThrowIfCancellationRequested ();
-					stream.Write (options.NewLineBytes, 0, options.NewLineBytes.Length);
-				}
-			}
-
-			if (RawEpilogue != null && RawEpilogue.Length > 0)
-				WriteBytes (options, stream, RawEpilogue, EnsureNewLine, cancellationToken);
+			return buffer.Length > 0 && buffer[buffer.Length - 1] == (byte) '\n';
 		}
 
-		/// <summary>
-		/// Asynchronously write the <see cref="Multipart"/> to the specified output stream.
-		/// </summary>
-		/// <remarks>
-		/// Asynchronously writes the multipart MIME entity and its subparts to the output stream.
-		/// </remarks>
-		/// <returns>An awaitable task.</returns>
-		/// <param name="options">The formatting options.</param>
-		/// <param name="stream">The output stream.</param>
-		/// <param name="contentOnly"><c>true</c> if only the content should be written; otherwise, <c>false</c>.</param>
-		/// <param name="cancellationToken">The cancellation token.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="stream"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.OperationCanceledException">
-		/// The operation was canceled via the cancellation token.
-		/// </exception>
-		/// <exception cref="System.IO.IOException">
-		/// An I/O error occurred.
-		/// </exception>
-		public override async Task WriteToAsync (FormatOptions options, Stream stream, bool contentOnly, CancellationToken cancellationToken = default (CancellationToken))
+		// Check whether the specified child is the last thing written by a multipart that was truncated by the end of the
+		// stream, in which case it is responsible for making sure that the output ends with a new-line sequence (if needed).
+		internal bool IsLastChildOfTruncatedMultipart (int index)
 		{
-			await base.WriteToAsync (options, stream, contentOnly, cancellationToken).ConfigureAwait (false);
-
-			if (ContentType.IsMimeType ("multipart", "signed")) {
-				// don't hide or reformat the headers of any children of a multipart/signed
-				if (options.International || options.HiddenHeaders.Count > 0) {
-					options = options.Clone ();
-					options.HiddenHeaders.Clear ();
-					options.International = false;
-				}
-			}
-
-			if (RawPreamble != null && RawPreamble.Length > 0)
-				await WriteBytesAsync (options, stream, RawPreamble, children.Count > 0 || EnsureNewLine, cancellationToken).ConfigureAwait (false);
-
-			var boundary = Encoding.ASCII.GetBytes ("--" + Boundary + "--");
-
-			for (int i = 0; i < children.Count; i++) {
-				var msg = children[i] as MessagePart;
-				var multi = children[i] as Multipart;
-				var part = children[i] as MimePart;
-
-				await stream.WriteAsync (boundary, 0, boundary.Length - 2, cancellationToken).ConfigureAwait (false);
-				await stream.WriteAsync (options.NewLineBytes, 0, options.NewLineBytes.Length, cancellationToken).ConfigureAwait (false);
-				await children[i].WriteToAsync (options, stream, false, cancellationToken).ConfigureAwait (false);
-
-				if (msg != null && msg.Message != null && msg.Message.Body != null) {
-					multi = msg.Message.Body as Multipart;
-					part = msg.Message.Body as MimePart;
-				}
-
-				if ((part != null && part.Content == null) ||
-				    (multi != null && !multi.WriteEndBoundary))
-					continue;
-
-				await stream.WriteAsync (options.NewLineBytes, 0, options.NewLineBytes.Length, cancellationToken).ConfigureAwait (false);
-			}
-
-			if (!WriteEndBoundary)
-				return;
-
-			await stream.WriteAsync (boundary, 0, boundary.Length, cancellationToken).ConfigureAwait (false);
-
-			if (RawEpilogue == null)
-				await stream.WriteAsync (options.NewLineBytes, 0, options.NewLineBytes.Length, cancellationToken).ConfigureAwait (false);
-
-			if (RawEpilogue != null && RawEpilogue.Length > 0)
-				await WriteBytesAsync (options, stream, RawEpilogue, EnsureNewLine, cancellationToken).ConfigureAwait (false);
+			return index == children.Count - 1 && IsTruncated && RawTrailingBoundary is null;
 		}
 
 		#region ICollection implementation
@@ -601,7 +548,7 @@ namespace MimeKit {
 		/// <remarks>
 		/// A <see cref="Multipart"/> is never read-only.
 		/// </remarks>
-		/// <value><c>true</c> if this instance is read only; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if this instance is read only; otherwise, <see langword="false" />.</value>
 		public bool IsReadOnly {
 			get { return false; }
 		}
@@ -610,70 +557,127 @@ namespace MimeKit {
 		/// Add an entity to the multipart.
 		/// </summary>
 		/// <remarks>
+		/// Adds an entity and its boundary marker to the multipart.
+		/// </remarks>
+		/// <param name="entity">The MIME entity to add.</param>
+		/// <param name="boundary">The boundary marker preceeding the entity.</param>
+		internal void AddInternal (MimeEntity entity, byte[]? boundary)
+		{
+			rawBoundaries?.Add (boundary);
+			children.Add (entity);
+		}
+
+		/// <summary>
+		/// Add an entity to the multipart.
+		/// </summary>
+		/// <remarks>
 		/// Adds the specified part to the multipart.
 		/// </remarks>
-		/// <param name="part">The part to add.</param>
+		/// <param name="entity">The MIME entity to add.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="part"/> is <c>null</c>.
+		/// <paramref name="entity"/> is <see langword="null"/>.
 		/// </exception>
-		public void Add (MimeEntity part)
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public void Add (MimeEntity entity)
 		{
-			if (part == null)
-				throw new ArgumentNullException (nameof (part));
+			if (entity is null)
+				throw new ArgumentNullException (nameof (entity));
 
-			WriteEndBoundary = true;
-			children.Add (part);
+			CheckDisposed ();
+
+			RawTrailingBoundary = null;
+			rawBoundaries?.Add (null);
+			children.Add (entity);
 		}
 
 		/// <summary>
 		/// Clear a multipart.
 		/// </summary>
 		/// <remarks>
-		/// Removes all of the parts within the multipart.
+		/// Removes all the entities within the multipart.
 		/// </remarks>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
 		public void Clear ()
 		{
-			WriteEndBoundary = true;
+			Clear (false);
+		}
+
+		/// <summary>
+		/// Clear a multipart.
+		/// </summary>
+		/// <remarks>
+		/// Removes all the entities within the multipart, optionally disposing them in the process.
+		/// </remarks>
+		/// <param name="dispose"><see langword="true" /> if all the child entities of the multipart should be disposed; otherwise, <see langword="false" />.</param>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public void Clear (bool dispose)
+		{
+			CheckDisposed ();
+
+			if (dispose) {
+				for (int i = 0; i < children.Count; i++)
+					children[i].Dispose ();
+			}
+
+			RawTrailingBoundary = null;
+			RawEndBoundary = null;
+			rawBoundaries = null;
 			children.Clear ();
 		}
 
 		/// <summary>
-		/// Check if the <see cref="Multipart"/> contains the specified part.
+		/// Check if the <see cref="Multipart"/> contains the specified entity.
 		/// </summary>
 		/// <remarks>
-		/// Determines whether or not the multipart contains the specified part.
+		/// Determines whether the multipart contains the specified entity.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified part exists;
-		/// otherwise <value>false</value>.</returns>
-		/// <param name="part">The part to check for.</param>
+		/// <returns><see langword="true" /> if the specified entity exists;
+		/// otherwise, <see langword="false" />.</returns>
+		/// <param name="entity">The entity to check for.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="part"/> is <c>null</c>.
+		/// <paramref name="entity"/> is <see langword="null"/>.
 		/// </exception>
-		public bool Contains (MimeEntity part)
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public bool Contains (MimeEntity entity)
 		{
-			if (part == null)
-				throw new ArgumentNullException (nameof (part));
+			if (entity is null)
+				throw new ArgumentNullException (nameof (entity));
 
-			return children.Contains (part);
+			CheckDisposed ();
+
+			return children.Contains (entity);
 		}
 
 		/// <summary>
-		/// Copy all of the entities in the <see cref="Multipart"/> to the specified array.
+		/// Copy all the entities in the <see cref="Multipart"/> to the specified array.
 		/// </summary>
 		/// <remarks>
-		/// Copies all of the entities within the <see cref="Multipart"/> into the array,
+		/// Copies all the entities within the <see cref="Multipart"/> into the array,
 		/// starting at the specified array index.
 		/// </remarks>
-		/// <param name="array">The array to copy the headers to.</param>
+		/// <param name="array">The array to copy the child entities to.</param>
 		/// <param name="arrayIndex">The index into the array.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="array"/> is <c>null</c>.
+		/// <paramref name="array"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="arrayIndex"/> is out of range.
 		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
 		public void CopyTo (MimeEntity[] array, int arrayIndex)
 		{
+			CheckDisposed ();
+
 			children.CopyTo (array, arrayIndex);
 		}
 
@@ -681,22 +685,31 @@ namespace MimeKit {
 		/// Remove an entity from the multipart.
 		/// </summary>
 		/// <remarks>
-		/// Removes the specified part, if it exists within the multipart.
+		/// Removes the specified entity if it exists within the multipart.
 		/// </remarks>
-		/// <returns><value>true</value> if the part was removed; otherwise <value>false</value>.</returns>
-		/// <param name="part">The part to remove.</param>
+		/// <returns><see langword="true" /> if the part was removed; otherwise, <see langword="false" />.</returns>
+		/// <param name="entity">The MIME entity to remove.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="part"/> is <c>null</c>.
+		/// <paramref name="entity"/> is <see langword="null"/>.
 		/// </exception>
-		public bool Remove (MimeEntity part)
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public bool Remove (MimeEntity entity)
 		{
-			if (part == null)
-				throw new ArgumentNullException (nameof (part));
+			if (entity is null)
+				throw new ArgumentNullException (nameof (entity));
 
-			if (!children.Remove (part))
+			CheckDisposed ();
+
+			int index = children.IndexOf (entity);
+
+			if (index == -1)
 				return false;
 
-			WriteEndBoundary = true;
+			RawTrailingBoundary = null;
+			rawBoundaries?.RemoveAt (index);
+			children.RemoveAt (index);
 
 			return true;
 		}
@@ -709,19 +722,24 @@ namespace MimeKit {
 		/// Get the index of an entity.
 		/// </summary>
 		/// <remarks>
-		/// Finds the index of the specified part, if it exists.
+		/// Finds the index of the specified entity, if it exists.
 		/// </remarks>
-		/// <returns>The index of the specified part if found; otherwise <c>-1</c>.</returns>
-		/// <param name="part">The part.</param>
+		/// <returns>The index of the specified entity if found; otherwise <c>-1</c>.</returns>
+		/// <param name="entity">The MIME entity.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="part"/> is <c>null</c>.
+		/// <paramref name="entity"/> is <see langword="null"/>.
 		/// </exception>
-		public int IndexOf (MimeEntity part)
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public int IndexOf (MimeEntity entity)
 		{
-			if (part == null)
-				throw new ArgumentNullException (nameof (part));
+			if (entity is null)
+				throw new ArgumentNullException (nameof (entity));
 
-			return children.IndexOf (part);
+			CheckDisposed ();
+
+			return children.IndexOf (entity);
 		}
 
 		/// <summary>
@@ -731,62 +749,85 @@ namespace MimeKit {
 		/// Inserts the part into the multipart at the specified index.
 		/// </remarks>
 		/// <param name="index">The index.</param>
-		/// <param name="part">The part.</param>
+		/// <param name="entity">The MIME entity.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="part"/> is <c>null</c>.
+		/// <paramref name="entity"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
 		/// </exception>
-		public void Insert (int index, MimeEntity part)
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
+		public void Insert (int index, MimeEntity entity)
 		{
 			if (index < 0 || index > children.Count)
 				throw new ArgumentOutOfRangeException (nameof (index));
 
-			if (part == null)
-				throw new ArgumentNullException (nameof (part));
+			if (entity is null)
+				throw new ArgumentNullException (nameof (entity));
 
-			children.Insert (index, part);
-			WriteEndBoundary = true;
+			CheckDisposed ();
+
+			RawTrailingBoundary = null;
+			rawBoundaries?.Insert (index, null);
+			children.Insert (index, entity);
 		}
 
 		/// <summary>
 		/// Remove an entity from the <see cref="Multipart"/> at the specified index.
 		/// </summary>
 		/// <remarks>
-		/// Removes the entity at the specified index.
+		/// <para>Removes the entity at the specified index.</para>
+		/// <note type="note">It is the responsibility of the caller to dispose the entity at the specified <paramref name="index"/>.</note>
 		/// </remarks>
 		/// <param name="index">The index.</param>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
 		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
 		public void RemoveAt (int index)
 		{
+			CheckDisposed ();
+
+			RawTrailingBoundary = null;
+			rawBoundaries?.RemoveAt (index);
 			children.RemoveAt (index);
-			WriteEndBoundary = true;
 		}
 
 		/// <summary>
 		/// Get or set the <see cref="MimeEntity"/> at the specified index.
 		/// </summary>
 		/// <remarks>
-		/// Gets or sets the <see cref="MimeEntity"/> at the specified index.
+		/// <para>Gets or sets the <see cref="MimeEntity"/> at the specified index.</para>
+		/// <note type="note">It is the responsibility of the caller to dispose the original entity at the specified <paramref name="index"/>.</note>
 		/// </remarks>
 		/// <value>The entity at the specified index.</value>
 		/// <param name="index">The index.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
 		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
 		public MimeEntity this[int index] {
-			get { return children[index]; }
+			get {
+				CheckDisposed ();
+
+				return children[index];
+			}
 			set {
-				if (value == null)
+				if (value is null)
 					throw new ArgumentNullException (nameof (value));
 
-				WriteEndBoundary = true;
+				CheckDisposed ();
+
+				RawTrailingBoundary = null;
 				children[index] = value;
 			}
 		}
@@ -802,8 +843,13 @@ namespace MimeKit {
 		/// Gets the enumerator for the children of the <see cref="Multipart"/>.
 		/// </remarks>
 		/// <returns>The enumerator.</returns>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
 		public IEnumerator<MimeEntity> GetEnumerator ()
 		{
+			CheckDisposed ();
+
 			return children.GetEnumerator ();
 		}
 
@@ -818,11 +864,52 @@ namespace MimeKit {
 		/// Gets the enumerator for the children of the <see cref="Multipart"/>.
 		/// </remarks>
 		/// <returns>The enumerator.</returns>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="Multipart"/> has been disposed.
+		/// </exception>
 		IEnumerator IEnumerable.GetEnumerator ()
 		{
+			CheckDisposed ();
+
 			return children.GetEnumerator ();
 		}
 
 		#endregion
+
+		void BoundaryChanged (object? sender, EventArgs args)
+		{
+			// If/when the boundary changes, it is no longer necessary to maintain the raw (parsed) boundary
+			// markers for each child part. Instead, we will generate them in WriteTo/Async().
+			ContentType.Parameters.BoundaryChanged -= BoundaryChanged;
+			RawEndBoundary = null;
+			rawBoundaries = null;
+		}
+
+		private protected override IMimeDisposable? GetChildForDisposal (int index)
+		{
+			return index < children.Count ? children[index] : null;
+		}
+
+		/// <summary>
+		/// Release the unmanaged resources used by the <see cref="Multipart"/> and
+		/// optionally releases the managed resources.
+		/// </summary>
+		/// <remarks>
+		/// Releases the unmanaged resources used by the <see cref="Multipart"/> and
+		/// optionally releases the managed resources.
+		/// </remarks>
+		/// <param name="disposing"><see langword="true" /> to release both managed and unmanaged resources;
+		/// <see langword="false" /> to release only the unmanaged resources.</param>
+		protected override void Dispose (bool disposing)
+		{
+			if (disposing && rawBoundaries != null) {
+				// Note: this event is only connected if the Multipart was parsed by a IMimeParser,
+				// in which case, `boundaries` will not be null.
+				ContentType.Parameters.BoundaryChanged -= BoundaryChanged;
+				rawBoundaries = null;
+			}
+
+			base.Dispose (disposing);
+		}
 	}
 }

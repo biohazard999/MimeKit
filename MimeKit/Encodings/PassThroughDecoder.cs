@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,8 @@ namespace MimeKit.Encodings {
 	/// </remarks>
 	public class PassThroughDecoder : IMimeDecoder
 	{
+		readonly ContentEncoding encoding;
+
 		/// <summary>
 		/// Initialize a new instance of the <see cref="PassThroughDecoder"/> class.
 		/// </summary>
@@ -44,7 +46,7 @@ namespace MimeKit.Encodings {
 		/// </remarks>
 		public PassThroughDecoder (ContentEncoding encoding)
 		{
-			Encoding = encoding;
+			this.encoding = encoding;
 		}
 
 		/// <summary>
@@ -60,18 +62,18 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Gets the encoding.
+		/// Get the encoding.
 		/// </summary>
 		/// <remarks>
 		/// Gets the encoding that the decoder supports.
 		/// </remarks>
 		/// <value>The encoding.</value>
 		public ContentEncoding Encoding {
-			get; private set;
+			get { return encoding; }
 		}
 
 		/// <summary>
-		/// Estimates the length of the output.
+		/// Estimate the length of the output.
 		/// </summary>
 		/// <remarks>
 		/// Estimates the number of bytes needed to decode the specified number of input bytes.
@@ -85,7 +87,7 @@ namespace MimeKit.Encodings {
 
 		void ValidateArguments (byte[] input, int startIndex, int length, byte[] output)
 		{
-			if (input == null)
+			if (input is null)
 				throw new ArgumentNullException (nameof (input));
 
 			if (startIndex < 0 || startIndex > input.Length)
@@ -94,7 +96,7 @@ namespace MimeKit.Encodings {
 			if (length < 0 || length > (input.Length - startIndex))
 				throw new ArgumentOutOfRangeException (nameof (length));
 
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
 			if (output.Length < EstimateOutputLength (length))
@@ -102,29 +104,7 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Decodes the specified input into the output buffer.
-		/// </summary>
-		/// <remarks>
-		/// Copies the input buffer into the output buffer, verbatim.
-		/// </remarks>
-		/// <returns>The number of bytes written to the output buffer.</returns>
-		/// <param name="input">A pointer to the beginning of the input buffer.</param>
-		/// <param name="length">The length of the input buffer.</param>
-		/// <param name="output">A pointer to the beginning of the output buffer.</param>
-		public unsafe int Decode (byte* input, int length, byte* output)
-		{
-			byte* inend = input + length;
-			byte* outptr = output;
-			byte* inptr = input;
-
-			while (inptr < inend)
-				*outptr++ = *inptr++;
-
-			return length;
-		}
-
-		/// <summary>
-		/// Decodes the specified input into the output buffer.
+		/// Decode the specified input into the output buffer.
 		/// </summary>
 		/// <remarks>
 		/// Copies the input buffer into the output buffer, verbatim.
@@ -135,9 +115,9 @@ namespace MimeKit.Encodings {
 		/// <param name="length">The length of the input buffer.</param>
 		/// <param name="output">The output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="input"/> is <c>null</c>.</para>
+		/// <para><paramref name="input"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="output"/> is <c>null</c>.</para>
+		/// <para><paramref name="output"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -152,15 +132,53 @@ namespace MimeKit.Encodings {
 		{
 			ValidateArguments (input, startIndex, length, output);
 
+#if NET6_0_OR_GREATER
+			input.AsSpan (startIndex, length).CopyTo (output.AsSpan ());
+
+			return length;
+#else
 			unsafe {
-				fixed (byte* inptr = input, outptr = output) {
-					return Decode (inptr + startIndex, length, outptr);
+				fixed (byte* inbuf = input, outbuf = output) {
+					byte* inptr = inbuf + startIndex;
+					byte* inend = inptr + length;
+					byte* outptr = outbuf;
+
+					while (inptr < inend)
+						*outptr++ = *inptr++;
+
+					return length;
 				}
 			}
+#endif
 		}
 
 		/// <summary>
-		/// Resets the decoder.
+		/// Decode the final input into the output buffer.
+		/// </summary>
+		/// <remarks>
+		/// Copies the input verbatim. This decoder has no buffered input.
+		/// </remarks>
+		/// <returns>The number of bytes written to the output buffer.</returns>
+		/// <param name="input">The input buffer.</param>
+		/// <param name="startIndex">The starting index of the input buffer.</param>
+		/// <param name="length">The length of the input buffer.</param>
+		/// <param name="output">The output buffer.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="input"/> or <paramref name="output"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify a valid input range.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="output"/> is smaller than <see cref="EstimateOutputLength"/> requires.
+		/// </exception>
+		public int Flush (byte[] input, int startIndex, int length, byte[] output)
+		{
+			return Decode (input, startIndex, length, output);
+		}
+
+		/// <summary>
+		/// Reset the decoder.
 		/// </summary>
 		/// <remarks>
 		/// Resets the state of the decoder.

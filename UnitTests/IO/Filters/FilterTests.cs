@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,17 +24,15 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
 using System.Text;
-
-using NUnit.Framework;
 
 using MimeKit;
 using MimeKit.IO;
+using MimeKit.Utils;
+using MimeKit.Encodings;
 using MimeKit.IO.Filters;
 using MimeKit.Cryptography;
-using MimeKit.Utils;
+using MimeKit.Tnef;
 
 namespace UnitTests.IO.Filters {
 	[TestFixture]
@@ -52,6 +50,220 @@ namespace UnitTests.IO.Filters {
 			Assert.Throws<ArgumentNullException> (() => filter.Flush (null, 0, 0, out outputIndex, out outputLength));
 			Assert.Throws<ArgumentOutOfRangeException> (() => filter.Flush (buffer, -1, 0, out outputIndex, out outputLength));
 			Assert.Throws<ArgumentOutOfRangeException> (() => filter.Flush (buffer, 0, 20, out outputIndex, out outputLength));
+		}
+
+		static byte[] EncodeBoundaryInput (IMimeEncoder encoder, byte[] input)
+		{
+			var output = new byte[encoder.EstimateOutputLength (input.Length)];
+			int length = encoder.Flush (input, 0, input.Length, output);
+			Array.Resize (ref output, length);
+			return output;
+		}
+
+		static IEnumerable<TestCaseData> StatefulFilterCases ()
+		{
+			var text = Encoding.ASCII.GetBytes ("From x\r\nFrom \nFr\r\nbody \t\r \tx\r\n\t\r\nFro");
+			var binary = Enumerable.Range (0, 256).Select (x => (byte) x).ToArray ();
+			var armor = Encoding.ASCII.GetBytes ("ignored\r\n-----BEGIN PGP MESSAGE-----\r\nYWJj\r\n-----END PGP MESSAGE-----\r\nignored");
+			var rtf = new UnitTests.Tnef.RtfCompressedBuilder ().WriteLiterals (text).WriteReference (0, 17).WriteEndOfStream ().ToArray ();
+			var uu = EncodeBoundaryInput (new UUEncoder (), binary);
+			var yenc = EncodeBoundaryInput (new YEncEncoder (), binary);
+			var cases = new (string Name, Func<IMimeFilter> Create, byte[] Input)[] {
+				("Unix2Dos", () => new Unix2DosFilter (), text),
+				("Unix2DosEnsureNewLine", () => new Unix2DosFilter (true), text),
+				("Dos2Unix", () => new Dos2UnixFilter (), text),
+				("Dos2UnixEnsureNewLine", () => new Dos2UnixFilter (true), text),
+				("TrailingWhitespace", () => new TrailingWhitespaceFilter (), text),
+				("MboxFrom", () => new MboxFromFilter (), text),
+				("ArmoredFrom", () => new ArmoredFromFilter (), text),
+				("BestEncoding", () => new BestEncodingFilter (), text),
+				("DkimSimple", () => new DkimSimpleBodyFilter (), text),
+				("DkimRelaxed", () => new DkimRelaxedBodyFilter (), text),
+				("OpenPgpBlock", () => new OpenPgpBlockFilter ("-----BEGIN PGP MESSAGE-----", "-----END PGP MESSAGE-----"), armor),
+				("OpenPgpDetection", () => new OpenPgpDetectionFilter (), armor),
+				("RtfCompressed", () => new RtfCompressedToRtf (), rtf),
+				("Base64Decoder", () => new DecoderFilter (new Base64Decoder ()), Encoding.ASCII.GetBytes (Convert.ToBase64String (binary) + "\r\n!YQ==Zg")),
+				("QuotedPrintableDecoder", () => new DecoderFilter (new QuotedPrintableDecoder ()), Encoding.ASCII.GetBytes ("abc=20=3D=\r\n_=QX==\rZ=4G=41=\r")),
+				("EncodedWordDecoder", () => new DecoderFilter (new QuotedPrintableDecoder (true)), Encoding.ASCII.GetBytes ("abc_def=20=3D=QX==\rZ=4G=41=")),
+				("Rfc2231Decoder", () => new DecoderFilter (new Rfc2231Decoder ()), Encoding.ASCII.GetBytes ("abc%20%3D%QX%%41%4G%")),
+				("UUDecoder", () => new DecoderFilter (new UUDecoder (true)), uu),
+				("UUDecoderFramed", () => new DecoderFilter (new UUDecoder ()), Encoding.ASCII.GetBytes ("ignored\nbegin 644 file\n").Concat (uu).Concat ("end\n"u8.ToArray ()).ToArray ()),
+				("YEncDecoder", () => new DecoderFilter (new YEncDecoder (true)), yenc),
+				("YEncDecoderFramed", () => new DecoderFilter (new YEncDecoder ()), Encoding.ASCII.GetBytes ("ignored\n=ybegin line=128 size=256 name=file\n").Concat (yenc).Concat ("=yend size=256\n"u8.ToArray ()).ToArray ()),
+				("Base64EncoderUnix", () => new EncoderFilter (new Base64Encoder (NewLineFormat.Unix)), binary),
+				("QuotedPrintableEncoderUnix", () => new EncoderFilter (new QuotedPrintableEncoder (NewLineFormat.Unix)), text.Concat (binary).ToArray ()),
+				("UUEncoderUnix", () => new EncoderFilter (new UUEncoder (NewLineFormat.Unix)), binary),
+				("YEncEncoderUnix", () => new EncoderFilter (new YEncEncoder (NewLineFormat.Unix)), binary),
+				("Base64EncoderDos", () => new EncoderFilter (new Base64Encoder (NewLineFormat.Dos)), binary),
+				("QuotedPrintableEncoderDos", () => new EncoderFilter (new QuotedPrintableEncoder (NewLineFormat.Dos)), text.Concat (binary).ToArray ()),
+				("UUEncoderDos", () => new EncoderFilter (new UUEncoder (NewLineFormat.Dos)), binary),
+				("YEncEncoderDos", () => new EncoderFilter (new YEncEncoder (NewLineFormat.Dos)), binary)
+			};
+
+			foreach (var item in cases)
+				yield return new TestCaseData (item.Create, item.Input).SetName ($"{{m}}({item.Name})");
+		}
+
+		static byte[] FilterInChunks (IMimeFilter filter, byte[] input, int chunkSize, bool emptyFlush)
+		{
+			var padded = new byte[input.Length + 2];
+			input.CopyTo (padded, 1);
+			int end = emptyFlush ? input.Length : Math.Max (0, input.Length - chunkSize);
+
+			using (var stream = new MemoryStream ()) {
+				for (int index = 0; index < end;) {
+					int count = Math.Min (chunkSize, end - index);
+					var output = filter.Filter (padded, index + 1, count, out int outputIndex, out int outputLength);
+					stream.Write (output, outputIndex, outputLength);
+					index += count;
+
+					output = filter.Filter (Array.Empty<byte> (), 0, 0, out outputIndex, out outputLength);
+					stream.Write (output, outputIndex, outputLength);
+				}
+
+				var finalInput = emptyFlush ? Array.Empty<byte> () : padded;
+				var flushed = filter.Flush (finalInput, emptyFlush ? 0 : end + 1, input.Length - end, out int flushedIndex, out int flushedLength);
+				stream.Write (flushed, flushedIndex, flushedLength);
+				return stream.ToArray ();
+			}
+		}
+
+		static object GetFilterState (IMimeFilter filter)
+		{
+			return filter switch {
+				BestEncodingFilter best => (best.GetBestEncoding (EncodingConstraint.SevenBit), best.GetBestEncoding (EncodingConstraint.EightBit), best.GetBestEncoding (EncodingConstraint.None)),
+				OpenPgpDetectionFilter pgp => (pgp.DataType, pgp.BeginOffset, pgp.EndOffset),
+				DkimBodyFilter dkim => dkim.LastWasNewLine,
+				RtfCompressedToRtf rtf => (rtf.CompressionMode, rtf.IsValidCrc32),
+				DecoderFilter { Decoder: YEncDecoder yenc } => yenc.Checksum,
+				EncoderFilter { Encoder: YEncEncoder yenc } => yenc.Checksum,
+				EncoderFilter encoder => encoder.HasOutput,
+				_ => null
+			};
+		}
+
+		[TestCaseSource (nameof (StatefulFilterCases))]
+		public void TestStatefulFilterBoundaries (Func<IMimeFilter> create, byte[] data)
+		{
+			var fullOutput = FilterInChunks (create (), data, data.Length + 1, false);
+
+			for (int length = 0; length <= data.Length; length++) {
+				var input = data.AsSpan (0, length).ToArray ();
+				var reference = create ();
+				var expected = FilterInChunks (reference, input, data.Length + 1, false);
+				var expectedState = GetFilterState (reference);
+
+				foreach (int chunkSize in new[] { 1, 2, 3, 7, 16, 31, 64, 4096 }) {
+					foreach (bool emptyFlush in new[] { false, true }) {
+						var filter = create ();
+						for (int iteration = 0; iteration < 2; iteration++) {
+							var actual = FilterInChunks (filter, input, chunkSize, emptyFlush);
+							string context = $"length={length}, chunkSize={chunkSize}, emptyFlush={emptyFlush}, iteration={iteration}";
+							Assert.That (actual, Is.EqualTo (expected), context);
+							Assert.That (GetFilterState (filter), Is.EqualTo (expectedState), context);
+
+							// UUEncoder.Flush also writes the terminator for an empty encoded stream.
+							if (filter is not EncoderFilter { Encoder: UUEncoder }) {
+								filter.Flush (Array.Empty<byte> (), 0, 0, out _, out int outputLength);
+								Assert.That (outputLength, Is.Zero, "Repeated flush");
+							}
+
+							filter.Reset ();
+						}
+
+						filter.Filter (data, 0, length, out _, out _);
+						filter.Reset ();
+						Assert.That (FilterInChunks (filter, data, chunkSize, emptyFlush), Is.EqualTo (fullOutput), "Reset with pending input");
+					}
+				}
+			}
+		}
+
+		[TestCaseSource (nameof (StatefulFilterCases))]
+		public void TestStatefulFilterEndOfStream (Func<IMimeFilter> create, byte[] data)
+		{
+			var reference = create ();
+			var expected = FilterInChunks (reference, data, data.Length + 1, false);
+
+			foreach (int chunkSize in new[] { 1, 7, 4096 }) {
+				foreach (bool read in new[] { false, true }) {
+					var filter = create ();
+					using (var input = new ChunkedReadStream (data, chunkSize))
+					using (var output = new MemoryStream ())
+					using (var filtered = new FilteredStream (read ? input : output)) {
+						filtered.Add (filter);
+						if (read) {
+							filtered.CopyTo (output);
+							Assert.That (filtered.ReadByte (), Is.EqualTo (-1));
+						} else {
+							for (int index = 0; index < data.Length; index += chunkSize)
+								filtered.Write (data, index, Math.Min (chunkSize, data.Length - index));
+							filtered.Flush ();
+							filtered.Flush ();
+						}
+
+						Assert.That (output.ToArray (), Is.EqualTo (expected), $"chunkSize={chunkSize}, read={read}");
+						Assert.That (GetFilterState (filter), Is.EqualTo (GetFilterState (reference)));
+					}
+				}
+			}
+		}
+
+		[TestCaseSource (nameof (StatefulFilterCases))]
+		public async Task TestStatefulFilterEndOfStreamAsync (Func<IMimeFilter> create, byte[] data)
+		{
+			var reference = create ();
+			var expected = FilterInChunks (reference, data, data.Length + 1, false);
+
+			foreach (int chunkSize in new[] { 1, 7, 4096 }) {
+				foreach (bool read in new[] { false, true }) {
+					var filter = create ();
+					using (var input = new ChunkedReadStream (data, chunkSize))
+					using (var output = new MemoryStream ())
+					using (var filtered = new FilteredStream (read ? input : output)) {
+						filtered.Add (filter);
+						if (read) {
+							await filtered.CopyToAsync (output);
+							Assert.That (await filtered.ReadAsync (new byte[1], 0, 1), Is.Zero);
+						} else {
+							for (int index = 0; index < data.Length; index += chunkSize)
+								await filtered.WriteAsync (data, index, Math.Min (chunkSize, data.Length - index));
+							await filtered.FlushAsync ();
+							await filtered.FlushAsync ();
+						}
+
+						Assert.That (output.ToArray (), Is.EqualTo (expected), $"chunkSize={chunkSize}, read={read}");
+						Assert.That (GetFilterState (filter), Is.EqualTo (GetFilterState (reference)));
+					}
+				}
+			}
+		}
+
+		[TestCase ("From ", ContentEncoding.QuotedPrintable)]
+		[TestCase ("From sender", ContentEncoding.QuotedPrintable)]
+		[TestCase ("prefix\r\nFrom sender", ContentEncoding.QuotedPrintable)]
+		[TestCase ("From sender\r\n", ContentEncoding.QuotedPrintable)]
+		[TestCase ("From", ContentEncoding.SevenBit)]
+		[TestCase ("Not From sender", ContentEncoding.SevenBit)]
+		public void TestBestEncodingFilterUnterminatedFromLine (string text, ContentEncoding expected)
+		{
+			var input = Encoding.ASCII.GetBytes (text);
+
+			foreach (int chunkSize in new[] { 1, 3, 4096 }) {
+				var filter = new BestEncodingFilter ();
+				Assert.That (FilterInChunks (filter, input, chunkSize, true), Is.EqualTo (input));
+
+				foreach (var constraint in new[] { EncodingConstraint.SevenBit, EncodingConstraint.EightBit, EncodingConstraint.None })
+					Assert.That (filter.GetBestEncoding (constraint), Is.EqualTo (expected));
+
+				filter.Reset ();
+				filter.Filter (input, 0, input.Length, out _, out _);
+				Assert.That (filter.GetBestEncoding (EncodingConstraint.SevenBit), Is.EqualTo (expected), "Before flushing");
+
+				filter.Reset ();
+				filter.Filter ("other"u8.ToArray (), 0, 5, out _, out _);
+				Assert.That (filter.GetBestEncoding (EncodingConstraint.SevenBit), Is.EqualTo (ContentEncoding.SevenBit), "Reset");
+			}
 		}
 
 		[Test]
@@ -80,9 +292,159 @@ namespace UnitTests.IO.Filters {
 
 					var actual = Encoding.UTF8.GetString (stream.GetBuffer (), 0, (int) stream.Length);
 
-					Assert.AreEqual (expected, actual, "From armoring failed when end boundary falls in the middle of From.");
+					Assert.That (actual, Is.EqualTo (expected), "From armoring failed when end boundary falls in the middle of From.");
 				}
 			}
+		}
+
+		[TestCase (1)]
+		[TestCase (8)]
+		[TestCase (64)]
+		[TestCase (1024)]
+		public void TestArmoredFromFilterFromRussiaWithLove (int bufferSize)
+		{
+			const string FromRussiaWithLove = "From Russia with love is one of my favorite James Bond files.\n";
+			const int iterations = 1000;
+
+			var inputBuilder = new StringBuilder (FromRussiaWithLove.Length * iterations);
+			var outputBuilder = new StringBuilder ((FromRussiaWithLove.Length + 1) * iterations);
+
+			for (int i = 0; i < iterations; i++) {
+				inputBuilder.Append (FromRussiaWithLove);
+				outputBuilder.Append ("=46");
+				outputBuilder.Append (FromRussiaWithLove, 1, FromRussiaWithLove.Length - 1);
+			}
+
+			string expected = outputBuilder.ToString ();
+			string input = inputBuilder.ToString ();
+
+			using (var stream = new MemoryStream ()) {
+				using (var filtered = new FilteredStream (stream)) {
+					var filter = new ArmoredFromFilter ();
+
+					filtered.Add (filter);
+
+					using (var inputStream = new MemoryStream (Encoding.ASCII.GetBytes (input), false)) {
+						var buffer = new byte[bufferSize];
+						int nread;
+
+						do {
+							nread = inputStream.Read (buffer, 0, buffer.Length);
+							if (nread == 0)
+								break;
+
+							filtered.Write (buffer, 0, nread);
+						} while (true);
+
+						filtered.Flush ();
+					}
+				}
+
+				var actual = Encoding.UTF8.GetString (stream.GetBuffer (), 0, (int) stream.Length);
+
+				Assert.That (actual, Is.EqualTo (expected), "From armoring failed when end boundary falls in the middle of From.");
+			}
+		}
+
+		[Test]
+		public void TestMboxFromFilter ()
+		{
+			const string text = "This text is meant to test that the filter will armor lines beginning with\nFrom (like mbox). And let's add another\nFrom line for good measure, shall we?\n";
+			const string expected = "This text is meant to test that the filter will armor lines beginning with\n>From (like mbox). And let's add another\n>From line for good measure, shall we?\n";
+			var filter = new MboxFromFilter ();
+
+			TestArgumentExceptions (filter);
+
+			using (var stream = new MemoryStream ()) {
+				using (var filtered = new FilteredStream (stream)) {
+					int fromIndex = text.IndexOf ("\nFrom ", StringComparison.Ordinal);
+					var buffer = Encoding.UTF8.GetBytes (text);
+
+					filtered.Add (filter);
+
+					// write out a buffer where the end boundary falls in the middle of "From "
+					int endIndex = fromIndex + 3;
+					filtered.Write (buffer, 0, endIndex);
+
+					// write out the rest
+					filtered.Write (buffer, endIndex, buffer.Length - endIndex);
+					filtered.Flush ();
+
+					var actual = Encoding.UTF8.GetString (stream.GetBuffer (), 0, (int) stream.Length);
+
+					Assert.That (actual, Is.EqualTo (expected), "From armoring failed when end boundary falls in the middle of From.");
+				}
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (8)]
+		[TestCase (64)]
+		[TestCase (1024)]
+		public void TestMboxFromFilterFromRussiaWithLove (int bufferSize)
+		{
+			const string FromRussiaWithLove = "From Russia with love is one of my favorite James Bond files.\n";
+			const int iterations = 1000;
+
+			var inputBuilder = new StringBuilder (FromRussiaWithLove.Length * iterations);
+			var outputBuilder = new StringBuilder ((FromRussiaWithLove.Length + 1) * iterations);
+
+			for (int i = 0; i < iterations; i++) {
+				inputBuilder.Append (FromRussiaWithLove);
+				outputBuilder.Append ('>');
+				outputBuilder.Append (FromRussiaWithLove);
+			}
+
+			string expected = outputBuilder.ToString ();
+			string input = inputBuilder.ToString ();
+
+			using (var stream = new MemoryStream ()) {
+				using (var filtered = new FilteredStream (stream)) {
+					var filter = new MboxFromFilter ();
+
+					filtered.Add (filter);
+
+					using (var inputStream = new MemoryStream (Encoding.ASCII.GetBytes (input), false)) {
+						var buffer = new byte[bufferSize];
+						int nread;
+
+						do {
+							nread = inputStream.Read (buffer, 0, buffer.Length);
+							if (nread == 0)
+								break;
+
+							filtered.Write (buffer, 0, nread);
+						} while (true);
+
+						filtered.Flush ();
+					}
+				}
+
+				var actual = Encoding.UTF8.GetString (stream.GetBuffer (), 0, (int) stream.Length);
+
+				Assert.That (actual, Is.EqualTo (expected), "From armoring failed when end boundary falls in the middle of From.");
+			}
+		}
+
+		[Test]
+		public void TestBestEncodingFilterCrLfSplitAcrossBuffers ()
+		{
+			var line = Encoding.ASCII.GetBytes (new string ('x', 78) + "\r\n");
+			var filter = new BestEncodingFilter ();
+
+			// the CR must not be counted toward the line length when the LF arrives in the next buffer
+			filter.Filter (line, 0, line.Length - 1, out _, out _);
+			filter.Flush (line, line.Length - 1, 1, out _, out _);
+
+			Assert.That (filter.GetBestEncoding (EncodingConstraint.SevenBit, 78), Is.EqualTo (ContentEncoding.SevenBit));
+
+			filter.Reset ();
+
+			// an unterminated final line still counts toward the maximum line length
+			var unterminated = Encoding.ASCII.GetBytes (new string ('x', 79));
+			filter.Flush (unterminated, 0, unterminated.Length, out _, out _);
+
+			Assert.That (filter.GetBestEncoding (EncodingConstraint.SevenBit, 78), Is.EqualTo (ContentEncoding.QuotedPrintable));
 		}
 
 		[Test]
@@ -103,7 +465,7 @@ namespace UnitTests.IO.Filters {
 					var buffer = Encoding.UTF8.GetBytes (ascii);
 					ContentEncoding encoding;
 
-					Assert.IsFalse (filtered.CanTimeout, "CanTimeout");
+					Assert.That (filtered.CanTimeout, Is.False, "CanTimeout");
 					Assert.Throws<InvalidOperationException> (() => { var x = filtered.ReadTimeout; });
 					Assert.Throws<InvalidOperationException> (() => { var x = filtered.WriteTimeout; });
 					Assert.Throws<InvalidOperationException> (() => filtered.ReadTimeout = 50);
@@ -119,21 +481,21 @@ namespace UnitTests.IO.Filters {
 
 					filtered.Add (filter);
 
-					Assert.IsTrue (filtered.Contains (filter), "Contains");
+					Assert.That (filtered.Contains (filter), Is.True, "Contains");
 
 					filtered.Write (buffer, 0, buffer.Length);
 					filtered.Flush ();
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.SevenBit);
-					Assert.AreEqual (ContentEncoding.SevenBit, encoding, "ASCII 7bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.SevenBit), "ASCII 7bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.EightBit);
-					Assert.AreEqual (ContentEncoding.SevenBit, encoding, "ASCII 8bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.SevenBit), "ASCII 8bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.None);
-					Assert.AreEqual (ContentEncoding.SevenBit, encoding, "ASCII no constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.SevenBit), "ASCII no constraint.");
 
-					Assert.IsTrue (filtered.Remove (filter), "Remove");
+					Assert.That (filtered.Remove (filter), Is.True, "Remove");
 				}
 			}
 
@@ -157,13 +519,13 @@ namespace UnitTests.IO.Filters {
 					filtered.Flush ();
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.SevenBit);
-					Assert.AreEqual (ContentEncoding.QuotedPrintable, encoding, "From-line 7bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.QuotedPrintable), "From-line 7bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.EightBit);
-					Assert.AreEqual (ContentEncoding.QuotedPrintable, encoding, "From-line 8bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.QuotedPrintable), "From-line 8bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.None);
-					Assert.AreEqual (ContentEncoding.QuotedPrintable, encoding, "From-line no constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.QuotedPrintable), "From-line no constraint.");
 				}
 			}
 
@@ -182,13 +544,13 @@ namespace UnitTests.IO.Filters {
 					filtered.Flush ();
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.SevenBit);
-					Assert.AreEqual (ContentEncoding.QuotedPrintable, encoding, "French 7bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.QuotedPrintable), "French 7bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.EightBit);
-					Assert.AreEqual (ContentEncoding.EightBit, encoding, "French 8bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.EightBit), "French 8bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.None);
-					Assert.AreEqual (ContentEncoding.EightBit, encoding, "French no constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.EightBit), "French no constraint.");
 
 					filter.Reset ();
 
@@ -197,13 +559,13 @@ namespace UnitTests.IO.Filters {
 					filtered.Flush ();
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.SevenBit);
-					Assert.AreEqual (ContentEncoding.QuotedPrintable, encoding, "French (long lines) 7bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.QuotedPrintable), "French (long lines) 7bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.EightBit);
-					Assert.AreEqual (ContentEncoding.QuotedPrintable, encoding, "French (long lines) 8bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.QuotedPrintable), "French (long lines) 8bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.None);
-					Assert.AreEqual (ContentEncoding.QuotedPrintable, encoding, "French (long lines) no constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.QuotedPrintable), "French (long lines) no constraint.");
 				}
 			}
 
@@ -221,13 +583,13 @@ namespace UnitTests.IO.Filters {
 					filtered.Flush ();
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.SevenBit, 78);
-					Assert.AreEqual (ContentEncoding.SevenBit, encoding, "78-character line; 7bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.SevenBit), "78-character line; 7bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.EightBit, 78);
-					Assert.AreEqual (ContentEncoding.SevenBit, encoding, "78-character line; 8bit constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.SevenBit), "78-character line; 8bit constraint.");
 
 					encoding = filter.GetBestEncoding (EncodingConstraint.None, 78);
-					Assert.AreEqual (ContentEncoding.SevenBit, encoding, "78-character line; no constraint.");
+					Assert.That (encoding, Is.EqualTo (ContentEncoding.SevenBit), "78-character line; no constraint.");
 				}
 			}
 		}
@@ -239,13 +601,13 @@ namespace UnitTests.IO.Filters {
 			int outputIndex, outputLength;
 			var buffer = new byte[10];
 
-			Assert.AreEqual (buffer, filter.Filter (buffer, 1, buffer.Length - 2, out outputIndex, out outputLength));
-			Assert.AreEqual (1, outputIndex, "outputIndex");
-			Assert.AreEqual (buffer.Length - 2, outputLength, "outputLength");
+			Assert.That (filter.Filter (buffer, 1, buffer.Length - 2, out outputIndex, out outputLength), Is.EqualTo (buffer));
+			Assert.That (outputIndex, Is.EqualTo (1), "outputIndex");
+			Assert.That (outputLength, Is.EqualTo (buffer.Length - 2), "outputLength");
 
-			Assert.AreEqual (buffer, filter.Flush (buffer, 1, buffer.Length - 2, out outputIndex, out outputLength));
-			Assert.AreEqual (1, outputIndex, "outputIndex");
-			Assert.AreEqual (buffer.Length - 2, outputLength, "outputLength");
+			Assert.That (filter.Flush (buffer, 1, buffer.Length - 2, out outputIndex, out outputLength), Is.EqualTo (buffer));
+			Assert.That (outputIndex, Is.EqualTo (1), "outputIndex");
+			Assert.That (outputLength, Is.EqualTo (buffer.Length - 2), "outputLength");
 
 			filter.Reset ();
 		}
@@ -287,7 +649,7 @@ namespace UnitTests.IO.Filters {
 					// Note: this Flush() should do nothing but test a code-path
 					filtered.Flush ();
 
-					Assert.AreEqual (expected.Length, length, "iso-8859-15 length");
+					Assert.That (length, Is.EqualTo (expected.Length), "iso-8859-15 length");
 				}
 			}
 
@@ -308,7 +670,106 @@ namespace UnitTests.IO.Filters {
 					// Note: this Flush() should do nothing but test a code-path
 					filtered.Flush ();
 
-					Assert.AreEqual (expected.Length, length, "iso-8859-1 length");
+					Assert.That (length, Is.EqualTo (expected.Length), "iso-8859-1 length");
+				}
+			}
+		}
+
+		[Test]
+		public void TestCharsetFilterFlushPendingDecoderState (
+			[Values ("utf-8", "utf-16", "utf-32")] string charset,
+			[Values (1, 2, 3, 4)] int trailingBytes,
+			[Values (false, true)] bool emptyFlush,
+			[Values (1, 1024, 4096)] int chunkSize)
+		{
+			var source = Encoding.GetEncoding (charset, EncoderFallback.ExceptionFallback, new DecoderReplacementFallback ("\uFFFD"));
+			var input = source.GetBytes (new string ('a', 1023) + "\u00e9\U0001F600");
+			Array.Resize (ref input, input.Length - (4 - trailingBytes));
+			var expected = Encoding.UTF8.GetBytes (source.GetString (input));
+			var filter = new CharsetFilter (source, Encoding.UTF8);
+			int endIndex = emptyFlush ? input.Length : Math.Max (0, input.Length - chunkSize);
+
+			for (int iteration = 0; iteration < 2; iteration++) {
+				using (var stream = new MemoryStream ()) {
+					for (int index = 0; index < endIndex;) {
+						int count = Math.Min (chunkSize, endIndex - index);
+						var output = filter.Filter (input, index, count, out int outputIndex, out int outputLength);
+						stream.Write (output, outputIndex, outputLength);
+						index += count;
+					}
+
+					filter.Filter (Array.Empty<byte> (), 0, 0, out _, out int emptyLength);
+					Assert.That (emptyLength, Is.Zero, "An empty non-final buffer must not flush decoder state.");
+
+					var flushed = filter.Flush (input, endIndex, input.Length - endIndex, out int flushedIndex, out int flushedLength);
+					stream.Write (flushed, flushedIndex, flushedLength);
+					Assert.That (stream.ToArray (), Is.EqualTo (expected));
+
+					filter.Flush (Array.Empty<byte> (), 0, 0, out _, out emptyLength);
+					Assert.That (emptyLength, Is.Zero, "Repeated flushing must not duplicate output.");
+				}
+
+				filter.Reset ();
+			}
+		}
+
+		[Test]
+		public void TestCharsetFilterFlushPendingDecoderException (
+			[Values ("utf-8", "utf-16", "utf-32")] string charset,
+			[Values (1, 2, 3)] int trailingBytes)
+		{
+			var source = Encoding.GetEncoding (charset, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
+			var input = source.GetBytes ("\U0001F600");
+			var filter = new CharsetFilter (source, Encoding.UTF8);
+
+			filter.Filter (input, 0, trailingBytes, out _, out _);
+			Assert.Throws<DecoderFallbackException> (() => filter.Flush (Array.Empty<byte> (), 0, 0, out _, out _));
+
+			filter.Reset ();
+			filter.Flush (Array.Empty<byte> (), 0, 0, out _, out int outputLength);
+			Assert.That (outputLength, Is.Zero);
+		}
+
+		[Test]
+		public void TestCharsetFilterEndOfStream ([Values (false, true)] bool reading)
+		{
+			var input = new byte[] { (byte) 'a', 0xe2, 0x82 };
+
+			using (var output = new MemoryStream ()) {
+				using (var source = new MemoryStream (input)) {
+					using (var filtered = new FilteredStream (reading ? source : output)) {
+						filtered.Add (new CharsetFilter (Encoding.UTF8, Encoding.UTF8));
+						if (reading) {
+							filtered.CopyTo (output);
+						} else {
+							filtered.Write (input, 0, input.Length);
+							filtered.Flush ();
+						}
+
+						Assert.That (output.ToArray (), Is.EqualTo (Encoding.UTF8.GetBytes ("a\uFFFD")));
+					}
+				}
+			}
+		}
+
+		[Test]
+		public async Task TestCharsetFilterEndOfStreamAsync ([Values (false, true)] bool reading)
+		{
+			var input = new byte[] { (byte) 'a', 0xe2, 0x82 };
+
+			using (var output = new MemoryStream ()) {
+				using (var source = new MemoryStream (input)) {
+					using (var filtered = new FilteredStream (reading ? source : output)) {
+						filtered.Add (new CharsetFilter (Encoding.UTF8, Encoding.UTF8));
+						if (reading) {
+							await filtered.CopyToAsync (output);
+						} else {
+							await filtered.WriteAsync (input, 0, input.Length);
+							await filtered.FlushAsync ();
+						}
+
+						Assert.That (output.ToArray (), Is.EqualTo (Encoding.UTF8.GetBytes ("a\uFFFD")));
+					}
 				}
 			}
 		}
@@ -332,7 +793,7 @@ namespace UnitTests.IO.Filters {
 
 					var actual = Encoding.UTF8.GetString (stream.GetBuffer (), 0, (int) stream.Length);
 
-					Assert.AreEqual (expected, actual, "increment of {0} failed.", increment);
+					Assert.That (actual, Is.EqualTo (expected), $"increment of {increment} failed.");
 				}
 			}
 		}
@@ -353,6 +814,100 @@ namespace UnitTests.IO.Filters {
 			// Make sure that resetting state works
 			filter.Reset ();
 			TestOpenPgpBlockFilter (filter, buffer, expected, 21);
+		}
+
+		static void TestUnix2DosFilter (string text, string expected, bool ensureNewLine)
+		{
+			var filter = new Unix2DosFilter (ensureNewLine);
+
+			TestArgumentExceptions (filter);
+
+			using (var stream = new MemoryStream ()) {
+				using (var filtered = new FilteredStream (stream)) {
+					var buffer = Encoding.UTF8.GetBytes (text);
+
+					filtered.Add (filter);
+					filtered.Write (buffer, 0, buffer.Length);
+					filtered.Flush ();
+					filtered.Flush ();
+
+					var actual = Encoding.UTF8.GetString (stream.GetBuffer (), 0, (int) stream.Length);
+
+					Assert.That (actual, Is.EqualTo (expected), $"unix2dos failed. EnsureNewLine = {ensureNewLine}");
+				}
+			}
+		}
+
+		[Test]
+		public void TestUnix2DosFilterSimple ()
+		{
+			const string text = "This text is meant to test that the filter will convert unix line endings to dos.\nHere's a second line of text.\nAnd one more line for good measure, shall we?";
+			const string expected = "This text is meant to test that the filter will convert unix line endings to dos.\r\nHere's a second line of text.\r\nAnd one more line for good measure, shall we?";
+
+			TestUnix2DosFilter (text, expected, false);
+			TestUnix2DosFilter (text, expected + "\r\n", true);
+		}
+
+		[Test]
+		public void TestUnix2DosFilterMixedLineEndings ()
+		{
+			const string text = "This text is meant to test that the filter will convert unix line endings to dos.\nHere's a second line of text.\r\nAnd one more line for good measure, shall we?\r";
+			const string expected = "This text is meant to test that the filter will convert unix line endings to dos.\r\nHere's a second line of text.\r\nAnd one more line for good measure, shall we?\r";
+
+			TestUnix2DosFilter (text, expected, false);
+			TestUnix2DosFilter (text, expected + '\n', true);
+		}
+
+		static void TestDos2UnixFilter (string text, string expected, bool ensureNewLine)
+		{
+			var filter = new Dos2UnixFilter (ensureNewLine);
+
+			TestArgumentExceptions (filter);
+
+			using (var stream = new MemoryStream ()) {
+				using (var filtered = new FilteredStream (stream)) {
+					var buffer = Encoding.UTF8.GetBytes (text);
+
+					filtered.Add (filter);
+					filtered.Write (buffer, 0, buffer.Length);
+					filtered.Flush ();
+					filtered.Flush ();
+
+					var actual = Encoding.UTF8.GetString (stream.GetBuffer (), 0, (int) stream.Length);
+
+					Assert.That (actual, Is.EqualTo (expected), $"dos2unix failed. EnsureNewLine = {ensureNewLine}");
+				}
+			}
+		}
+
+		[Test]
+		public void TestDos2UnixFilterSimple ()
+		{
+			const string text = "This text is meant to test that the filter will convert dos line endings to unix.\r\nHere's a second line of text.\r\nAnd one more line for good measure, shall we?";
+			const string expected = "This text is meant to test that the filter will convert dos line endings to unix.\nHere's a second line of text.\nAnd one more line for good measure, shall we?";
+
+			TestDos2UnixFilter (text, expected, false);
+			TestDos2UnixFilter (text, expected + '\n', true);
+		}
+
+		[Test]
+		public void TestDos2UnixFilterMixedLineEndings ()
+		{
+			const string text = "This text is meant to test that the filter will convert dos line endings to unix.\nHere's a second line of text.\r\nAnd one more line for good measure, shall we?\n";
+			const string expected = "This text is meant to test that the filter will convert dos line endings to unix.\nHere's a second line of text.\nAnd one more line for good measure, shall we?\n";
+
+			TestDos2UnixFilter (text, expected, false);
+			TestDos2UnixFilter (text, expected, true);
+		}
+
+		[TestCase ("abc\r", "abc\r", "abc\n")]
+		[TestCase ("abc\r\r", "abc\r\r", "abc\r\n")]
+		[TestCase ("abc\r\n\r", "abc\n\r", "abc\n\n")]
+		[TestCase ("\r", "\r", "\n")]
+		public void TestDos2UnixFilterTrailingCarriageReturn (string text, string expected, string expectedWithNewLine)
+		{
+			TestDos2UnixFilter (text, expected, false);
+			TestDos2UnixFilter (text, expectedWithNewLine, true);
 		}
 	}
 }

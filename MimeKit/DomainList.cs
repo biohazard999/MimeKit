@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@ using System.Text;
 using System.Collections;
 using System.Globalization;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 using MimeKit.Utils;
 
@@ -41,25 +42,101 @@ namespace MimeKit {
 	/// </remarks>
 	public class DomainList : IList<string>
 	{
-		readonly static byte[] DomainSentinels = new [] { (byte) ',', (byte) ':' };
-		readonly List<string> domains;
+		readonly static byte[] DomainSentinels = new[] { (byte) ',', (byte) ':' };
+		IList<string> domains;
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="DomainList"/> class.
 		/// </summary>
 		/// <remarks>
-		/// Creates a new <see cref="DomainList"/> based on the domains provided.
+		/// <para>Creates a new <see cref="DomainList"/> based on the domains provided.</para>
+		/// <para>Each entry must be a nonempty dot-atom or bracketed domain literal, without whitespace
+		/// or control characters. Internationalized domains and single-label names are supported.
+		/// Values are not trimmed or checked against DNS.</para>
 		/// </remarks>
 		/// <param name="domains">A domain list.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="domains"/> is <c>null</c>.
+		/// <paramref name="domains"/> is <see langword="null"/>.
 		/// </exception>
-		public DomainList (IEnumerable<string> domains)
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="domains"/> contains a null, empty or syntactically invalid domain.
+		/// </exception>
+		public DomainList (IEnumerable<string> domains) : this (domains, true)
 		{
-			if (domains == null)
+		}
+
+		internal DomainList (IEnumerable<string> domains, bool validate)
+		{
+			if (domains is null)
 				throw new ArgumentNullException (nameof (domains));
 
-			this.domains = new List<string> (domains);
+			var list = new List<string> (domains);
+
+			if (validate) {
+				foreach (var domain in list) {
+					if (!IsValidDomain (domain))
+						throw new ArgumentException ("The list contains an invalid domain.", nameof (domains));
+				}
+			}
+
+			this.domains = list;
+		}
+
+		static bool IsValidDomain (string? domain)
+		{
+			if (string.IsNullOrEmpty (domain))
+				return false;
+
+			bool literal = domain[0] == '[';
+			int endIndex = domain.Length;
+			int atomLength = 0;
+
+			if (literal) {
+				if (domain[endIndex - 1] != ']')
+					return false;
+
+				endIndex--;
+			}
+
+			for (int i = literal ? 1 : 0; i < endIndex; i++) {
+				char c = domain[i];
+
+				if (!literal && c == '.') {
+					if (atomLength == 0)
+						return false;
+
+					atomLength = 0;
+					continue;
+				}
+
+				if (c < 128) {
+					if (literal ? !((byte) c).IsDomain () : !((byte) c).IsAtom ())
+						return false;
+				} else {
+					if (char.IsWhiteSpace (c) || char.IsControl (c))
+						return false;
+
+					if (char.IsSurrogate (c)) {
+						if (!char.IsHighSurrogate (c) || i + 1 >= endIndex || !char.IsLowSurrogate (domain[i + 1]))
+							return false;
+
+						i++;
+					}
+				}
+
+				atomLength++;
+			}
+
+			return literal || atomLength > 0;
+		}
+
+		static void ValidateDomain (string domain, string parameterName)
+		{
+			if (domain is null)
+				throw new ArgumentNullException (parameterName);
+
+			if (!IsValidDomain (domain))
+				throw new ArgumentException ("Invalid domain syntax.", parameterName);
 		}
 
 		/// <summary>
@@ -70,13 +147,19 @@ namespace MimeKit {
 		/// </remarks>
 		public DomainList ()
 		{
-			domains = new List<string> ();
+			domains = Array.Empty<string> ();
+		}
+
+		void EnsureAllocated ()
+		{
+			if (domains is not List<string>)
+				domains = new List<string> ();
 		}
 
 		#region IList implementation
 
 		/// <summary>
-		/// Gets the index of the requested domain, if it exists.
+		/// Get the index of the requested domain, if it exists.
 		/// </summary>
 		/// <remarks>
 		/// Finds the index of the specified domain, if it exists.
@@ -84,18 +167,18 @@ namespace MimeKit {
 		/// <returns>The index of the requested domain; otherwise <value>-1</value>.</returns>
 		/// <param name="domain">The domain.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="domain"/> is <c>null</c>.
+		/// <paramref name="domain"/> is <see langword="null"/>.
 		/// </exception>
 		public int IndexOf (string domain)
 		{
-			if (domain == null)
+			if (domain is null)
 				throw new ArgumentNullException (nameof (domain));
 
 			return domains.IndexOf (domain);
 		}
 
 		/// <summary>
-		/// Insert the domain at the specified index.
+		/// Insert a domain at the specified index.
 		/// </summary>
 		/// <remarks>
 		/// Inserts the domain at the specified index in the list.
@@ -103,22 +186,25 @@ namespace MimeKit {
 		/// <param name="index">The index to insert the domain.</param>
 		/// <param name="domain">The domain to insert.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="domain"/> is <c>null</c>.
+		/// <paramref name="domain"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
 		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="domain"/> is empty or syntactically invalid.
+		/// </exception>
 		public void Insert (int index, string domain)
 		{
-			if (domain == null)
-				throw new ArgumentNullException (nameof (domain));
+			ValidateDomain (domain, nameof (domain));
 
+			EnsureAllocated ();
 			domains.Insert (index, domain);
 			OnChanged ();
 		}
 
 		/// <summary>
-		/// Removes the domain at the specified index.
+		/// Remove the domain at the specified index.
 		/// </summary>
 		/// <remarks>
 		/// Removes the domain at the specified index.
@@ -134,7 +220,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets or sets the domain at the specified index.
+		/// Get or set the domain at the specified index.
 		/// </summary>
 		/// <remarks>
 		/// Gets or sets the domain at the specified index.
@@ -142,16 +228,18 @@ namespace MimeKit {
 		/// <value>The domain at the specified index.</value>
 		/// <param name="index">The index.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
 		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="value"/> is empty or syntactically invalid.
+		/// </exception>
 		public string this [int index] {
 			get { return domains[index]; }
 			set {
-				if (value == null)
-					throw new ArgumentNullException (nameof (value));
+				ValidateDomain (value, nameof (value));
 
 				if (domains[index] == value)
 					return;
@@ -166,29 +254,32 @@ namespace MimeKit {
 		#region ICollection implementation
 
 		/// <summary>
-		/// Add the specified domain.
+		/// Add a domain.
 		/// </summary>
 		/// <remarks>
 		/// Adds the specified domain to the end of the list.
 		/// </remarks>
 		/// <param name="domain">The domain.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="domain"/> is <c>null</c>.
+		/// <paramref name="domain"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="domain"/> is empty or syntactically invalid.
 		/// </exception>
 		public void Add (string domain)
 		{
-			if (domain == null)
-				throw new ArgumentNullException (nameof (domain));
+			ValidateDomain (domain, nameof (domain));
 
+			EnsureAllocated ();
 			domains.Add (domain);
 			OnChanged ();
 		}
 
 		/// <summary>
-		/// Clears the domain list.
+		/// Clear the domain list.
 		/// </summary>
 		/// <remarks>
-		/// Removes all of the domains in the list.
+		/// Removes all the domains in the list.
 		/// </remarks>
 		public void Clear ()
 		{
@@ -197,27 +288,27 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Checks if the <see cref="DomainList"/> contains the specified domain.
+		/// Check if the <see cref="DomainList"/> contains the specified domain.
 		/// </summary>
 		/// <remarks>
-		/// Determines whether or not the domain list contains the specified domain.
+		/// Determines whether the domain list contains the specified domain.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified domain is contained;
-		/// otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the specified domain is contained;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="domain">The domain.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="domain"/> is <c>null</c>.
+		/// <paramref name="domain"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Contains (string domain)
 		{
-			if (domain == null)
+			if (domain is null)
 				throw new ArgumentNullException (nameof (domain));
 
 			return domains.Contains (domain);
 		}
 
 		/// <summary>
-		/// Copies all of the domains in the <see cref="DomainList"/> to the specified array.
+		/// Copy all of the domains in the <see cref="DomainList"/> to an array.
 		/// </summary>
 		/// <remarks>
 		/// Copies all of the domains within the <see cref="DomainList"/> into the array,
@@ -226,7 +317,7 @@ namespace MimeKit {
 		/// <param name="array">The array to copy the domains to.</param>
 		/// <param name="arrayIndex">The index into the array.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="array"/> is <c>null</c>.
+		/// <paramref name="array"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="arrayIndex"/> is out of range.
@@ -237,19 +328,19 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Removes the specified domain.
+		/// Remove a domain.
 		/// </summary>
 		/// <remarks>
 		/// Removes the first instance of the specified domain from the list if it exists.
 		/// </remarks>
-		/// <returns><value>true</value> if the domain was removed; otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the domain was removed; otherwise, <see langword="false" />.</returns>
 		/// <param name="domain">The domain.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="domain"/> is <c>null</c>.
+		/// <paramref name="domain"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Remove (string domain)
 		{
-			if (domain == null)
+			if (domain is null)
 				throw new ArgumentNullException (nameof (domain));
 
 			if (domains.Remove (domain)) {
@@ -261,7 +352,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets the number of domains in the <see cref="DomainList"/>.
+		/// Get the number of domains in the <see cref="DomainList"/>.
 		/// </summary>
 		/// <remarks>
 		/// Indicates the number of domains in the list.
@@ -277,7 +368,7 @@ namespace MimeKit {
 		/// <remarks>
 		/// A <see cref="DomainList"/> is never read-only.
 		/// </remarks>
-		/// <value><c>true</c> if this instance is read only; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if this instance is read only; otherwise, <see langword="false" />.</value>
 		public bool IsReadOnly {
 			get { return false; }
 		}
@@ -287,7 +378,7 @@ namespace MimeKit {
 		#region IEnumerable implementation
 
 		/// <summary>
-		/// Gets an enumerator for the list of domains.
+		/// Get an enumerator for the list of domains.
 		/// </summary>
 		/// <remarks>
 		/// Gets an enumerator for the list of domains.
@@ -303,7 +394,7 @@ namespace MimeKit {
 		#region IEnumerable implementation
 
 		/// <summary>
-		/// Gets an enumerator for the list of domains.
+		/// Get an enumerator for the list of domains.
 		/// </summary>
 		/// <remarks>
 		/// Gets an enumerator for the list of domains.
@@ -316,25 +407,12 @@ namespace MimeKit {
 
 		#endregion
 
-		static bool IsNullOrWhiteSpace (string value)
-		{
-			if (string.IsNullOrEmpty (value))
-				return true;
-
-			for (int i = 0; i < value.Length; i++) {
-				if (!char.IsWhiteSpace (value[i]))
-					return false;
-			}
-
-			return true;
-		}
-
 		internal string Encode (FormatOptions options)
 		{
-			var builder = new StringBuilder ();
+			using var builder = new ValueStringBuilder (256);
 
 			for (int i = 0; i < domains.Count; i++) {
-				if (IsNullOrWhiteSpace (domains[i]))
+				if (string.IsNullOrWhiteSpace (domains[i]))
 					continue;
 
 				if (builder.Length > 0)
@@ -343,7 +421,7 @@ namespace MimeKit {
 				builder.Append ('@');
 
 				if (!options.International && ParseUtils.IsInternational (domains[i])) {
-					var domain = ParseUtils.IdnEncode (domains[i]);
+					var domain = MailboxAddress.IdnMapping.Encode (domains[i]);
 
 					builder.Append (domain);
 				} else {
@@ -355,7 +433,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Returns a string representation of the list of domains.
+		/// Return a string representation of the list of domains.
 		/// </summary>
 		/// <remarks>
 		/// <para>Each non-empty domain string will be prepended by an '@'.</para>
@@ -364,10 +442,10 @@ namespace MimeKit {
 		/// <returns>A string representing the <see cref="DomainList"/>.</returns>
 		public override string ToString ()
 		{
-			var builder = new StringBuilder ();
+			using var builder = new ValueStringBuilder (128);
 
 			for (int i = 0; i < domains.Count; i++) {
-				if (IsNullOrWhiteSpace (domains[i]))
+				if (string.IsNullOrWhiteSpace (domains[i]))
 					continue;
 
 				if (builder.Length > 0)
@@ -381,12 +459,11 @@ namespace MimeKit {
 			return builder.ToString ();
 		}
 
-		internal event EventHandler Changed;
+		internal event EventHandler? Changed;
 
 		void OnChanged ()
 		{
-			if (Changed != null)
-				Changed (this, EventArgs.Empty);
+			Changed?.Invoke (this, EventArgs.Empty);
 		}
 
 		/// <summary>
@@ -397,19 +474,23 @@ namespace MimeKit {
 		/// specified index. The index will only be updated if a <see cref="DomainList"/> was
 		/// successfully parsed.
 		/// </remarks>
-		/// <returns><c>true</c> if a <see cref="DomainList"/> was successfully parsed;
-		/// <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if a <see cref="DomainList"/> was successfully parsed;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The buffer to parse.</param>
 		/// <param name="index">The index to start parsing.</param>
 		/// <param name="endIndex">An index of the end of the input.</param>
-		/// <param name="throwOnError">A flag indicating whether or not an
+		/// <param name="throwOnError">A flag indicating whether an
 		/// exception should be thrown on error.</param>
 		/// <param name="route">The parsed DomainList.</param>
-		internal static bool TryParse (byte[] buffer, ref int index, int endIndex, bool throwOnError, out DomainList route)
+		internal static bool TryParse (byte[] buffer, ref int index, int endIndex, bool throwOnError, [NotNullWhen (true)] out DomainList? route)
+		{
+			return TryParse (new ByteArrayAddressInput (buffer), ref index, endIndex, throwOnError, out route);
+		}
+
+		internal static bool TryParse<TInput> (TInput buffer, ref int index, int endIndex, bool throwOnError, [NotNullWhen (true)] out DomainList? route) where TInput : struct, IAddressParserInput
 		{
 			var domains = new List<string> ();
 			int startIndex = index;
-			string domain;
 
 			route = null;
 
@@ -419,15 +500,18 @@ namespace MimeKit {
 
 				if (index >= endIndex) {
 					if (throwOnError)
-						throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Incomplete domain-list at offset: {0}", startIndex), startIndex, index);
+						throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Incomplete domain-list at offset: {0}", buffer.GetByteOffset (startIndex)), buffer.GetByteOffset (startIndex), buffer.GetByteOffset (index));
 
 					return false;
 				}
 
-				if (!ParseUtils.TryParseDomain (buffer, ref index, endIndex, DomainSentinels, throwOnError, out domain))
+				if (!ParseUtils.TryParseDomain (buffer, ref index, endIndex, DomainSentinels, throwOnError, out var domain))
 					return false;
 
-				domains.Add (domain);
+				// Note: Encode() and ToString() both skip whitespace-only domains (which can be parsed when they consist
+				// of non-ASCII whitespace characters such as U+2008), so skip them here as well to keep things consistent.
+				if (!string.IsNullOrWhiteSpace (domain))
+					domains.Add (domain);
 
 				// Note: obs-domain-list allows for null domains between commas
 				do {
@@ -444,7 +528,7 @@ namespace MimeKit {
 					return false;
 			} while (index < buffer.Length && buffer[index] == (byte) '@');
 
-			route = new DomainList (domains);
+			route = new DomainList (domains, false);
 
 			return true;
 		}
@@ -456,21 +540,19 @@ namespace MimeKit {
 		/// Attempts to parse a <see cref="DomainList"/> from the supplied text. The index
 		/// will only be updated if a <see cref="DomainList"/> was successfully parsed.
 		/// </remarks>
-		/// <returns><c>true</c> if a <see cref="DomainList"/> was successfully parsed;
-		/// <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if a <see cref="DomainList"/> was successfully parsed;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="text">The text to parse.</param>
 		/// <param name="route">The parsed DomainList.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (string text, out DomainList route)
+		public static bool TryParse (string? text, [NotNullWhen (true)] out DomainList? route)
 		{
-			int index = 0;
-
-			if (text == null)
-				throw new ArgumentNullException (nameof (text));
+			if (text is null) {
+				route = null;
+				return false;
+			}
 
 			var buffer = Encoding.UTF8.GetBytes (text);
+			int index = 0;
 
 			return TryParse (buffer, ref index, buffer.Length, false, out route);
 		}

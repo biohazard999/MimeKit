@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2014-2020 Jeffrey Stedfast
+// Copyright (c) 2014-2024 Jeffrey Stedfast
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 // THE SOFTWARE.
 //
 
+using System;
 using System.Collections.Generic;
 
 using Android.Webkit;
@@ -41,6 +42,8 @@ namespace MessageReader.Android
 	{
 		readonly List<MultipartRelated> stack = new List<MultipartRelated> ();
 		readonly List<MimeEntity> attachments = new List<MimeEntity> ();
+		readonly List<MimeEntity> calenderAttachments = new List<MimeEntity> ();
+
 		readonly WebView webView;
 		bool renderedBody;
 
@@ -57,6 +60,13 @@ namespace MessageReader.Android
 		/// </summary>
 		public IList<MimeEntity> Attachments {
 			get { return attachments; }
+		}
+
+		/// <summary>
+		/// The list of text/calender entries that were in the MimeMessage.
+		/// </summary>
+		public IList<MimeEntity> CalenderAttachments {
+			get { return calenderAttachments; }
 		}
 
 		protected override void VisitMultipartAlternative (MultipartAlternative alternative)
@@ -80,23 +90,38 @@ namespace MessageReader.Android
 			stack.RemoveAt (stack.Count - 1);
 		}
 
-		// Sets the "oncontextmenu" <body> attribute to "return false;"
+		// Modifies various HTML attributes for better suitability for rendering.
 		void HtmlTagCallback (HtmlTagContext ctx, HtmlWriter htmlWriter)
 		{
-			if (ctx.TagId == HtmlTagId.Body && !ctx.IsEndTag) {
+			if (ctx.TagId == HtmlTagId.Meta && !ctx.IsEndTag) {
+				bool isContentType = false;
+
 				ctx.WriteTag (htmlWriter, false);
 
-				// add and/or replace oncontextmenu="return false;"
+				// replace charsets with "utf-8" since our output will be in utf-8 (and not whatever the original charset was)
 				foreach (var attribute in ctx.Attributes) {
-					if (attribute.Name.ToLowerInvariant () == "oncontextmenu")
-						continue;
-
-					htmlWriter.WriteAttribute (attribute);
+					if (attribute.Id == HtmlAttributeId.Charset) {
+						htmlWriter.WriteAttributeName (attribute.Name);
+						htmlWriter.WriteAttributeValue ("utf-8");
+					} else if (isContentType && attribute.Id == HtmlAttributeId.Content) {
+						htmlWriter.WriteAttributeName (attribute.Name);
+						htmlWriter.WriteAttributeValue ("text/html; charset=utf-8");
+						isContentType = false;
+					} else if (attribute.Id == HtmlAttributeId.HttpEquiv) {
+						if (attribute.Value != null) {
+							if (attribute.Value.Equals ("Content-Type", StringComparison.OrdinalIgnoreCase)) {
+								htmlWriter.WriteAttribute (attribute);
+								isContentType = true;
+							} else {
+								htmlWriter.WriteAttribute (attribute);
+							}
+						}
+					} else {
+						htmlWriter.WriteAttribute (attribute);
+					}
 				}
-
-				htmlWriter.WriteAttribute ("oncontextmenu", "return false;");
 			} else {
-				// pass the tag through to the output
+				// write the tag or end tag as-is since we don't need to modify it
 				ctx.WriteTag (htmlWriter, true);
 			}
 		}
@@ -104,6 +129,12 @@ namespace MessageReader.Android
 		protected override void VisitTextPart (TextPart entity)
 		{
 			TextConverter converter;
+
+			// treat text/calendar parts as attachments rather than message bodies
+			if (entity.ContentType.IsMimeType ("text", "calendar")) {
+				calenderAttachments.Add (entity);
+				return;
+			}
 
 			if (renderedBody) {
 				// since we've already found the body, treat this as an attachment
@@ -119,7 +150,7 @@ namespace MessageReader.Android
 				var flowed = new FlowedToHtml ();
 
 				if (entity.ContentType.Parameters.TryGetValue ("delsp", out string delsp))
-					flowed.DeleteSpace = delsp.ToLowerInvariant () == "yes";
+					flowed.DeleteSpace = delsp.Equals ("yes", StringComparison.OrdinalIgnoreCase);
 
 				converter = flowed;
 			} else {
@@ -137,7 +168,12 @@ namespace MessageReader.Android
 		protected override void VisitTnefPart (TnefPart entity)
 		{
 			// extract any attachments in the MS-TNEF part
-			attachments.AddRange (entity.ExtractAttachments ());
+			using (var tnef = entity.LoadTnefMessage ()) {
+				// the converted message (and its attachments) outlives the TnefMessage
+				var result = tnef.ConvertToMime ();
+
+				attachments.AddRange (result.Message.Attachments);
+			}
 		}
 
 		protected override void VisitMessagePart (MessagePart entity)

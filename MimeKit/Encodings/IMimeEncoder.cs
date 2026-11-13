@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,7 @@ namespace MimeKit.Encodings {
 	public interface IMimeEncoder
 	{
 		/// <summary>
-		/// Gets the encoding.
+		/// Get the encoding.
 		/// </summary>
 		/// <remarks>
 		/// Gets the encoding that the encoder supports.
@@ -52,21 +52,24 @@ namespace MimeKit.Encodings {
 		IMimeEncoder Clone ();
 
 		/// <summary>
-		/// Estimates the length of the output.
+		/// Estimate the length of the output.
 		/// </summary>
 		/// <remarks>
 		/// Estimates the number of bytes needed to encode the specified number of input bytes.
 		/// </remarks>
 		/// <returns>The estimated output length.</returns>
 		/// <param name="inputLength">The input length.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// The estimated output length is too large to be represented as an <see cref="System.Int32"/>.
+		/// </exception>
 		int EstimateOutputLength (int inputLength);
 
 		/// <summary>
-		/// Encodes the specified input into the output buffer.
+		/// Encode the specified input into the output buffer.
 		/// </summary>
 		/// <remarks>
 		/// <para>Encodes the specified input into the output buffer.</para>
-		/// <para>The output buffer should be large enough to hold all of the
+		/// <para>The output buffer should be large enough to hold all the
 		/// encoded input. For estimating the size needed for the output buffer,
 		/// see <see cref="EstimateOutputLength"/>.</para>
 		/// </remarks>
@@ -76,9 +79,9 @@ namespace MimeKit.Encodings {
 		/// <param name="length">The length of the input buffer.</param>
 		/// <param name="output">The output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="input"/> is <c>null</c>.</para>
+		/// <para><paramref name="input"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="output"/> is <c>null</c>.</para>
+		/// <para><paramref name="output"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -92,11 +95,11 @@ namespace MimeKit.Encodings {
 		int Encode (byte[] input, int startIndex, int length, byte[] output);
 
 		/// <summary>
-		/// Encodes the specified input into the output buffer, flushing any internal buffer state as well.
+		/// Encode the specified input into the output buffer, flushing any internal buffer state as well.
 		/// </summary>
 		/// <remarks>
-		/// <para>Encodes the specified input into the output buffer, flusing any internal state as well.</para>
-		/// <para>The output buffer should be large enough to hold all of the
+		/// <para>Encodes the specified input into the output buffer, flushing any internal state as well.</para>
+		/// <para>The output buffer should be large enough to hold all the
 		/// encoded input. For estimating the size needed for the output buffer,
 		/// see <see cref="EstimateOutputLength"/>.</para>
 		/// </remarks>
@@ -106,9 +109,9 @@ namespace MimeKit.Encodings {
 		/// <param name="length">The length of the input buffer.</param>
 		/// <param name="output">The output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="input"/> is <c>null</c>.</para>
+		/// <para><paramref name="input"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="output"/> is <c>null</c>.</para>
+		/// <para><paramref name="output"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -122,7 +125,7 @@ namespace MimeKit.Encodings {
 		int Flush (byte[] input, int startIndex, int length, byte[] output);
 
 		/// <summary>
-		/// Resets the encoder.
+		/// Reset the encoder.
 		/// </summary>
 		/// <remarks>
 		/// Resets the state of the encoder.

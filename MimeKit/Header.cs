@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,10 @@
 
 using System;
 using System.Text;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 using MimeKit.Utils;
 using MimeKit.Cryptography;
@@ -38,9 +41,13 @@ namespace MimeKit {
 	/// <remarks>
 	/// Represents a single header field and value pair.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\HeaderExamples.cs" region="EnumerateHeaders"/>
+	/// </example>
 	public class Header
 	{
 		internal static readonly byte[] Colon = { (byte) ':' };
+		static readonly char[] WhiteSpace = { ' ', '\t', '\r', '\n' };
 		internal readonly ParserOptions Options;
 
 		// cached FormatOptions that change the way the header is formatted
@@ -51,7 +58,7 @@ namespace MimeKit {
 
 		readonly byte[] rawField;
 		bool explicitRawValue;
-		string textValue;
+		string? textValue;
 		byte[] rawValue;
 
 		/// <summary>
@@ -67,22 +74,22 @@ namespace MimeKit {
 		/// <param name="id">The header identifier.</param>
 		/// <param name="value">The value of the header.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="encoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="encoding"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="id"/> is not a valid <see cref="HeaderId"/>.
 		/// </exception>
 		public Header (Encoding encoding, HeaderId id, string value)
 		{
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
 			if (id == HeaderId.Unknown)
 				throw new ArgumentOutOfRangeException (nameof (id));
 
-			if (value == null)
+			if (value is null)
 				throw new ArgumentNullException (nameof (value));
 
 			Options = ParserOptions.Default.Clone ();
@@ -106,9 +113,9 @@ namespace MimeKit {
 		/// <param name="id">The header identifier.</param>
 		/// <param name="value">The value of the header.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="charset"/> is <c>null</c>.</para>
+		/// <para><paramref name="charset"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="id"/> is not a valid <see cref="HeaderId"/>.
@@ -118,13 +125,13 @@ namespace MimeKit {
 		/// </exception>
 		public Header (string charset, HeaderId id, string value)
 		{
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
 			if (id == HeaderId.Unknown)
 				throw new ArgumentOutOfRangeException (nameof (id));
 
-			if (value == null)
+			if (value is null)
 				throw new ArgumentNullException (nameof (value));
 
 			var encoding = CharsetUtils.GetEncoding (charset);
@@ -146,13 +153,27 @@ namespace MimeKit {
 		/// <param name="id">The header identifier.</param>
 		/// <param name="value">The value of the header.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="id"/> is not a valid <see cref="HeaderId"/>.
 		/// </exception>
 		public Header (HeaderId id, string value) : this (Encoding.UTF8, id, value)
 		{
+		}
+
+		static void ValidateFieldName (string field)
+		{
+			if (field is null)
+				throw new ArgumentNullException (nameof (field));
+
+			if (field.Length == 0)
+				throw new ArgumentException ("Header field names are not allowed to be empty.", nameof (field));
+
+			for (int i = 0; i < field.Length; i++) {
+				if (field[i] >= 127 || !IsFieldText ((byte) field[i]))
+					throw new ArgumentException ("Illegal characters in header field name.", nameof (field));
+			}
 		}
 
 		/// <summary>
@@ -168,32 +189,23 @@ namespace MimeKit {
 		/// <param name="field">The name of the header field.</param>
 		/// <param name="value">The value of the header.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="encoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="encoding"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="field"/> is <c>null</c>.</para>
+		/// <para><paramref name="field"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// The <paramref name="field"/> contains illegal characters.
 		/// </exception>
 		public Header (Encoding encoding, string field, string value)
 		{
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
-			if (field == null)
-				throw new ArgumentNullException (nameof (field));
+			ValidateFieldName (field);
 
-			if (field.Length == 0)
-				throw new ArgumentException ("Header field names are not allowed to be empty.", nameof (field));
-
-			for (int i = 0; i < field.Length; i++) {
-				if (field[i] >= 127 || !IsAsciiAtom ((byte) field[i]))
-					throw new ArgumentException ("Illegal characters in header field name.", nameof (field));
-			}
-
-			if (value == null)
+			if (value is null)
 				throw new ArgumentNullException (nameof (value));
 
 			Options = ParserOptions.Default.Clone ();
@@ -217,11 +229,11 @@ namespace MimeKit {
 		/// <param name="field">The name of the header field.</param>
 		/// <param name="value">The value of the header.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="charset"/> is <c>null</c>.</para>
+		/// <para><paramref name="charset"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="field"/> is <c>null</c>.</para>
+		/// <para><paramref name="field"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// The <paramref name="field"/> contains illegal characters.
@@ -231,21 +243,12 @@ namespace MimeKit {
 		/// </exception>
 		public Header (string charset, string field, string value)
 		{
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
-			if (field == null)
-				throw new ArgumentNullException (nameof (field));
+			ValidateFieldName (field);
 
-			if (field.Length == 0)
-				throw new ArgumentException ("Header field names are not allowed to be empty.", nameof (field));
-
-			for (int i = 0; i < field.Length; i++) {
-				if (field[i] >= 127 || !IsAsciiAtom ((byte) field[i]))
-					throw new ArgumentException ("Illegal characters in header field name.", nameof (field));
-			}
-
-			if (value == null)
+			if (value is null)
 				throw new ArgumentNullException (nameof (value));
 
 			var encoding = CharsetUtils.GetEncoding (charset);
@@ -267,9 +270,9 @@ namespace MimeKit {
 		/// <param name="field">The name of the header field.</param>
 		/// <param name="value">The value of the header.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="field"/> is <c>null</c>.</para>
+		/// <para><paramref name="field"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// The <paramref name="field"/> contains illegal characters.
@@ -309,11 +312,51 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="options">The parser options used.</param>
 		/// <param name="field">The raw header field.</param>
+		/// <param name="fieldNameLength">The length of the field name (not including trailing whitespace).</param>
 		/// <param name="value">The raw value of the header.</param>
-		/// <param name="invalid"><c>true</c> if the header field is invalid; othereise, <c>false</c>.</param>
+		/// <param name="invalid"><see langword="true" /> if the header field is invalid; otherwise, <see langword="false" />.</param>
+#if NET5_0_OR_GREATER
+		[SkipLocalsInit]
+#endif
+		internal protected Header (ParserOptions options, byte[] field, int fieldNameLength, byte[] value, bool invalid)
+		{
+			Span<char> chars = fieldNameLength <= 32
+				? stackalloc char[32]
+				: new char[fieldNameLength];
+
+			for (int i = 0; i < fieldNameLength; i++)
+				chars[i] = (char) field[i];
+
+			Options = options;
+			rawField = field;
+			rawValue = value;
+
+			Field = chars.Slice (0, fieldNameLength).ToString ();
+			Id = Field.ToHeaderId ();
+			IsInvalid = invalid;
+		}
+
+		/// <summary>
+		/// Initialize a new instance of the <see cref="Header"/> class.
+		/// </summary>
+		/// <remarks>
+		/// <para>Creates a new message or entity header with the specified raw values.</para>
+		/// <para>This constructor is used by the
+		/// <a href="Overload_MimeKit_Header_TryParse.htm">TryParse</a> methods.</para>
+		/// </remarks>
+		/// <param name="options">The parser options used.</param>
+		/// <param name="field">The raw header field.</param>
+		/// <param name="value">The raw value of the header.</param>
+		/// <param name="invalid"><see langword="true" /> if the header field is invalid; otherwise, <see langword="false" />.</param>
+#if NET5_0_OR_GREATER
+		[SkipLocalsInit]
+#endif
 		internal protected Header (ParserOptions options, byte[] field, byte[] value, bool invalid)
 		{
-			var chars = new char[field.Length];
+			Span<char> chars = field.Length <= 32
+				? stackalloc char[32]
+				: new char[field.Length];
+
 			int count = 0;
 
 			while (count < field.Length && (invalid || !field[count].IsBlank ())) {
@@ -325,7 +368,7 @@ namespace MimeKit {
 			rawField = field;
 			rawValue = value;
 
-			Field = new string (chars, 0, count);
+			Field = chars.Slice (0, count).ToString ();
 			Id = Field.ToHeaderId ();
 			IsInvalid = invalid;
 		}
@@ -360,19 +403,17 @@ namespace MimeKit {
 		/// <returns>A copy of the header with its current state.</returns>
 		public Header Clone ()
 		{
-			var header = new Header (Options, Id, Field, rawField, rawValue) {
+			return new Header (Options, Id, Field, rawField, rawValue) {
 				explicitRawValue = explicitRawValue,
-				IsInvalid = IsInvalid
+				IsInvalid = IsInvalid,
+
+				// if the textValue has already been calculated, set it on the cloned header as well.
+				textValue = textValue
 			};
-
-			// if the textValue has already been calculated, set it on the cloned header as well.
-			header.textValue = textValue;
-
-			return header;
 		}
 
 		/// <summary>
-		/// Gets the stream offset of the beginning of the header.
+		/// Get the stream offset of the beginning of the header.
 		/// </summary>
 		/// <remarks>
 		/// If the offset is set, it refers to the byte offset where it
@@ -384,7 +425,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets the name of the header field.
+		/// Get the name of the header field.
 		/// </summary>
 		/// <remarks>
 		/// Represents the field name of the header.
@@ -395,7 +436,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets the header identifier.
+		/// Get the header identifier.
 		/// </summary>
 		/// <remarks>
 		/// This property is mainly used for switch-statements for performance reasons.
@@ -409,8 +450,18 @@ namespace MimeKit {
 			get; private set;
 		}
 
+		// Note: All of the Content-* HeaderId values are contiguous, so a range check is far cheaper
+		// than a case-insensitive string comparison. Only fall back to comparing the field name when
+		// the header is not one that MimeKit knows about.
+		internal bool IsContentHeader {
+			get {
+				return (Id >= HeaderId.ContentAlternative && Id <= HeaderId.ContentType) ||
+					(Id == HeaderId.Unknown && Field.StartsWith ("Content-", StringComparison.OrdinalIgnoreCase));
+			}
+		}
+
 		/// <summary>
-		/// Gets the raw field name of the header.
+		/// Get the raw field name of the header.
 		/// </summary>
 		/// <remarks>
 		/// Contains the raw field name of the header.
@@ -421,7 +472,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets the raw value of the header.
+		/// Get the raw value of the header.
 		/// </summary>
 		/// <remarks>
 		/// Contains the raw value of the header, before any decoding or charset conversion.
@@ -432,19 +483,18 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets or sets the header value.
+		/// Get or sets the header value.
 		/// </summary>
 		/// <remarks>
 		/// Represents the decoded header value and is suitable for displaying to the user.
 		/// </remarks>
 		/// <value>The header value.</value>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
 		public string Value {
 			get {
-				if (textValue == null)
-					textValue = Unfold (Rfc2047.DecodeText (Options, rawValue));
+				textValue ??= Unfold (Rfc2047.DecodeText (Options, rawValue));
 
 				return textValue;
 			}
@@ -454,7 +504,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets the header value using the specified character encoding.
+		/// Get the header value using the specified character encoding.
 		/// </summary>
 		/// <remarks>
 		/// <para>If the raw header value does not properly encode non-ASCII text, the decoder
@@ -468,7 +518,7 @@ namespace MimeKit {
 		/// <param name="encoding">The character encoding to use as a fallback.</param>
 		public string GetValue (Encoding encoding)
 		{
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
 			var options = Options.Clone ();
@@ -478,7 +528,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets the header value using the specified charset.
+		/// Get the header value using the specified charset.
 		/// </summary>
 		/// <remarks>
 		/// <para>If the raw header value does not properly encode non-ASCII text, the decoder
@@ -488,11 +538,14 @@ namespace MimeKit {
 		/// <para>By using this method, the client is able to override the fallback charset
 		/// on a per-header basis.</para>
 		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\HeaderExamples.cs" region="DecodeHeaderValue"/>
+		/// </example>
 		/// <returns>The value.</returns>
 		/// <param name="charset">The charset to use as a fallback.</param>
 		public string GetValue (string charset)
 		{
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
 			var encoding = CharsetUtils.GetEncoding (charset);
@@ -500,14 +553,28 @@ namespace MimeKit {
 			return GetValue (encoding);
 		}
 
-		static byte[] EncodeAddressHeader (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
+		internal static byte[] ReformatAddressHeader (ParserOptions options, FormatOptions format, string field, byte[] rawValue)
 		{
+			if (!InternetAddressList.TryParse (options, rawValue, 0, rawValue.Length, out var list))
+				return rawValue;
+
+			var encoding = format.International ? Encoding.UTF8 : Encoding.ASCII;
 			var encoded = new StringBuilder (" ");
 			int lineLength = field.Length + 2;
-			InternetAddressList list;
 
-			if (!InternetAddressList.TryParse (options, value, out list))
-				return (byte[]) format.NewLineBytes.Clone ();
+			list.Encode (format, encoded, true, ref lineLength);
+			encoded.Append (format.NewLine);
+
+			return encoding.GetBytes (encoded.ToString ());
+		}
+
+		static byte[] EncodeAddressHeader (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
+		{
+			if (!InternetAddressList.TryParse (options, value, out var list))
+				return EncodeUnstructuredHeader (options, format, encoding, field, value);
+
+			var encoded = new StringBuilder (" ");
+			int lineLength = field.Length + 2;
 
 			list.Encode (format, encoded, true, ref lineLength);
 			encoded.Append (format.NewLine);
@@ -523,94 +590,20 @@ namespace MimeKit {
 			return encoding.GetBytes (" " + value + format.NewLine);
 		}
 
-		delegate void ReceivedTokenSkipValueFunc (byte[] text, ref int index);
+#if NET8_0_OR_GREATER
+		static readonly SearchValues<char> ReceivedEndOfTokenSentinels = SearchValues.Create (new char[] { '\t', '\r', '\n', ' ', '(', ';' });
+#else
+		static ReadOnlySpan<char> ReceivedEndOfTokenSentinels => new char[] { '\t', '\r', '\n', ' ', '(', ';' };
+#endif
 
-		static void ReceivedTokenSkipAtom (byte[] text, ref int index)
+		static void ReceivedSkipToken (string value, ref int index)
 		{
-			if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, text.Length, false) || index >= text.Length)
-				return;
+			var span = value.AsSpan (index);
+			int endOfValue = span.IndexOfAny (ReceivedEndOfTokenSentinels);
+			int length = endOfValue == -1 ? span.Length : endOfValue;
 
-			ParseUtils.SkipAtom (text, ref index, text.Length);
+			index += length;
 		}
-
-		static void ReceivedTokenSkipDomain (byte[] text, ref int index)
-		{
-			if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, text.Length, false))
-				return;
-
-			if (text[index] == (byte) '[') {
-				while (index < text.Length && text[index] != (byte) ']')
-					index++;
-
-				if (index < text.Length)
-					index++;
-
-				return;
-			}
-
-			while (ParseUtils.SkipAtom (text, ref index, text.Length) && index < text.Length && text[index] == (byte) '.')
-				index++;
-		}
-
-		static readonly byte[] ReceivedAddrSpecSentinels = { (byte) '>', (byte) ';' };
-		static readonly byte[] ReceivedMessageIdSentinels = { (byte) '>' };
-
-		static void ReceivedTokenSkipAddress (byte[] text, ref int index)
-		{
-			string addrspec;
-			int at;
-
-			if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, text.Length, false) || index >= text.Length)
-				return;
-
-			if (text[index] == (byte) '<')
-				index++;
-
-			InternetAddress.TryParseAddrspec (text, ref index, text.Length, ReceivedAddrSpecSentinels, RfcComplianceMode.Strict, false, out addrspec, out at);
-
-			if (index < text.Length && text[index] == (byte) '>')
-				index++;
-		}
-
-		static void ReceivedTokenSkipMessageId (byte[] text, ref int index)
-		{
-			string addrspec;
-			int at;
-
-			if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, text.Length, false) || index >= text.Length)
-				return;
-
-			if (text[index] == (byte) '<') {
-				index++;
-
-				InternetAddress.TryParseAddrspec (text, ref index, text.Length, ReceivedMessageIdSentinels, RfcComplianceMode.Strict, false, out addrspec, out at);
-
-				if (index < text.Length && text[index] == (byte) '>')
-					index++;
-			} else {
-				ParseUtils.SkipAtom (text, ref index, text.Length);
-			}
-		}
-
-		struct ReceivedToken {
-			public readonly ReceivedTokenSkipValueFunc Skip;
-			public readonly string Atom;
-
-			public ReceivedToken (string atom, ReceivedTokenSkipValueFunc skip)
-			{
-				Atom = atom;
-				Skip = skip;
-			}
-		}
-
-		static readonly ReceivedToken[] ReceivedTokens = {
-			new ReceivedToken ("from", ReceivedTokenSkipDomain),
-			new ReceivedToken ("by", ReceivedTokenSkipDomain),
-			new ReceivedToken ("via", ReceivedTokenSkipDomain),
-			new ReceivedToken ("with", ReceivedTokenSkipAtom),
-			new ReceivedToken ("id", ReceivedTokenSkipMessageId),
-			new ReceivedToken ("for", ReceivedTokenSkipAddress),
-		};
 
 		class ReceivedTokenValue
 		{
@@ -624,75 +617,98 @@ namespace MimeKit {
 			}
 		}
 
+		static int TrimEnd (string value, int index)
+		{
+			while (index > 0 && ByteExtensions.Whitespace.IndexOf (value[index - 1]) != -1)
+				index--;
+
+			return index;
+		}
+
 		static byte[] EncodeReceivedHeader (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
 		{
 			var tokens = new List<ReceivedTokenValue> ();
-			var rawValue = encoding.GetBytes (value);
-			var encoded = new StringBuilder ();
-			int lineLength = field.Length + 1;
-			bool date = false;
-			int index = 0;
-			int count = 0;
+			int startIndex, endIndex, index = 0;
 
-			while (index < rawValue.Length) {
-				ReceivedTokenValue token = null;
-				int startIndex = index;
+			// tokenize any preliminary comments as independent tokens
+			while (index < value.Length) {
+				ParseUtils.SkipWhiteSpace (value, ref index, value.Length);
 
-				if (!ParseUtils.SkipCommentsAndWhiteSpace (rawValue, ref index, rawValue.Length, false) || index >= rawValue.Length) {
-					tokens.Add (new ReceivedTokenValue (startIndex, index - startIndex));
+				// break out of the loop if we've reached the end of the raw value or if the next token is not a comment
+				if (index >= value.Length || value[index] != '(')
+					break;
+
+				startIndex = index;
+
+				ParseUtils.SkipComment (value, ref index, value.Length);
+
+				tokens.Add (new ReceivedTokenValue (startIndex, index - startIndex));
+			}
+
+			// tokenize the clause keywords and values, stopping at ';'
+			while (index < value.Length && value[index] != ';') {
+				// Note: we tokenize the clause keyword, value and any comments that belong to it as a single token
+				startIndex = index;
+
+				// skip over the clause keyword
+				ReceivedSkipToken (value, ref index);
+
+				// skip any comments and/or whitespace that precede the value
+				ParseUtils.SkipCommentsAndWhiteSpace (value, ref index, value.Length, false);
+
+				// check for ';' in case the clause is missing a value
+				if (index >= value.Length || value[index] == ';') {
+					// trim any trailing whitespace from the clause
+					endIndex = TrimEnd (value, index);
+
+					// add the clause keyword and any comments that belong to it as a token
+					tokens.Add (new ReceivedTokenValue (startIndex, endIndex - startIndex));
 					break;
 				}
 
-				while (index < rawValue.Length && !rawValue[index].IsWhitespace ())
-					index++;
+				// skip the value for the clause
+				ReceivedSkipToken (value, ref index);
 
-				var atom = encoding.GetString (rawValue, startIndex, index - startIndex);
+				// skip any comments and/or whitespace that follow the value
+				ParseUtils.SkipCommentsAndWhiteSpace (value, ref index, value.Length, false);
 
-				for (int i = 0; i < ReceivedTokens.Length; i++) {
-					if (atom == ReceivedTokens[i].Atom) {
-						ReceivedTokens[i].Skip (rawValue, ref index);
+				// trim any trailing whitespace from the clause
+				endIndex = TrimEnd (value, index);
 
-						if (ParseUtils.SkipCommentsAndWhiteSpace (rawValue, ref index, rawValue.Length, false)) {
-							if (index < rawValue.Length && rawValue[index] == (byte) ';') {
-								date = true;
-								index++;
-							}
-						}
+				// add the entire clause as a token
+				tokens.Add (new ReceivedTokenValue (startIndex, endIndex - startIndex));
+			}
 
-						token = new ReceivedTokenValue (startIndex, index - startIndex);
-						break;
-					}
-				}
+			if (index < value.Length && value[index] == ';') {
+				// tokenize the ';' as its own token
+				tokens.Add (new ReceivedTokenValue (index, 1));
+				index++;
 
-				if (token == null) {
-					if (ParseUtils.SkipCommentsAndWhiteSpace (rawValue, ref index, rawValue.Length, false)) {
-						while (index < rawValue.Length && !rawValue[index].IsWhitespace ())
-							index++;
-					}
+				// skip any whitespace between the ';' and the date token
+				ParseUtils.SkipWhiteSpace (value, ref index, value.Length);
 
-					token = new ReceivedTokenValue (startIndex, index - startIndex);
-				}
+				if (index < value.Length) {
+					// trim any trailing whitespace from the date-time token
+					endIndex = TrimEnd (value, value.Length);
 
-				tokens.Add (token);
-
-				ParseUtils.SkipWhiteSpace (rawValue, ref index, rawValue.Length);
-
-				if (date && index < rawValue.Length) {
-					// slurp up the date (the final token)
-					tokens.Add (new ReceivedTokenValue (index, rawValue.Length - index));
-					break;
+					// treat the remainder of the header value as a single token (the date-time token contains whitespace)
+					tokens.Add (new ReceivedTokenValue (index, endIndex - index));
 				}
 			}
 
+			using var encoded = new ValueStringBuilder (value.Length);
+			int lineLength = field.Length + 1;
+			int count = 0;
+
 			foreach (var token in tokens) {
-				var text = encoding.GetString (rawValue, token.StartIndex, token.Length).TrimEnd ();
+				var text = value.Substring (token.StartIndex, token.Length);
 
 				if (count > 0 && lineLength + text.Length + 1 > format.MaxLineLength) {
 					encoded.Append (format.NewLine);
 					encoded.Append ('\t');
 					lineLength = 1;
 					count = 0;
-				} else {
+				} else if (count == 0 || text != ";") {
 					encoded.Append (' ');
 					lineLength++;
 				}
@@ -711,7 +727,7 @@ namespace MimeKit {
 		{
 			var buffer = Encoding.UTF8.GetBytes (value);
 
-			if (!AuthenticationResults.TryParse (buffer, out AuthenticationResults authres))
+			if (!AuthenticationResults.TryParse (buffer, out AuthenticationResults? authres))
 				return EncodeUnstructuredHeader (options, format, encoding, field, value);
 
 			var encoded = new StringBuilder ();
@@ -722,7 +738,7 @@ namespace MimeKit {
 			return encoding.GetBytes (encoded.ToString ());
 		}
 
-		static void EncodeDkimLongValue (FormatOptions format, StringBuilder encoded, ref int lineLength, string value)
+		static void EncodeDkimLongValue (FormatOptions format, ref ValueStringBuilder encoded, ref int lineLength, ReadOnlySpan<char> value)
 		{
 			int startIndex = 0;
 
@@ -730,7 +746,7 @@ namespace MimeKit {
 				int lineLeft = format.MaxLineLength - lineLength;
 				int index = Math.Min (startIndex + lineLeft, value.Length);
 
-				encoded.Append (value.Substring (startIndex, index - startIndex));
+				encoded.Append (value.Slice (startIndex, index - startIndex));
 				lineLength += (index - startIndex);
 
 				if (index == value.Length)
@@ -744,47 +760,41 @@ namespace MimeKit {
 			} while (true);
 		}
 
-		static void EncodeDkimHeaderList (FormatOptions format, StringBuilder encoded, ref int lineLength, string value, char delim)
+		static void EncodeDkimHeaderList (FormatOptions format, ref ValueStringBuilder encoded, ref int lineLength, ReadOnlySpan<char> value, char delim)
 		{
-			var tokens = value.Split (delim);
+			int i = 0;
 
-			for (int i = 0; i < tokens.Length; i++) {
+			foreach (var token in value.Tokenize (delim)) {
 				if (i > 0) {
 					encoded.Append (delim);
 					lineLength++;
 				}
 
-				if (lineLength + tokens[i].Length + 1 > format.MaxLineLength) {
+				if (lineLength + token.Length + 1 > format.MaxLineLength) {
 					encoded.Append (format.NewLine);
 					encoded.Append ('\t');
 					lineLength = 1;
-
-					if (tokens[i].Length + 1 > format.MaxLineLength) {
-						EncodeDkimLongValue (format, encoded, ref lineLength, tokens[i]);
-					} else {
-						lineLength += tokens[i].Length;
-						encoded.Append (tokens[i]);
-					}
-				} else {
-					lineLength += tokens[i].Length;
-					encoded.Append (tokens[i]);
 				}
+
+				lineLength += token.Length;
+				encoded.Append (token);
+				i++;
 			}
 		}
 
 		static byte[] EncodeDkimOrArcSignatureHeader (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
 		{
-			var encoded = new StringBuilder ();
+			var encoded = new ValueStringBuilder (value.Length);
 			int lineLength = field.Length + 1;
-			var token = new StringBuilder ();
 			int index = 0;
 
 			while (index < value.Length) {
+				using var token = new ValueStringBuilder (128);
+
 				while (index < value.Length && IsWhiteSpace (value[index]))
 					index++;
 
 				int startIndex = index;
-				string name;
 
 				while (index < value.Length && value[index] != '=') {
 					if (!IsWhiteSpace (value[index]))
@@ -792,7 +802,7 @@ namespace MimeKit {
 					index++;
 				}
 
-				name = value.Substring (startIndex, index - startIndex);
+				var name = value.AsSpan (startIndex, index - startIndex);
 
 				while (index < value.Length && value[index] != ';') {
 					if (!IsWhiteSpace (value[index]))
@@ -805,7 +815,7 @@ namespace MimeKit {
 					index++;
 				}
 
-				if (lineLength + token.Length + 1 > format.MaxLineLength || name == "bh" || name == "b") {
+				if (lineLength + token.Length + 1 > format.MaxLineLength || name.SequenceEqual ("bh".AsSpan ()) || name.SequenceEqual ("b".AsSpan ())) {
 					encoded.Append (format.NewLine);
 					encoded.Append ('\t');
 					lineLength = 1;
@@ -815,23 +825,64 @@ namespace MimeKit {
 				}
 
 				if (token.Length > format.MaxLineLength) {
-					switch (name) {
-					case "z":
-						EncodeDkimHeaderList (format, encoded, ref lineLength, token.ToString (), '|');
-						break;
-					case "h":
-						EncodeDkimHeaderList (format, encoded, ref lineLength, token.ToString (), ':');
-						break;
-					default:
-						EncodeDkimLongValue (format, encoded, ref lineLength, token.ToString ());
-						break;
+					if (name.SequenceEqual ("z".AsSpan ())) {
+						EncodeDkimHeaderList (format, ref encoded, ref lineLength, token.AsSpan (), '|');
+					} else if (name.SequenceEqual ("h".AsSpan ())) {
+						EncodeDkimHeaderList (format, ref encoded, ref lineLength, token.AsSpan (), ':');
+					} else {
+						EncodeDkimLongValue (format, ref encoded, ref lineLength, token.AsSpan ());
 					}
 				} else {
-					encoded.Append (token.ToString ());
+					encoded.Append (token.AsSpan ());
 					lineLength += token.Length;
 				}
+			}
 
-				token.Length = 0;
+			encoded.Append (format.NewLine);
+
+			return encoding.GetBytes (encoded.ToString ());
+		}
+
+		static byte[] EncodeDispositionNotificationOptions (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
+		{
+			using var encoded = new ValueStringBuilder (value.Length);
+			int lineLength = field.Length + 1;
+			int index = 0;
+
+			while (index < value.Length) {
+				using var parameter = new ValueStringBuilder (128);
+
+				while (index < value.Length && IsWhiteSpace (value[index]))
+					index++;
+
+				while (index < value.Length && value[index] != '=') {
+					if (!IsWhiteSpace (value[index]))
+						parameter.Append (value[index]);
+					index++;
+				}
+
+				while (index < value.Length && value[index] != ';') {
+					if (!IsWhiteSpace (value[index]))
+						parameter.Append (value[index]);
+					index++;
+				}
+
+				if (index < value.Length && value[index] == ';') {
+					parameter.Append (';');
+					index++;
+				}
+
+				if (lineLength + parameter.Length + 1 > format.MaxLineLength && encoded.Length > 0) {
+					encoded.Append (format.NewLine);
+					encoded.Append ('\t');
+					lineLength = 1;
+				} else {
+					encoded.Append (' ');
+					lineLength++;
+				}
+
+				encoded.Append (parameter.AsSpan ());
+				lineLength += parameter.Length;
 			}
 
 			encoded.Append (format.NewLine);
@@ -841,7 +892,7 @@ namespace MimeKit {
 
 		static byte[] EncodeReferencesHeader (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
 		{
-			var encoded = new StringBuilder ();
+			using var encoded = new ValueStringBuilder (value.Length);
 			int lineLength = field.Length + 1;
 			int count = 0;
 
@@ -856,7 +907,9 @@ namespace MimeKit {
 					lineLength++;
 				}
 
-				encoded.Append ('<').Append (reference).Append ('>');
+				encoded.Append ('<');
+				encoded.Append (reference);
+				encoded.Append ('>');
 				lineLength += reference.Length + 2;
 				count++;
 			}
@@ -868,10 +921,37 @@ namespace MimeKit {
 
 		static bool IsWhiteSpace (char c)
 		{
-			return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+			return ParseUtils.IsWhiteSpace (c);
 		}
 
-		static IEnumerable<string> TokenizeText (string text)
+		readonly struct Word
+		{
+			readonly string text;
+			readonly int startIndex;
+			readonly int length;
+
+			public Word (string text, int startIndex, int length)
+			{
+				this.startIndex = startIndex;
+				this.length = length;
+				this.text = text;
+			}
+
+			public int Length => length;
+
+			public char this[int index] {
+				get {
+					return text[startIndex + index];
+				}
+			}
+
+			public ReadOnlySpan<char> AsSpan ()
+			{
+				return text.AsSpan (startIndex, length);
+			}
+		}
+
+		static IEnumerable<Word> TokenizeText (string text)
 		{
 			int index = 0;
 
@@ -881,7 +961,8 @@ namespace MimeKit {
 				while (index < text.Length && !IsWhiteSpace (text[index]))
 					index++;
 
-				yield return text.Substring (startIndex, index - startIndex);
+				if (index > startIndex)
+					yield return new Word (text, startIndex, index - startIndex);
 
 				if (index == text.Length)
 					break;
@@ -891,43 +972,7 @@ namespace MimeKit {
 				while (index < text.Length && IsWhiteSpace (text[index]))
 					index++;
 
-				yield return text.Substring (startIndex, index - startIndex);
-			}
-
-			yield break;
-		}
-
-		class BrokenWord
-		{
-			public readonly char[] Text;
-			public readonly int StartIndex;
-			public readonly int Length;
-
-			public BrokenWord (char[] text, int startIndex, int length)
-			{
-				StartIndex = startIndex;
-				Length = length;
-				Text = text;
-			}
-		}
-
-		static IEnumerable<BrokenWord> WordBreak (FormatOptions format, string word, int lineLength)
-		{
-			var chars = word.ToCharArray ();
-			int startIndex = 0;
-
-			lineLength = Math.Max (lineLength, 1);
-
-			while (startIndex < word.Length) {
-				int length = Math.Min (format.MaxLineLength - lineLength, word.Length - startIndex);
-
-				if (char.IsSurrogatePair (word, startIndex + length - 1))
-					length--;
-
-				yield return new BrokenWord (chars, startIndex, length);
-
-				startIndex += length;
-				lineLength = 1;
+				yield return new Word (text, startIndex, index - startIndex);
 			}
 
 			yield break;
@@ -935,9 +980,9 @@ namespace MimeKit {
 
 		internal static string Fold (FormatOptions format, string field, string value)
 		{
-			var folded = new StringBuilder (value.Length);
+			using var folded = new ValueStringBuilder (value.Length);
 			int lineLength = field.Length + 2;
-			int lastLwsp = -1;
+			int lastLwsp = 0;
 
 			folded.Append (' ');
 
@@ -947,7 +992,7 @@ namespace MimeKit {
 				if (IsWhiteSpace (word[0])) {
 					if (lineLength + word.Length > format.MaxLineLength) {
 						for (int i = 0; i < word.Length; i++) {
-							if (lineLength > format.MaxLineLength) {
+							if (lineLength >= format.MaxLineLength) {
 								folded.Append (format.NewLine);
 								lineLength = 0;
 							}
@@ -957,7 +1002,7 @@ namespace MimeKit {
 						}
 					} else {
 						lineLength += word.Length;
-						folded.Append (word);
+						folded.Append (word.AsSpan ());
 					}
 
 					lastLwsp = folded.Length - 1;
@@ -970,26 +1015,30 @@ namespace MimeKit {
 					lastLwsp = -1;
 				}
 
-				if (word.Length > format.MaxLineLength) {
-					foreach (var broken in WordBreak (format, word, lineLength)) {
-						if (lineLength + broken.Length > format.MaxLineLength) {
-							folded.Append (format.NewLine);
-							folded.Append (' ');
-							lineLength = 1;
-						}
-
-						folded.Append (broken.Text, broken.StartIndex, broken.Length);
-						lineLength += broken.Length;
-					}
-				} else {
-					lineLength += word.Length;
-					folded.Append (word);
+				if (word.Length >= format.MaxLineLength) {
+					// Folding inside a word would insert whitespace into its decoded value.
+					// Encode the whole value so whitespace between adjacent encoded words is preserved.
+					var encoded = Rfc2047.EncodeText (format, CharsetUtils.UTF8, value);
+					return Encoding.UTF8.GetString (Rfc2047.FoldUnstructuredHeader (format, field, encoded));
 				}
+
+				folded.Append (word.AsSpan ());
+				lineLength += word.Length;
 			}
 
 			folded.Append (format.NewLine);
 
 			return folded.ToString ();
+		}
+
+		static byte[] ReformatContentDisposition (ParserOptions options, FormatOptions format, Encoding encoding, string field, byte[] rawValue)
+		{
+			if (!ContentDisposition.TryParse (options, rawValue, out var disposition))
+				return rawValue;
+
+			var encoded = disposition.Encode (format, encoding);
+
+			return Encoding.UTF8.GetBytes (encoded);
 		}
 
 		static byte[] EncodeContentDisposition (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
@@ -1000,12 +1049,185 @@ namespace MimeKit {
 			return Encoding.UTF8.GetBytes (encoded);
 		}
 
+		static byte[] ReformatContentType (ParserOptions options, FormatOptions format, Encoding encoding, string field, byte[] rawValue)
+		{
+			if (!ContentType.TryParse (options, rawValue, out var contentType))
+				return rawValue;
+
+			var encoded = contentType.Encode (format, encoding);
+
+			return Encoding.UTF8.GetBytes (encoded);
+		}
+
 		static byte[] EncodeContentType (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
 		{
 			var contentType = ContentType.Parse (options, value);
 			var encoded = contentType.Encode (format, encoding);
 
 			return Encoding.UTF8.GetBytes (encoded);
+		}
+
+		static void AppendWord (FormatOptions format, ref ValueStringBuilder builder, ref int lineLength, ReadOnlySpan<char> word)
+		{
+			if (lineLength + word.Length + 1 <= format.MaxLineLength) {
+				builder.Append (' ');
+				lineLength++;
+
+				builder.Append (word);
+				lineLength += word.Length;
+			} else if (word.Length + 1 <= format.MaxLineLength) {
+				builder.Append (format.NewLine);
+				builder.Append (' ');
+				builder.Append (word);
+				lineLength = word.Length + 1;
+			} else {
+				int remaining = word.Length;
+				int index = 0;
+
+				do {
+					int wordLength = Math.Min (remaining, format.MaxLineLength - (lineLength + 1));
+
+					builder.Append (' ');
+					lineLength++;
+
+					builder.Append (word.Slice (index, wordLength));
+					lineLength += wordLength;
+					remaining -= wordLength;
+					index += wordLength;
+
+					if (remaining == 0)
+						break;
+
+					builder.Append (format.NewLine);
+					lineLength = 0;
+				} while (true);
+			}
+		}
+
+		static void AppendComment (FormatOptions format, Encoding encoding, ref ValueStringBuilder builder, ref int lineLength, string value, int startIndex, int length)
+		{
+			ReadOnlySpan<char> comment;
+
+			if (!format.International) {
+				comment = Rfc2047.EncodeComment (format, encoding, value, startIndex + 1, length - 2).AsSpan ();
+			} else {
+				comment = value.AsSpan (startIndex, length);
+			}
+
+			// Try to fit the entire comment on a single line.
+			if (lineLength + comment.Length + 1 <= format.MaxLineLength) {
+				builder.Append (' ');
+				lineLength++;
+
+				builder.Append (comment);
+				lineLength += comment.Length;
+			} else if (comment.Length + 1 <= format.MaxLineLength) {
+				builder.Append (format.NewLine);
+				builder.Append (' ');
+				builder.Append (comment);
+				lineLength = comment.Length + 1;
+			} else {
+				// We'll need to split the comment over multiple lines.
+				int index = 0;
+
+				do {
+					// Try to split on words within the comment.
+					int wspIndex = comment.Slice (index).IndexOfAny (WhiteSpace.AsSpan ());
+					wspIndex = wspIndex != -1 ? index + wspIndex : comment.Length;
+
+					int wordLength = wspIndex - index;
+
+					AppendWord (format, ref builder, ref lineLength, comment.Slice (index, wordLength));
+					index = wspIndex;
+
+					if (index < comment.Length) {
+						// Skip over any whitespace (which will effectively compact it).
+						// Note: Since we know this is a comment, the very last char will be a ')', so it can never end with whitespace.
+						while (IsWhiteSpace (comment[index]))
+							index++;
+					}
+				} while (index < comment.Length);
+			}
+		}
+
+		static bool IsMailingListCommandSpecial (char c)
+		{
+			return c is '<' or '(' or ',';
+		}
+
+		static byte[] EncodeMailingListCommandHeader (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
+		{
+			var encoded = new ValueStringBuilder (value.Length);
+			int lineLength = field.Length + 1;
+			int index = 0;
+
+			while (index < value.Length) {
+				while (index < value.Length && IsWhiteSpace (value[index]))
+					index++;
+
+				if (index >= value.Length)
+					break;
+
+				int startIndex = index;
+
+				if (value[index] == '<') {
+					// url
+					while (index < value.Length && value[index] != '>')
+						index++;
+
+					if (index < value.Length) {
+						index++;
+
+						int urlLength = index - startIndex;
+
+						if (lineLength + urlLength + 1 < format.MaxLineLength) {
+							encoded.Append (' ');
+							lineLength++;
+
+							encoded.Append (value.AsSpan (startIndex, urlLength));
+							lineLength += urlLength;
+						} else {
+							// Do not break apart a URL that is not already broken.
+							encoded.Append (format.NewLine);
+							encoded.Append (' ');
+							lineLength = 1;
+
+							encoded.Append (value.AsSpan (startIndex, urlLength));
+							lineLength += urlLength;
+						}
+
+						continue;
+					}
+
+					// Fall through to handling this token as a normal word token.
+				} else if (value[index] == '(') {
+					// comment
+					if (ParseUtils.SkipComment (value, ref index, value.Length)) {
+						AppendComment (format, encoding, ref encoded, ref lineLength, value, startIndex, index - startIndex);
+						continue;
+					}
+
+					// Fall through to handling this token as a normal word token.
+				} else if (value[index] == ',') {
+					// Collapse multiple commas into a single comma.
+					while (index < value.Length && (value[index] == ',' || IsWhiteSpace (value[index])))
+						index++;
+
+					encoded.Append (',');
+					lineLength++;
+					continue;
+				}
+
+				// word
+				while (index < value.Length && !IsWhiteSpace (value[index]) && !IsMailingListCommandSpecial (value[index]))
+					index++;
+
+				AppendWord (format, ref encoded, ref lineLength, value.AsSpan (startIndex, index - startIndex));
+			}
+
+			encoded.Append (format.NewLine);
+
+			return encoding.GetBytes (encoded.ToString ());
 		}
 
 		static byte[] EncodeUnstructuredHeader (ParserOptions options, FormatOptions format, Encoding encoding, string field, string value)
@@ -1025,9 +1247,11 @@ namespace MimeKit {
 		/// Format the raw value of the header to conform with the specified formatting options.
 		/// </summary>
 		/// <remarks>
-		/// This method will called by the <a href="Overload_MimeKit_Header_SetValue.htm">SetValue</a>
-		/// methods and may also be conditionally called when the header is being written to a
-		/// <see cref="System.IO.Stream"/>.
+		/// <para>This method is called by the <a href="Overload_MimeKit_Header_SetValue.htm">SetValue</a>
+		/// methods.</para>
+		/// <para>This method should encode unicode characters according to the rules of rfc2047 (when
+		/// <see cref="FormatOptions.International"/> is <see langword="false" />) as well as properly folding the
+		/// value to conform with rfc5322.</para>
 		/// </remarks>
 		/// <param name="format">The formatting options.</param>
 		/// <param name="encoding">The character encoding to be used.</param>
@@ -1052,6 +1276,7 @@ namespace MimeKit {
 				return EncodeAddressHeader (Options, format, encoding, Field, value);
 			case HeaderId.Received:
 				return EncodeReceivedHeader (Options, format, encoding, Field, value);
+			case HeaderId.OriginalMessageId:
 			case HeaderId.ResentMessageId:
 			case HeaderId.InReplyTo:
 			case HeaderId.MessageId:
@@ -1063,6 +1288,8 @@ namespace MimeKit {
 				return EncodeContentDisposition (Options, format, encoding, Field, value);
 			case HeaderId.ContentType:
 				return EncodeContentType (Options, format, encoding, Field, value);
+			case HeaderId.DispositionNotificationOptions:
+				return EncodeDispositionNotificationOptions (Options, format, encoding, Field, value);
 			case HeaderId.ArcAuthenticationResults:
 			case HeaderId.AuthenticationResults:
 				return EncodeAuthenticationResultsHeader (Options, format, encoding, Field, value);
@@ -1070,6 +1297,13 @@ namespace MimeKit {
 			case HeaderId.ArcSeal:
 			case HeaderId.DkimSignature:
 				return EncodeDkimOrArcSignatureHeader (Options, format, encoding, Field, value);
+			case HeaderId.ListArchive:
+			case HeaderId.ListHelp:
+			case HeaderId.ListOwner:
+			case HeaderId.ListPost:
+			case HeaderId.ListSubscribe:
+			case HeaderId.ListUnsubscribe:
+				return EncodeMailingListCommandHeader (Options, format, encoding, Field, value);
 			default:
 				return EncodeUnstructuredHeader (Options, format, encoding, Field, value);
 			}
@@ -1078,18 +1312,66 @@ namespace MimeKit {
 		internal byte[] GetRawValue (FormatOptions format)
 		{
 			if (format.International && !explicitRawValue) {
-				if (textValue == null)
-					textValue = Unfold (Rfc2047.DecodeText (Options, rawValue));
-
-				// Note: if we're reformatting to be International, then charset doesn't matter.
-				return FormatRawValue (format, CharsetUtils.UTF8, textValue);
+				switch (Id) {
+				case HeaderId.DispositionNotificationTo:
+				case HeaderId.ResentReplyTo:
+				case HeaderId.ResentSender:
+				case HeaderId.ResentFrom:
+				case HeaderId.ResentBcc:
+				case HeaderId.ResentCc:
+				case HeaderId.ResentTo:
+				case HeaderId.ReplyTo:
+				case HeaderId.Sender:
+				case HeaderId.From:
+				case HeaderId.Bcc:
+				case HeaderId.Cc:
+				case HeaderId.To:
+					return ReformatAddressHeader (Options, format, Field, rawValue);
+				case HeaderId.Received:
+					// Note: Received headers should never be reformatted.
+					return rawValue;
+				case HeaderId.OriginalMessageId:
+				case HeaderId.ResentMessageId:
+				case HeaderId.InReplyTo:
+				case HeaderId.MessageId:
+				case HeaderId.ContentId:
+					// Note: No text that can be internationalized.
+					return rawValue;
+				case HeaderId.References:
+					// Note: No text that can be internationalized.
+					return rawValue;
+				case HeaderId.ContentDisposition:
+					return ReformatContentDisposition (Options, format, CharsetUtils.UTF8, Field, rawValue);
+				case HeaderId.ContentType:
+					return ReformatContentType (Options, format, CharsetUtils.UTF8, Field, rawValue);
+				case HeaderId.DispositionNotificationOptions:
+					return rawValue;
+				case HeaderId.ArcAuthenticationResults:
+				case HeaderId.AuthenticationResults:
+					// Note: No text that can be internationalized.
+					return rawValue;
+				case HeaderId.ArcMessageSignature:
+				case HeaderId.ArcSeal:
+				case HeaderId.DkimSignature:
+					// TODO: Is there any value in reformatting this for internationalized text?
+					return rawValue;
+				case HeaderId.ListArchive:
+				case HeaderId.ListHelp:
+				case HeaderId.ListOwner:
+				case HeaderId.ListPost:
+				case HeaderId.ListSubscribe:
+				case HeaderId.ListUnsubscribe:
+					return EncodeMailingListCommandHeader (Options, format, CharsetUtils.UTF8, Field, Value);
+				default:
+					return EncodeUnstructuredHeader (Options, format, CharsetUtils.UTF8, Field, Value);
+				}
 			}
 
 			return rawValue;
 		}
 
 		/// <summary>
-		/// Sets the header value using the specified formatting options and character encoding.
+		/// Ses the header value using the specified formatting options and character encoding.
 		/// </summary>
 		/// <remarks>
 		/// When a particular charset is desired for encoding the header value
@@ -1100,26 +1382,28 @@ namespace MimeKit {
 		/// <param name="encoding">A character encoding.</param>
 		/// <param name="value">The header value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="format"/> is <c>null</c>.</para>
+		/// <para><paramref name="format"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="encoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="encoding"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
+		[MemberNotNull (nameof (rawValue))]
 		public void SetValue (FormatOptions format, Encoding encoding, string value)
 		{
-			if (format == null)
+			if (format is null)
 				throw new ArgumentNullException (nameof (format));
 
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
-			if (value == null)
+			if (value is null)
 				throw new ArgumentNullException (nameof (value));
 
-			textValue = Unfold (value.Trim ());
+			textValue = Unfold (value);
 
 			rawValue = FormatRawValue (format, encoding, textValue);
+			explicitRawValue = false;
 
 			// cache the formatting options that change the way the header is formatted
 			//allowMixedHeaderCharsets = format.AllowMixedHeaderCharsets;
@@ -1131,7 +1415,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Sets the header value using the specified character encoding.
+		/// Set the header value using the specified character encoding.
 		/// </summary>
 		/// <remarks>
 		/// When a particular charset is desired for encoding the header value
@@ -1141,17 +1425,18 @@ namespace MimeKit {
 		/// <param name="encoding">A character encoding.</param>
 		/// <param name="value">The header value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="encoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="encoding"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
+		[MemberNotNull (nameof (rawValue))]
 		public void SetValue (Encoding encoding, string value)
 		{
 			SetValue (FormatOptions.Default, encoding, value);
 		}
 
 		/// <summary>
-		/// Sets the header value using the specified formatting options and charset.
+		/// Set the header value using the specified formatting options and charset.
 		/// </summary>
 		/// <remarks>
 		/// When a particular charset is desired for encoding the header value
@@ -1162,21 +1447,21 @@ namespace MimeKit {
 		/// <param name="charset">A charset encoding.</param>
 		/// <param name="value">The header value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="format"/> is <c>null</c>.</para>
+		/// <para><paramref name="format"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="charset"/> is <c>null</c>.</para>
+		/// <para><paramref name="charset"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
 		/// <paramref name="charset"/> is not supported.
 		/// </exception>
 		public void SetValue (FormatOptions format, string charset, string value)
 		{
-			if (format == null)
+			if (format is null)
 				throw new ArgumentNullException (nameof (format));
 
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
 			var encoding = CharsetUtils.GetEncoding (charset);
@@ -1185,31 +1470,29 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Sets the header value using the specified charset.
+		/// Set the header value using the specified charset.
 		/// </summary>
 		/// <remarks>
 		/// When a particular charset is desired for encoding the header value
 		/// according to the rules of rfc2047, this method should be used
 		/// instead of the <see cref="Value"/> setter.
 		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\HeaderExamples.cs" region="SetHeaderValue"/>
+		/// </example>
 		/// <param name="charset">A charset encoding.</param>
 		/// <param name="value">The header value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="charset"/> is <c>null</c>.</para>
+		/// <para><paramref name="charset"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
 		/// <paramref name="charset"/> is not supported.
 		/// </exception>
 		public void SetValue (string charset, string value)
 		{
-			if (charset == null)
-				throw new ArgumentNullException (nameof (charset));
-
-			var encoding = CharsetUtils.GetEncoding (charset);
-
-			SetValue (FormatOptions.Default, encoding, value);
+			SetValue (FormatOptions.Default, charset, value);
 		}
 
 		/// <summary>
@@ -1222,14 +1505,14 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="value">The raw header value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <paramref name="value"/> does not end with a new-line character.
 		/// </exception>
 		public void SetRawValue (byte[] value)
 		{
-			if (value == null)
+			if (value is null)
 				throw new ArgumentNullException (nameof (value));
 
 			if (value.Length == 0 || value[value.Length - 1] != (byte) '\n')
@@ -1242,16 +1525,15 @@ namespace MimeKit {
 			OnChanged ();
 		}
 
-		internal event EventHandler Changed;
+		internal event EventHandler? Changed;
 
 		void OnChanged ()
 		{
-			if (Changed != null)
-				Changed (this, EventArgs.Empty);
+			Changed?.Invoke (this, EventArgs.Empty);
 		}
 
 		/// <summary>
-		/// Returns a string representation of the header.
+		/// Return a string representation of the header.
 		/// </summary>
 		/// <remarks>
 		/// Formats the header field and value in a way that is suitable for display.
@@ -1272,16 +1554,19 @@ namespace MimeKit {
 		/// </remarks>
 		/// <returns>The unfolded header value.</returns>
 		/// <param name="text">The header text.</param>
-		public static unsafe string Unfold (string text)
+#if NET5_0_OR_GREATER
+		[SkipLocalsInit]
+#endif
+		public static string Unfold (string text)
 		{
 			int startIndex;
 			int endIndex;
 			int i = 0;
 
-			if (text == null)
+			if (text is null)
 				return string.Empty;
 
-			while (i < text.Length && char.IsWhiteSpace (text[i]))
+			while (i < text.Length && IsWhiteSpace (text[i]))
 				i++;
 
 			if (i == text.Length)
@@ -1291,43 +1576,36 @@ namespace MimeKit {
 			endIndex = i;
 
 			while (i < text.Length) {
-				if (!char.IsWhiteSpace (text[i++]))
+				if (!IsWhiteSpace (text[i++]))
 					endIndex = i;
 			}
 
 			int count = endIndex - startIndex;
-			char[] chars = new char[count];
+			Span<char> chars = count <= 32
+				? stackalloc char[32]
+				: new char[count];
 
-			fixed (char* outbuf = chars) {
-				char* outptr = outbuf;
-
-				for (i = startIndex; i < endIndex; i++) {
-					if (text[i] != '\r' && text[i] != '\n')
-						*outptr++ = text[i];
-				}
-
-				count = (int) (outptr - outbuf);
+			for (i = startIndex, count = 0; i < endIndex; i++) {
+				if (text[i] != '\r' && text[i] != '\n')
+					chars[count++] = text[i];
 			}
 
-			return new string (chars, 0, count);
+			return chars.Slice (0, count).ToString ();
 		}
 
-		static bool IsAsciiAtom (byte c)
+		[MethodImpl (MethodImplOptions.AggressiveInlining)]
+		static bool IsFieldText (byte c)
 		{
-			return c.IsAsciiAtom ();
+			return c.IsFieldText ();
 		}
 
-		static bool IsControl (byte c)
-		{
-			return c.IsCtrl ();
-		}
-
+		[MethodImpl (MethodImplOptions.AggressiveInlining)]
 		static bool IsBlank (byte c)
 		{
 			return c.IsBlank ();
 		}
 
-		internal static unsafe bool TryParse (ParserOptions options, byte* input, int length, bool strict, out Header header)
+		internal static unsafe bool TryParse (ParserOptions options, byte* input, int length, bool strict, [NotNullWhen (true)] out Header? header)
 		{
 			byte* inend = input + length;
 			byte* start = input;
@@ -1335,13 +1613,8 @@ namespace MimeKit {
 			var invalid = false;
 
 			// find the end of the field name
-			if (strict) {
-				while (inptr < inend && IsAsciiAtom (*inptr))
-					inptr++;
-			} else {
-				while (inptr < inend && *inptr != (byte) ':' && !IsControl (*inptr))
-					inptr++;
-			}
+			while (inptr < inend && IsFieldText (*inptr))
+				inptr++;
 
 			while (inptr < inend && IsBlank (*inptr))
 				inptr++;
@@ -1352,6 +1625,7 @@ namespace MimeKit {
 					return false;
 				}
 
+				// mark the header as invalid and consume the entire input as the 'field'
 				invalid = true;
 				inptr = inend;
 			}
@@ -1367,9 +1641,15 @@ namespace MimeKit {
 			byte[] value;
 
 			if (inptr < inend) {
+				// skip over the ':'
 				inptr++;
 
 				int count = (int) (inend - inptr);
+
+				// When in strict mode (aka when called from any of the public Parse/TryParse APIs), force the value to be canonicalized by ending with a new-line sequence.
+				if (strict && inend[-1] != (byte) '\n')
+					count += FormatOptions.Default.NewLine.Length;
+
 				value = new byte[count];
 
 				fixed (byte* outbuf = value) {
@@ -1377,9 +1657,19 @@ namespace MimeKit {
 
 					while (inptr < inend)
 						*outptr++ = *inptr++;
+
+					// When in strict mode (aka when called from any of the public Parse/TryParse APIs), force the value to be canonicalized by ending with a new-line sequence.
+					// See https://github.com/jstedfast/MimeKit/issues/695 for more information.
+					if (strict && inend[-1] != (byte) '\n') {
+						var newLine = FormatOptions.Default.NewLineBytes;
+
+						for (int i = 0; i < newLine.Length; i++)
+							*outptr++ = newLine[i];
+					}
 				}
 			} else {
-				value = new byte[0];
+				// Note: The only way to get here is if we have an invalid header, in which case the entire 'header' is stored as the 'field'.
+				value = Array.Empty<byte> ();
 			}
 
 			header = new Header (options, field, value, invalid);
@@ -1394,24 +1684,18 @@ namespace MimeKit {
 		/// Parses a header from the supplied buffer starting at the given index
 		/// and spanning across the specified number of bytes.
 		/// </remarks>
-		/// <returns><c>true</c>, if the header was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the header was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <param name="header">The parsed header.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, int startIndex, int length, out Header header)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, int startIndex, int length, [NotNullWhen (true)] out Header? header)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex, length);
+			if (!ArgumentValidator.TryValidate (options, buffer, startIndex, length)) {
+				header = null;
+				return false;
+			}
 
 			unsafe {
 				fixed (byte* inptr = buffer) {
@@ -1427,19 +1711,12 @@ namespace MimeKit {
 		/// Parses a header from the supplied buffer starting at the given index
 		/// and spanning across the specified number of bytes.
 		/// </remarks>
-		/// <returns><c>true</c>, if the header was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the header was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <param name="header">The parsed header.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, int length, out Header header)
+		public static bool TryParse (byte[]? buffer, int startIndex, int length, [NotNullWhen (true)] out Header? header)
 		{
 			return TryParse (ParserOptions.Default, buffer, startIndex, length, out header);
 		}
@@ -1450,22 +1727,17 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a header from the supplied buffer starting at the specified index.
 		/// </remarks>
-		/// <returns><c>true</c>, if the header was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the header was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="header">The parsed header.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> is out of range.
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, int startIndex, out Header header)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, int startIndex, [NotNullWhen (true)] out Header? header)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex);
+			if (!ArgumentValidator.TryValidate (options, buffer, startIndex)) {
+				header = null;
+				return false;
+			}
 
 			int length = buffer.Length - startIndex;
 
@@ -1482,17 +1754,11 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a header from the supplied buffer starting at the specified index.
 		/// </remarks>
-		/// <returns><c>true</c>, if the header was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the header was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="header">The parsed header.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> is out of range.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, out Header header)
+		public static bool TryParse (byte[]? buffer, int startIndex, [NotNullWhen (true)] out Header? header)
 		{
 			return TryParse (ParserOptions.Default, buffer, startIndex, out header);
 		}
@@ -1503,16 +1769,11 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a header from the specified buffer.
 		/// </remarks>
-		/// <returns><c>true</c>, if the header was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the header was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="header">The parsed header.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, out Header header)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, [NotNullWhen (true)] out Header? header)
 		{
 			return TryParse (options, buffer, 0, out header);
 		}
@@ -1523,13 +1784,10 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a header from the specified buffer.
 		/// </remarks>
-		/// <returns><c>true</c>, if the header was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the header was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="header">The parsed header.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, out Header header)
+		public static bool TryParse (byte[]? buffer, [NotNullWhen (true)] out Header? header)
 		{
 			return TryParse (ParserOptions.Default, buffer, out header);
 		}
@@ -1540,18 +1798,16 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a header from the specified text.
 		/// </remarks>
-		/// <returns><c>true</c>, if the header was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the header was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="text">The text to parse.</param>
 		/// <param name="header">The parsed header.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="text"/> is <c>null</c>.</para>
-		/// </exception>
-		public static bool TryParse (ParserOptions options, string text, out Header header)
+		public static bool TryParse (ParserOptions? options, string? text, [NotNullWhen (true)] out Header? header)
 		{
-			ParseUtils.ValidateArguments (options, text);
+			if (!ArgumentValidator.TryValidate (options, text)) {
+				header = null;
+				return false;
+			}
 
 			var buffer = Encoding.UTF8.GetBytes (text);
 
@@ -1568,13 +1824,10 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a header from the specified text.
 		/// </remarks>
-		/// <returns><c>true</c>, if the header was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the header was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="text">The text to parse.</param>
 		/// <param name="header">The parsed header.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (string text, out Header header)
+		public static bool TryParse (string? text, [NotNullWhen (true)] out Header? header)
 		{
 			return TryParse (ParserOptions.Default, text, out header);
 		}

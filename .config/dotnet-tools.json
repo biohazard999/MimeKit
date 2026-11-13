@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "altcover.global": {
+      "version": "9.0.145",
+      "commands": [
+        "altcover"
+      ],
+      "rollForward": false
+    },
+    "coveralls.net": {
+      "version": "4.0.1",
+      "commands": [
+        "csmacnz.Coveralls"
+      ],
+      "rollForward": false
+    },
+    "nunit.consolerunner.netcore": {
+      "version": "3.22.0",
+      "commands": [
+        "nunit"
+      ],
+      "rollForward": false
+    },
+    "sharpfuzz.commandline": {
+      "version": "2.3.0",
+      "commands": [
+        "sharpfuzz"
+      ],
+      "rollForward": false
+    }
+  }
+}

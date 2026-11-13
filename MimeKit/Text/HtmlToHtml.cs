@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,32 +26,24 @@
 
 using System;
 using System.IO;
-using System.Collections.Generic;
 
 namespace MimeKit.Text {
 	/// <summary>
 	/// An HTML to HTML converter.
 	/// </summary>
 	/// <remarks>
-	/// Used to convert HTML into HTML.
+	/// <para>Used to convert HTML into HTML.</para>
+	/// <para>A tag that is truncated by the end of the input (e.g. <c>&lt;img src=x</c>) is dropped rather than
+	/// being written to the output.</para>
 	/// </remarks>
 	/// <example>
 	/// <code language="c#" source="Examples\MimeVisitorExamples.cs" region="HtmlPreviewVisitor" />
 	/// </example>
 	public class HtmlToHtml : TextConverter
 	{
-		//static readonly HashSet<string> AutoClosingTags;
-
-		//static HtmlToHtml ()
-		//{
-		//	// Note: These are tags that auto-close when an identical tag is encountered and/or when a parent node is closed.
-		//	AutoClosingTags = new HashSet<string> (new [] {
-		//		"li",
-		//		"p",
-		//		"td",
-		//		"tr"
-		//	}, MimeUtils.OrdinalIgnoreCase);
-		//}
+		HtmlNoScriptHandling noScriptHandling = HtmlNoScriptHandling.Unwrap;
+		int maxElementDepth = HtmlTokenizer.DefaultMaxElementDepth;
+		HtmlComplianceOptions complianceOptions = HtmlComplianceOptions.Default.Clone ();
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="HtmlToHtml"/> class.
@@ -86,24 +78,13 @@ namespace MimeKit.Text {
 		}
 
 		/// <summary>
-		/// Get or set whether or not the converter should remove HTML comments from the output.
+		/// Get or set whether the converter should remove HTML comments from the output.
 		/// </summary>
 		/// <remarks>
-		/// Gets or sets whether or not the converter should remove HTML comments from the output.
+		/// Gets or sets whether the converter should remove HTML comments from the output.
 		/// </remarks>
-		/// <value><c>true</c> if the converter should remove comments; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the converter should remove comments; otherwise, <see langword="false" />.</value>
 		public bool FilterComments {
-			get; set;
-		}
-
-		/// <summary>
-		/// Get or set whether or not executable scripts should be stripped from the output.
-		/// </summary>
-		/// <remarks>
-		/// Gets or sets whether or not executable scripts should be stripped from the output.
-		/// </remarks>
-		/// <value><c>true</c> if executable scripts should be filtered; otherwise, <c>false</c>.</value>
-		public bool FilterHtml {
 			get; set;
 		}
 
@@ -141,37 +122,140 @@ namespace MimeKit.Text {
 		/// <code language="c#" source="Examples\MimeVisitorExamples.cs" region="HtmlPreviewVisitor" />
 		/// </example>
 		/// <value>The html tag callback.</value>
-		public HtmlTagCallback HtmlTagCallback {
+		public HtmlTagCallback? HtmlTagCallback {
 			get; set;
 		}
 
-#if false
 		/// <summary>
-		/// Get or set whether or not the converter should collapse white space,
-		/// balance tags, and fix other problems in the source HTML.
+		/// Get or set the maximum element depth.
 		/// </summary>
 		/// <remarks>
-		/// Gets or sets whether or not the converter should collapse white space,
-		/// balance tags, and fix other problems in the source HTML.
+		/// <para>Gets or sets the maximum number of distinct nested elements that will be tracked while
+		/// tokenizing the HTML (see <see cref="HtmlTokenizer.MaxElementDepth"/>).</para>
+		/// <para>Consecutive nested elements that are identical share a single entry, so arbitrarily deep nesting
+		/// of the same element does not count towards this limit. If a start tag exceeds this limit, then it is the
+		/// last tag passed to the <see cref="HtmlTagCallback"/> and the remainder of the input is written to the
+		/// output as encoded text.</para>
 		/// </remarks>
-		/// <value><c>true</c> if the output html should be normalized; otherwise, <c>false</c>.</value>
-		public bool NormalizeHtml {
+		/// <value>The maximum element depth.</value>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="value"/> is less than <c>1</c>.
+		/// </exception>
+		public int MaxElementDepth {
+			get { return maxElementDepth; }
+			set {
+				if (value < 1)
+					throw new ArgumentOutOfRangeException (nameof (value));
+
+				maxElementDepth = value;
+			}
+		}
+
+		/// <summary>
+		/// Get or set the logger to use for reporting HTML compliance violations.
+		/// </summary>
+		/// <remarks>
+		/// <para>Gets or sets the logger to use for reporting HTML compliance violations.</para>
+		/// <para>Violations are reported as they are encountered during <see cref="Convert(TextReader, TextWriter)"/>
+		/// (see <see cref="HtmlTokenizer.ComplianceLogger"/>). When the value is <see langword="null" /> (the default),
+		/// no compliance checks are performed.</para>
+		/// <para>Character references are checked even though the converter does not decode them.</para>
+		/// </remarks>
+		/// <value>The HTML compliance logger.</value>
+		public IHtmlComplianceLogger? ComplianceLogger {
 			get; set;
 		}
-#endif
 
-#if false
 		/// <summary>
-		/// Get or set whether or not the converter should only output an HTML fragment.
+		/// Get or set the options that control how HTML compliance violations are reported.
 		/// </summary>
 		/// <remarks>
-		/// Gets or sets whether or not the converter should only output an HTML fragment.
+		/// <para>Gets or sets the options that control how HTML compliance violations are reported.
+		/// These options only have an effect when a <see cref="ComplianceLogger"/> has been set.</para>
+		/// <para>Limits apply to each document separately: the count of reported issues restarts with
+		/// every conversion.</para>
 		/// </remarks>
-		/// <value><c>true</c> if the converter should only output an HTML fragment; otherwise, <c>false</c>.</value>
+		/// <value>The compliance options.</value>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="value"/> is <see langword="null"/>.
+		/// </exception>
+		public HtmlComplianceOptions ComplianceOptions {
+			get { return complianceOptions; }
+			set {
+				if (value is null)
+					throw new ArgumentNullException (nameof (value));
+
+				if (value == HtmlComplianceOptions.Default)
+					complianceOptions = value.Clone ();
+				else
+					complianceOptions = value;
+			}
+		}
+
+		/// <summary>
+		/// Get or set how <c>&lt;noscript&gt;</c> elements should be handled.
+		/// </summary>
+		/// <remarks>
+		/// <para>Gets or sets how <c>&lt;noscript&gt;</c> elements should be handled.</para>
+		/// <para>The HTML5 specification tokenizes the content of a <c>&lt;noscript&gt;</c> element differently
+		/// depending on whether scripting is enabled in the application that renders the HTML (see
+		/// <see cref="HtmlTokenizer.ScriptingEnabled"/>). When scripting is enabled, the content is raw text;
+		/// when scripting is disabled, the content is normal markup.</para>
+		/// <note type="security">
+		/// <para>If the <see cref="HtmlTagCallback"/> is being used to filter the HTML (for example, to remove
+		/// remote images or event handler attributes), then the output is only filtered correctly if the
+		/// <c>&lt;noscript&gt;</c> content is tokenized the same way that the application that eventually renders
+		/// the output will interpret it. A mismatch in either direction allows content to bypass the callback:</para>
+		/// <list type="bullet">
+		/// <item><description>When using <see cref="HtmlNoScriptHandling.ScriptingEnabled"/>, if the output is
+		/// rendered with scripting disabled (as is typical for email clients), markup inside <c>&lt;noscript&gt;</c>
+		/// elements, such as tracking images, remote content and forms, is never seen by the callback but
+		/// <em>is</em> rendered.</description></item>
+		/// <item><description>When using <see cref="HtmlNoScriptHandling.ScriptingDisabled"/>, if the output is
+		/// rendered with scripting enabled, a <c>&lt;/noscript&gt;</c> hidden inside a comment or a raw text element
+		/// such as <c>&lt;style&gt;</c> within a <c>&lt;noscript&gt;</c> element will close the
+		/// <c>&lt;noscript&gt;</c> element in the renderer, allowing markup that the callback never saw
+		/// (including script event handlers) to be rendered. This is a cross-site scripting (XSS)
+		/// vulnerability.</description></item>
+		/// </list>
+		/// <para>The default value is <see cref="HtmlNoScriptHandling.Unwrap"/>, which tokenizes the content of
+		/// <c>&lt;noscript&gt;</c> elements as normal markup (so that it is passed to the <see cref="HtmlTagCallback"/>)
+		/// and removes the <c>&lt;noscript&gt;</c> start and end tags from the output. Since the output then contains no
+		/// <c>&lt;noscript&gt;</c> elements, it is interpreted the same way regardless of whether scripting is enabled
+		/// in the renderer. The trade-off is that the fallback content of <c>&lt;noscript&gt;</c> elements is always
+		/// displayed, even by renderers that have scripting enabled.</para>
+		/// <para>Note that <see cref="HtmlToHtml"/> is not an HTML sanitizer. For displaying untrusted HTML,
+		/// use a dedicated HTML sanitizer library.</para>
+		/// </note>
+		/// </remarks>
+		/// <value>The method for handling <c>&lt;noscript&gt;</c> elements.</value>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="value"/> is not a valid <see cref="HtmlNoScriptHandling"/> value.
+		/// </exception>
+		public HtmlNoScriptHandling NoScriptHandling {
+			get { return noScriptHandling; }
+			set {
+				if (value < HtmlNoScriptHandling.Unwrap || value > HtmlNoScriptHandling.ScriptingDisabled)
+					throw new ArgumentOutOfRangeException (nameof (value));
+
+				noScriptHandling = value;
+			}
+		}
+
+		/// <summary>
+		/// Get or set whether the converter should only output an HTML fragment.
+		/// </summary>
+		/// <remarks>
+		/// <para>Gets or sets whether the converter should output an entire HTML document or just a fragment
+		/// of the HTML body content.</para>
+		/// <para>When <see langword="true" />, the <c>&lt;!DOCTYPE&gt;</c>, <c>&lt;html&gt;</c>, <c>&lt;head&gt;</c>
+		/// (including its content) and <c>&lt;body&gt;</c> tags are removed without being passed to the
+		/// <see cref="HtmlTagCallback"/>.</para>
+		/// </remarks>
+		/// <value><see langword="true" /> if the converter should only output an HTML fragment; otherwise, <see langword="false" />.</value>
 		public bool OutputHtmlFragment {
 			get; set;
 		}
-#endif
 
 		class HtmlToHtmlTagContext : HtmlTagContext
 		{
@@ -204,29 +288,6 @@ namespace MimeKit.Text {
 			tagContext.WriteTag (htmlWriter, true);
 		}
 
-		static bool SuppressContent (IList<HtmlToHtmlTagContext> stack)
-		{
-			for (int i = stack.Count; i > 0; i--) {
-				if (stack[i - 1].SuppressInnerContent)
-					return true;
-			}
-
-			return false;
-		}
-
-		static HtmlToHtmlTagContext Pop (IList<HtmlToHtmlTagContext> stack, string name)
-		{
-			for (int i = stack.Count; i > 0; i--) {
-				if (stack[i - 1].TagName.Equals (name, StringComparison.OrdinalIgnoreCase)) {
-					var ctx = stack[i - 1];
-					stack.RemoveAt (i - 1);
-					return ctx;
-				}
-			}
-
-			return null;
-		}
-
 		/// <summary>
 		/// Convert the contents of <paramref name="reader"/> from the <see cref="InputFormat"/> to the
 		/// <see cref="OutputFormat"/> and uses the <paramref name="writer"/> to write the resulting text.
@@ -238,16 +299,16 @@ namespace MimeKit.Text {
 		/// <param name="reader">The text reader.</param>
 		/// <param name="writer">The text writer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="reader"/> is <c>null</c>.</para>
+		/// <para><paramref name="reader"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="writer"/> is <c>null</c>.</para>
+		/// <para><paramref name="writer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public override void Convert (TextReader reader, TextWriter writer)
 		{
-			if (reader == null)
+			if (reader is null)
 				throw new ArgumentNullException (nameof (reader));
 
-			if (writer == null)
+			if (writer is null)
 				throw new ArgumentNullException (nameof (writer));
 
 			if (!string.IsNullOrEmpty (Header)) {
@@ -261,86 +322,7 @@ namespace MimeKit.Text {
 				}
 			}
 
-			using (var htmlWriter = new HtmlWriter (writer)) {
-				var callback = HtmlTagCallback ?? DefaultHtmlTagCallback;
-				var stack = new List<HtmlToHtmlTagContext> ();
-				var tokenizer = new HtmlTokenizer (reader);
-				HtmlToHtmlTagContext ctx;
-				HtmlToken token;
-
-				while (tokenizer.ReadNextToken (out token)) {
-					switch (token.Kind) {
-					default:
-						if (!SuppressContent (stack))
-							htmlWriter.WriteToken (token);
-						break;
-					case HtmlTokenKind.Comment:
-						if (!FilterComments && !SuppressContent (stack))
-							htmlWriter.WriteToken (token);
-						break;
-					case HtmlTokenKind.Tag:
-						var tag = (HtmlTagToken) token;
-
-						if (!tag.IsEndTag) {
-							//if (NormalizeHtml && AutoClosingTags.Contains (startTag.TagName) &&
-							//	(ctx = Pop (stack, startTag.TagName)) != null &&
-							//	ctx.InvokeCallbackForEndTag && !SuppressContent (stack)) {
-							//	var value = string.Format ("</{0}>", ctx.TagName);
-							//	var name = ctx.TagName;
-							//
-							//	ctx = new HtmlToHtmlTagContext (new HtmlTokenTag (HtmlTokenKind.EndTag, name, value)) {
-							//		InvokeCallbackForEndTag = ctx.InvokeCallbackForEndTag,
-							//		SuppressInnerContent = ctx.SuppressInnerContent,
-							//		DeleteEndTag = ctx.DeleteEndTag,
-							//		DeleteTag = ctx.DeleteTag
-							//	};
-							//	callback (ctx, htmlWriter);
-							//}
-
-							if (!tag.IsEmptyElement) {
-								ctx = new HtmlToHtmlTagContext (tag);
-
-								if (FilterHtml && ctx.TagId == HtmlTagId.Script) {
-									ctx.SuppressInnerContent = true;
-									ctx.DeleteEndTag = true;
-									ctx.DeleteTag = true;
-								} else if (!SuppressContent (stack)) {
-									callback (ctx, htmlWriter);
-								}
-
-								stack.Add (ctx);
-							} else if (!SuppressContent (stack)) {
-								ctx = new HtmlToHtmlTagContext (tag);
-
-								if (!FilterHtml || ctx.TagId != HtmlTagId.Script)
-									callback (ctx, htmlWriter);
-							}
-						} else {
-							if ((ctx = Pop (stack, tag.Name)) != null) {
-								if (!SuppressContent (stack)) {
-									if (ctx.InvokeCallbackForEndTag) {
-										ctx = new HtmlToHtmlTagContext (tag) {
-											InvokeCallbackForEndTag = ctx.InvokeCallbackForEndTag,
-											SuppressInnerContent = ctx.SuppressInnerContent,
-											DeleteEndTag = ctx.DeleteEndTag,
-											DeleteTag = ctx.DeleteTag
-										};
-										callback (ctx, htmlWriter);
-									} else if (!ctx.DeleteEndTag) {
-										htmlWriter.WriteEndTag (tag.Name);
-									}
-								}
-							} else if (!SuppressContent (stack)) {
-								ctx = new HtmlToHtmlTagContext (tag);
-								callback (ctx, htmlWriter);
-							}
-						}
-						break;
-					}
-				}
-
-				htmlWriter.Flush ();
-			}
+			ConvertHtml (reader, writer);
 
 			if (!string.IsNullOrEmpty (Footer)) {
 				if (FooterFormat == HeaderFooterFormat.Text) {
@@ -351,6 +333,280 @@ namespace MimeKit.Text {
 				} else {
 					writer.Write (Footer);
 				}
+			}
+		}
+
+		static bool IsDocumentStructureTag (HtmlTagId id)
+		{
+			return id == HtmlTagId.Html || id == HtmlTagId.Head || id == HtmlTagId.Body;
+		}
+
+		static bool IsTemplate (HtmlTagToken tag)
+		{
+			return tag.Id == HtmlTagId.Unknown && tag.Name.Equals ("template", StringComparison.OrdinalIgnoreCase);
+		}
+
+		// Get whether a start tag remains within the <head> element according to the "in head" insertion mode rules.
+		// Any other start tag implicitly closes the <head> element (browsers then insert it into the <body>).
+		static bool IsAllowedInHead (HtmlTagToken tag)
+		{
+			switch (tag.Id) {
+			case HtmlTagId.Html:
+			case HtmlTagId.Head:
+			case HtmlTagId.Base:
+			case HtmlTagId.BaseFont:
+			case HtmlTagId.BGSound:
+			case HtmlTagId.Link:
+			case HtmlTagId.Meta:
+			case HtmlTagId.Title:
+			case HtmlTagId.NoScript:
+			case HtmlTagId.NoFrames:
+			case HtmlTagId.Style:
+			case HtmlTagId.Script:
+				return true;
+			default:
+				return IsTemplate (tag);
+			}
+		}
+
+		static bool IsWhiteSpace (ReadOnlySpan<char> text)
+		{
+			foreach (var c in text) {
+				if (c != ' ' && c != '\t' && c != '\n' && c != '\f' && c != '\r')
+					return false;
+			}
+
+			return true;
+		}
+
+		// Note: This is also used by RtfToHtml to convert the HTML encapsulated within RTF (which is just as untrusted
+		// as any other HTML), so that both converters share the same filtering logic.
+		internal void ConvertHtml (TextReader reader, TextWriter writer)
+		{
+			using (var htmlWriter = new HtmlWriter (writer, true)) {
+				var unwrapNoScript = noScriptHandling == HtmlNoScriptHandling.Unwrap;
+				var fragment = OutputHtmlFragment;
+				var callback = HtmlTagCallback ?? DefaultHtmlTagCallback;
+				var stack = new HtmlTagContextStack<HtmlToHtmlTagContext> ();
+				var tokenizer = new HtmlTokenizer (reader) {
+					DecodeCharacterReferences = false,
+					ScriptingEnabled = noScriptHandling == HtmlNoScriptHandling.ScriptingEnabled,
+					IgnoreTruncatedTags = true,
+					MaxElementDepth = maxElementDepth,
+					ComplianceLogger = ComplianceLogger,
+					ComplianceOptions = complianceOptions,
+					ReuseDataTokens = true
+				};
+				var treeConstruction = tokenizer.TreeConstruction;
+				HtmlToHtmlTagContext? headCtx = null;
+				bool rawText = false;
+				int headTemplateDepth = 0;
+				bool headDone = false;
+				HtmlToHtmlTagContext? ctx;
+
+				treeConstruction.TrackClosedElements = true;
+
+				// Note: When outputting a fragment, the content of the <head> element is removed. Browsers implicitly close the
+				// <head> element when they encounter a start tag or non-whitespace text that does not belong in the <head> (and
+				// insert that content into the <body>), so do the same. Otherwise, content that browsers would render could get
+				// removed and, worse, the output could get interpreted differently than the tokenizer interpreted the input
+				// (e.g. if an SVG or MathML element within the <head> remains open after the </head> end tag).
+				void EndHead ()
+				{
+					if (headCtx != null) {
+						stack.Pop ("head");
+						headCtx = null;
+					}
+
+					headDone = true;
+				}
+
+				void ProcessEndTag (HtmlTagToken tag, bool implicitlyClosed)
+				{
+					// Note: The <noscript> start tags are never written when unwrapping, so don't write the end tags either, even
+					// for a <noscript> element within SVG or MathML content that gets implicitly closed.
+					if (unwrapNoScript && tag.Id == HtmlTagId.NoScript)
+						return;
+
+					// Note: If the tokenizer ignored the end tag, then the element is still open (and so is the case for browsers),
+					// so leave its context on the stack. Otherwise, the wrong context would get popped (or none at all) when the
+					// element eventually gets closed, causing the wrong end tags to be written.
+					if (!implicitlyClosed && treeConstruction.LastTag.Disposition == HtmlTreeConstruction.TagDisposition.Ignored) {
+						// Note: The end tag may have been ignored because the <noscript> element (which is in the "special" category)
+						// was in the way (e.g. </span> in <span><noscript><svg></span>). Since the <noscript> tags are not written
+						// when unwrapping, the end tag would no longer be ignored when the output is parsed (implicitly closing any
+						// SVG or MathML elements), so drop it.
+						if (unwrapNoScript && treeConstruction.IsNoScriptOpen)
+							return;
+
+						ctx = stack.Peek (tag.Name);
+					} else {
+						ctx = stack.Pop (tag.Name);
+					}
+
+					if (ctx != null) {
+						if (!stack.SuppressContent) {
+							if (ctx.InvokeCallbackForEndTag) {
+								ctx = new HtmlToHtmlTagContext (tag) {
+									InvokeCallbackForEndTag = ctx.InvokeCallbackForEndTag,
+									SuppressInnerContent = ctx.SuppressInnerContent,
+									DeleteEndTag = ctx.DeleteEndTag,
+									DeleteTag = ctx.DeleteTag
+								};
+								callback (ctx, htmlWriter);
+							} else if (!ctx.DeleteEndTag) {
+								htmlWriter.WriteEndTag (tag.Name);
+							}
+						}
+					} else if (!stack.SuppressContent && !(fragment && IsDocumentStructureTag (tag.Id))) {
+						// Note: An implicitly closed element might not have a context if its start tag was self-closing (e.g. <e/>),
+						// since browsers ignore the self-closing flag on non-void HTML elements. Write its end tag anyway, since
+						// otherwise the end tags written for the foreign elements beneath it would be ignored.
+						ctx = new HtmlToHtmlTagContext (tag);
+						callback (ctx, htmlWriter);
+					}
+				}
+
+				while (tokenizer.ReadNextToken (out var token)) {
+					switch (token.Kind) {
+					default:
+						if (fragment && !headDone && !rawText && token.Kind == HtmlTokenKind.Data && headTemplateDepth == 0 && !IsWhiteSpace (((HtmlDataToken) token).DataSpan))
+							EndHead ();
+
+						if (!stack.SuppressContent)
+							htmlWriter.WriteToken (token);
+						break;
+					case HtmlTokenKind.Comment:
+						if (!FilterComments && !stack.SuppressContent)
+							htmlWriter.WriteToken (token);
+						break;
+					case HtmlTokenKind.DocType:
+						if (!fragment && !stack.SuppressContent)
+							htmlWriter.WriteToken (token);
+						break;
+					case HtmlTokenKind.Tag:
+						var tag = (HtmlTagToken) token;
+
+						// Note: Some tags (e.g. <body>, <img> or </div>) implicitly close the open SVG and MathML elements. Since
+						// the tag itself might not get written (e.g. if it gets removed by the callback), write explicit end tags
+						// for those elements. Otherwise, the output would remain in foreign content and browsers would interpret
+						// the remainder of the output differently than the tokenizer interpreted the input.
+						//
+						// The HTML elements that were closed above the outermost foreign element also need explicit end tags
+						// because an end tag for a foreign element is only honored when that element is the current node. This
+						// also makes the conversion idempotent since converting the output again will not implicitly close any
+						// foreign elements.
+						var closed = treeConstruction.ClosedElements;
+						int lastForeign = closed.Count - 1;
+
+						while (lastForeign >= 0 && !closed[lastForeign].IsForeign)
+							lastForeign--;
+
+						for (int i = 0; i <= lastForeign; i++) {
+							var endTag = new HtmlTagToken (closed[i].Name, true);
+
+							for (int n = 0; n < closed[i].Count; n++)
+								ProcessEndTag (endTag, true);
+						}
+
+						treeConstruction.ClearClosedElements ();
+
+						// Note: Browsers ignore every tag in a frameset document other than the frameset, frame and noframes tags (and
+						// the html tags, which have no effect at that point). Since the ignored tags did not switch the tokenizer state
+						// (e.g. <style>, <textarea> or <svg>), drop them so that they cannot change how the output is interpreted when
+						// it is not a frameset document (e.g. if the callback removed the <frameset> tag or the output is a fragment).
+						if (treeConstruction.IsInFrameset && tag.Id != HtmlTagId.FrameSet && tag.Id != HtmlTagId.Frame && tag.Id != HtmlTagId.NoFrames)
+							break;
+
+						// Note: Browsers ignore a <frameset> start tag once the frameset-ok flag is "not ok" (e.g. after a <body> start tag
+						// or any content), or after the outermost frameset closes. Drop it so that it cannot take effect when the output
+						// gets interpreted without the tokens that caused it to be ignored (e.g. if the callback removed the first frameset).
+						if (tag.Id == HtmlTagId.FrameSet && !tag.IsEndTag && (!treeConstruction.IsInFrameset ||
+							treeConstruction.LastTag.Disposition == HtmlTreeConstruction.TagDisposition.Ignored))
+							break;
+
+						// Note: The content of <noscript> elements has been tokenized as markup (as if scripting is disabled), so
+						// remove the <noscript> tags themselves so that renderers with scripting enabled interpret it the same way.
+						if (unwrapNoScript && tag.Id == HtmlTagId.NoScript)
+							break;
+
+						if (!tag.IsEndTag) {
+							if (fragment && !headDone) {
+								if (headCtx == null) {
+									// Note: Any start tag that does not belong in the <head> means that the <body> has started, after
+									// which browsers ignore any <head> tags.
+									if (!IsAllowedInHead (tag))
+										headDone = true;
+								} else if (IsTemplate (tag)) {
+									headTemplateDepth++;
+								} else if (headTemplateDepth == 0 && !IsAllowedInHead (tag)) {
+									EndHead ();
+								}
+							}
+
+							if (fragment && IsDocumentStructureTag (tag.Id)) {
+								// Drop the tag (and the content of <head>) without consulting the callback.
+								if (tag.Id == HtmlTagId.Head) {
+									// Note: Browsers ignore the self-closing flag on <head> as well as any subsequent <head> tags.
+									if (!headDone && headCtx == null) {
+										headCtx = new HtmlToHtmlTagContext (tag) {
+											SuppressInnerContent = true,
+											DeleteEndTag = true,
+											DeleteTag = true
+										};
+
+										stack.Push (headCtx);
+									}
+								} else if (!tag.IsEmptyElement) {
+									ctx = new HtmlToHtmlTagContext (tag) {
+										DeleteEndTag = true,
+										DeleteTag = true
+									};
+
+									stack.Push (ctx);
+								}
+							} else if (!tag.IsEmptyElement || tokenizer.TokenizerState != HtmlTokenizerState.Data) {
+								// Note: A self-closing tag such as <style/> or <script/> still switches the tokenizer into a raw content
+								// state (browsers ignore the self-closing flag on non-void HTML elements), so treat it as an open element
+								// so that SuppressInnerContent applies to the raw content that follows.
+								ctx = new HtmlToHtmlTagContext (tag);
+
+								if (!stack.SuppressContent)
+									callback (ctx, htmlWriter);
+
+								stack.Push (ctx);
+							} else if (!stack.SuppressContent) {
+								ctx = new HtmlToHtmlTagContext (tag);
+								callback (ctx, htmlWriter);
+							}
+
+							rawText = tokenizer.TokenizerState != HtmlTokenizerState.Data;
+						} else {
+							rawText = false;
+
+							if (fragment && headCtx != null) {
+								if (headTemplateDepth > 0) {
+									if (IsTemplate (tag))
+										headTemplateDepth--;
+									else if (tag.Id == HtmlTagId.Head)
+										break;
+								} else if (tag.Id == HtmlTagId.Head) {
+									ProcessEndTag (tag, false);
+									headCtx = null;
+									headDone = true;
+									break;
+								} else if (tag.Id == HtmlTagId.Body || tag.Id == HtmlTagId.Html || tag.Id == HtmlTagId.Br) {
+									EndHead ();
+								}
+							}
+
+							ProcessEndTag (tag, false);
+						}
+						break;
+					}
+				}
+
+				htmlWriter.Flush ();
 			}
 		}
 	}

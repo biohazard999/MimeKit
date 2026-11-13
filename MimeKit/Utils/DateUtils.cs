@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,11 +44,20 @@ namespace MimeKit.Utils {
 		HasSign        = (1 << 7),
 	}
 
-	class DateToken
+	readonly struct DateToken
 	{
-		public DateTokenFlags Flags { get; private set; }
-		public int StartIndex { get; private set; }
-		public int Length { get; private set; }
+		public DateToken (DateTokenFlags flags, int start, int length)
+		{
+			Flags = flags;
+			Start = start;
+			Length = length;
+		}
+
+		public DateTokenFlags Flags { get; }
+
+		public int Start { get; }
+
+		public int Length { get; }
 
 		public bool IsNumeric {
 			get { return (Flags & DateTokenFlags.NonNumeric) == 0; }
@@ -76,13 +85,6 @@ namespace MimeKit.Utils {
 
 		public bool IsTimeZone {
 			get { return IsNumericZone || IsAlphaZone; }
-		}
-
-		public DateToken (DateTokenFlags flags, int startIndex, int length)
-		{
-			StartIndex = startIndex;
-			Length = length;
-			Flags = flags;
 		}
 	}
 
@@ -134,6 +136,8 @@ namespace MimeKit.Utils {
 				{ "T",     -700 }, { "U",     -800 }, { "V",     -900 },
 				{ "W",    -1000 }, { "X",    -1100 }, { "Y",    -1200 },
 				{ "Z",        0 },
+				// Additional timezone mappings
+				{ "JST",    900 }, { "KST",    900 },
 			};
 
 			datetok = new DateTokenFlags[256];
@@ -167,14 +171,14 @@ namespace MimeKit.Utils {
 			datetok['-'] |= DateTokenFlags.HasSign;
 		}
 
-		static bool TryGetWeekday (DateToken token, byte[] text, out DayOfWeek weekday)
+		static bool TryGetWeekday (in DateToken token, byte[] text, out DayOfWeek weekday)
 		{
 			weekday = DayOfWeek.Sunday;
 
 			if (!token.IsWeekday || token.Length < 3)
 				return false;
 
-			var name = Encoding.ASCII.GetString (text, token.StartIndex, 3);
+			var name = Encoding.ASCII.GetString (text, token.Start, 3);
 
 			for (int day = 0; day < WeekDays.Length; day++) {
 				if (WeekDays[day].Equals (name, StringComparison.OrdinalIgnoreCase)) {
@@ -186,10 +190,10 @@ namespace MimeKit.Utils {
 			return false;
 		}
 
-		static bool TryGetDayOfMonth (DateToken token, byte[] text, out int day)
+		static bool TryGetDayOfMonth (in DateToken token, byte[] text, out int day)
 		{
-			int endIndex = token.StartIndex + token.Length;
-			int index = token.StartIndex;
+			int endIndex = token.Start + token.Length;
+			int index = token.Start;
 
 			day = 0;
 
@@ -205,14 +209,14 @@ namespace MimeKit.Utils {
 			return true;
 		}
 
-		static bool TryGetMonth (DateToken token, byte[] text, out int month)
+		static bool TryGetMonth (in DateToken token, byte[] text, out int month)
 		{
 			month = 0;
 
 			if (!token.IsMonth || token.Length < 3)
 				return false;
 
-			var name = Encoding.ASCII.GetString (text, token.StartIndex, 3);
+			var name = Encoding.ASCII.GetString (text, token.Start, 3);
 
 			for (int i = 0; i < Months.Length; i++) {
 				if (Months[i].Equals (name, StringComparison.OrdinalIgnoreCase)) {
@@ -224,10 +228,10 @@ namespace MimeKit.Utils {
 			return false;
 		}
 
-		static bool TryGetYear (DateToken token, byte[] text, out int year)
+		static bool TryGetYear (in DateToken token, byte[] text, out int year)
 		{
-			int endIndex = token.StartIndex + token.Length;
-			int index = token.StartIndex;
+			int endIndex = token.Start + token.Length;
+			int index = token.Start;
 
 			year = 0;
 
@@ -243,10 +247,10 @@ namespace MimeKit.Utils {
 			return year >= 1969;
 		}
 
-		static bool TryGetTimeOfDay (DateToken token, byte[] text, out int hour, out int minute, out int second)
+		static bool TryGetTimeOfDay (in DateToken token, byte[] text, out int hour, out int minute, out int second)
 		{
-			int endIndex = token.StartIndex + token.Length;
-			int index = token.StartIndex;
+			int endIndex = token.Start + token.Length;
+			int index = token.Start;
 
 			hour = minute = second = 0;
 
@@ -266,19 +270,46 @@ namespace MimeKit.Utils {
 			if (index >= endIndex || text[index++] != (byte) ':')
 				return true;
 
-			if (!ParseUtils.TryParseInt32 (text, ref index, endIndex, out second) || second > 59)
+			if (!ParseUtils.TryParseInt32 (text, ref index, endIndex, out second) || second > 60)
 				return false;
+
+			if (hour == 23 && minute == 59 && second == 60) {
+				// Ignore leap seconds - DateTime does not handle them.
+				second = 59;
+			} else if (second == 60) {
+				return false;
+			}
 
 			return index == endIndex;
 		}
 
-		static bool TryGetTimeZone (DateToken token, byte[] text, out int tzone)
+		static bool IsAmOrPm (in DateToken token, byte[] text, ref int hour)
+		{
+			// If this is an AM or PM token, the second character is *always* an 'M' or 'm'
+			if (token.IsAlphaZone && token.Length == 2 && (text[token.Start + 1] == (byte) 'M' || text[token.Start + 1] == (byte) 'm')) {
+				if (text[token.Start] == (byte) 'A' || text[token.Start] == (byte) 'a') {
+					if (hour == 12)
+						hour = 0;
+					return true;
+				}
+
+				if (text[token.Start] == (byte) 'P' || text[token.Start] == (byte) 'p') {
+					if (hour < 12)
+						hour += 12;
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		static bool TryGetTimeZone (in DateToken token, byte[] text, out int tzone)
 		{
 			tzone = 0;
 
 			if (token.IsNumericZone) {
-				int endIndex = token.StartIndex + token.Length;
-				int index = token.StartIndex;
+				int endIndex = token.Start + token.Length;
+				int index = token.Start;
 				int sign;
 
 				if (text[index] == (byte) '-')
@@ -298,31 +329,34 @@ namespace MimeKit.Utils {
 				if (token.Length > 3)
 					return false;
 
-				var name = Encoding.ASCII.GetString (text, token.StartIndex, token.Length);
+				var name = Encoding.ASCII.GetString (text, token.Start, token.Length);
 
 				if (!timezones.TryGetValue (name, out tzone))
 					return false;
 			} else if (token.IsNumeric) {
-				int endIndex = token.StartIndex + token.Length;
-				int index = token.StartIndex;
+				int endIndex = token.Start + token.Length;
+				int index = token.Start;
 
 				if (!ParseUtils.TryParseInt32 (text, ref index, endIndex, out tzone) || index != endIndex)
 					return false;
 			}
 
-			if (tzone < -1200 || tzone > 1400)
+			// Note: Reject minutes >= 60. Otherwise, a zone such as -1192 would become -12:32, which is out of range.
+			if (tzone < -1200 || tzone > 1400 || Math.Abs (tzone % 100) >= 60)
 				return false;
 
 			return true;
 		}
 
-		static bool IsTokenDelimeter (byte c)
+		static bool IsTokenDelimiter (byte c)
 		{
 			return c == (byte) '-' || c == (byte) '/' || c == (byte) ',' || c.IsWhitespace ();
 		}
 
-		static IEnumerable<DateToken> TokenizeDate (byte[] text, int startIndex, int length)
+		static List<DateToken> TokenizeDate (byte[] text, int startIndex, int length)
 		{
+			// Note: typical rfc822 date headers will have 6 tokens.
+			var tokens = new List<DateToken> (8);
 			int endIndex = startIndex + length;
 			int index = startIndex;
 			DateTokenFlags mask;
@@ -340,24 +374,22 @@ namespace MimeKit.Utils {
 					start = index++;
 
 					// find the end of this token
-					while (index < endIndex && !IsTokenDelimeter (text[index]))
+					while (index < endIndex && !IsTokenDelimiter (text[index]))
 						mask |= datetok[text[index++]];
 
-					yield return new DateToken (mask, start, index - start);
+					var token = new DateToken (mask, start, index - start);
+					tokens.Add (token);
 				}
 
-				// skip over the token delimeter
+				// skip over the token delimiter
 				index++;
 			}
 
-			yield break;
+			return tokens;
 		}
 
-		static bool TryParseStandardDateFormat (IList<DateToken> tokens, byte[] text, out DateTimeOffset date)
+		static bool TryParseStandardDateFormat (List<DateToken> tokens, byte[] text, out DateTimeOffset date)
 		{
-			int day, month, year, tzone;
-			int hour, minute, second;
-			DayOfWeek weekday;
 			//bool haveWeekday;
 			int n = 0;
 
@@ -368,7 +400,7 @@ namespace MimeKit.Utils {
 				return false;
 
 			// Note: the weekday is not required
-			if (TryGetWeekday (tokens[n], text, out weekday)) {
+			if (TryGetWeekday (tokens[n], text, out _)) {
 				if (tokens.Count < 6)
 					return false;
 
@@ -376,19 +408,22 @@ namespace MimeKit.Utils {
 				n++;
 			}
 
-			if (!TryGetDayOfMonth (tokens[n++], text, out day))
+			if (!TryGetDayOfMonth (tokens[n++], text, out int day))
 				return false;
 
-			if (!TryGetMonth (tokens[n++], text, out month))
+			if (!TryGetMonth (tokens[n++], text, out int month))
 				return false;
 
-			if (!TryGetYear (tokens[n++], text, out year))
+			if (!TryGetYear (tokens[n++], text, out int year))
 				return false;
 
-			if (!TryGetTimeOfDay (tokens[n++], text, out hour, out minute, out second))
+			if (!TryGetTimeOfDay (tokens[n++], text, out int hour, out int minute, out int second))
 				return false;
 
-			if (!TryGetTimeZone (tokens[n], text, out tzone))
+			if (IsAmOrPm (tokens[n], text, ref hour))
+				n++;
+
+			if (n >= tokens.Count || !TryGetTimeZone (tokens[n], text, out int tzone))
 				tzone = 0;
 
 			int minutes = tzone % 100;
@@ -412,51 +447,47 @@ namespace MimeKit.Utils {
 			bool numericMonth = false;
 			bool haveWeekday = false;
 			bool haveTime = false;
-			DayOfWeek weekday;
+			bool haveAmPm = false;
 			TimeSpan offset;
 
 			for (int i = 0; i < tokens.Count; i++) {
-				int value;
-
-				if (!haveWeekday && tokens[i].IsWeekday) {
-					if (TryGetWeekday (tokens[i], text, out weekday)) {
-						haveWeekday = true;
-						continue;
-					}
+				if (!haveWeekday && TryGetWeekday (tokens[i], text, out _)) {
+					haveWeekday = true;
+					continue;
 				}
 
-				if ((month == null || numericMonth) && tokens[i].IsMonth) {
-					if (TryGetMonth (tokens[i], text, out value)) {
-						if (numericMonth) {
-							numericMonth = false;
-							day = month;
-						}
-
-						month = value;
-						continue;
+				if ((month is null || numericMonth) && TryGetMonth (tokens[i], text, out int value)) {
+					if (numericMonth) {
+						numericMonth = false;
+						day = month;
 					}
+
+					month = value;
+					continue;
 				}
 
-				if (!haveTime && tokens[i].IsTimeOfDay) {
-					if (TryGetTimeOfDay (tokens[i], text, out hour, out minute, out second)) {
-						haveTime = true;
-						continue;
-					}
+				if (!haveTime && TryGetTimeOfDay (tokens[i], text, out hour, out minute, out second)) {
+					haveTime = true;
+					continue;
 				}
 
-				if (tzone == null && tokens[i].IsTimeZone) {
-					if (TryGetTimeZone (tokens[i], text, out value)) {
-						tzone = value;
-						continue;
-					}
+				if (haveTime && tzone is null && !haveAmPm && IsAmOrPm (tokens[i], text, ref hour)) {
+					haveAmPm = true;
+					continue;
+				}
+
+				// Limit TryGetTimeZone to alpha and numeric timezone tokens (do not allow numeric tokens as they are handled below).
+				if (tzone is null && tokens[i].IsTimeZone && TryGetTimeZone (tokens[i], text, out value)) {
+					tzone = value;
+					continue;
 				}
 
 				if (tokens[i].IsNumeric) {
 					if (tokens[i].Length == 4) {
-						if (year == null) {
+						if (year is null) {
 							if (TryGetYear (tokens[i], text, out value))
 								year = value;
-						} else if (tzone == null) {
+						} else if (tzone is null) {
 							if (TryGetTimeZone (tokens[i], text, out value))
 								tzone = value;
 						}
@@ -468,23 +499,23 @@ namespace MimeKit.Utils {
 						continue;
 
 					// Note: we likely have either YYYY[-/]MM[-/]DD or MM[-/]DD[-/]YY
-					int endIndex = tokens[i].StartIndex + tokens[i].Length;
-					int index = tokens[i].StartIndex;
+					int endIndex = tokens[i].Start + tokens[i].Length;
+					int index = tokens[i].Start;
 
 					ParseUtils.TryParseInt32 (text, ref index, endIndex, out value);
 
-					if (month == null && value > 0 && value <= 12) {
+					if (month is null && value > 0 && value <= 12) {
 						numericMonth = true;
 						month = value;
 						continue;
 					}
 
-					if (day == null && value > 0 && value <= 31) {
+					if (day is null && value > 0 && value <= 31) {
 						day = value;
 						continue;
 					}
 
-					if (year == null && value >= 69) {
+					if (year is null && value >= 69) {
 						year = 1900 + value;
 						continue;
 					}
@@ -493,7 +524,7 @@ namespace MimeKit.Utils {
 				// WTF is this??
 			}
 
-			if (year == null || month == null || day == null) {
+			if (year is null || month is null || day is null) {
 				date = new DateTimeOffset ();
 				return false;
 			}
@@ -527,30 +558,19 @@ namespace MimeKit.Utils {
 		/// Parses an rfc822 date and time from the supplied buffer starting at the given index
 		/// and spanning across the specified number of bytes.
 		/// </remarks>
-		/// <returns><c>true</c>, if the date was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the date was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <param name="date">The parsed date.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, int length, out DateTimeOffset date)
+		public static bool TryParse (byte[]? buffer, int startIndex, int length, out DateTimeOffset date)
 		{
-			if (buffer == null)
-				throw new ArgumentNullException (nameof (buffer));
+			if (!ArgumentValidator.TryValidate (buffer, startIndex, length)) {
+				date = DateTimeOffset.MinValue;
+				return false;
+			}
 
-			if (startIndex < 0 || startIndex > buffer.Length)
-				throw new ArgumentOutOfRangeException (nameof (startIndex));
-
-			if (length < 0 || length > (buffer.Length - startIndex))
-				throw new ArgumentOutOfRangeException (nameof (length));
-
-			var tokens = new List<DateToken> (TokenizeDate (buffer, startIndex, length));
+			var tokens = TokenizeDate (buffer, startIndex, length);
 
 			if (TryParseStandardDateFormat (tokens, buffer, out date))
 				return true;
@@ -558,7 +578,7 @@ namespace MimeKit.Utils {
 			if (TryParseUnknownDateFormat (tokens, buffer, out date))
 				return true;
 
-			date = new DateTimeOffset ();
+			date = DateTimeOffset.MinValue;
 
 			return false;
 		}
@@ -569,36 +589,18 @@ namespace MimeKit.Utils {
 		/// <remarks>
 		/// Parses an rfc822 date and time from the supplied buffer starting at the specified index.
 		/// </remarks>
-		/// <returns><c>true</c>, if the date was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the date was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="date">The parsed date.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> is not within the range of the byte array.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, out DateTimeOffset date)
+		public static bool TryParse (byte[]? buffer, int startIndex, out DateTimeOffset date)
 		{
-			if (buffer == null)
-				throw new ArgumentNullException (nameof (buffer));
+			if (!ArgumentValidator.TryValidate (buffer, startIndex)) {
+				date = DateTimeOffset.MinValue;
+				return false;
+			}
 
-			if (startIndex < 0 || startIndex > buffer.Length)
-				throw new ArgumentOutOfRangeException (nameof (startIndex));
-
-			int length = buffer.Length - startIndex;
-			var tokens = new List<DateToken> (TokenizeDate (buffer, startIndex, length));
-
-			if (TryParseStandardDateFormat (tokens, buffer, out date))
-				return true;
-
-			if (TryParseUnknownDateFormat (tokens, buffer, out date))
-				return true;
-
-			date = new DateTimeOffset ();
-
-			return false;
+			return TryParse (buffer, startIndex, buffer.Length - startIndex, out date);
 		}
 
 		/// <summary>
@@ -607,28 +609,17 @@ namespace MimeKit.Utils {
 		/// <remarks>
 		/// Parses an rfc822 date and time from the specified buffer.
 		/// </remarks>
-		/// <returns><c>true</c>, if the date was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the date was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="date">The parsed date.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, out DateTimeOffset date)
+		public static bool TryParse (byte[]? buffer, out DateTimeOffset date)
 		{
-			if (buffer == null)
-				throw new ArgumentNullException (nameof (buffer));
+			if (buffer is null) {
+				date = DateTimeOffset.MinValue;
+				return false;
+			}
 
-			var tokens = new List<DateToken> (TokenizeDate (buffer, 0, buffer.Length));
-
-			if (TryParseStandardDateFormat (tokens, buffer, out date))
-				return true;
-
-			if (TryParseUnknownDateFormat (tokens, buffer, out date))
-				return true;
-
-			date = new DateTimeOffset ();
-
-			return false;
+			return TryParse (buffer, 0, buffer.Length, out date);
 		}
 
 		/// <summary>
@@ -637,76 +628,23 @@ namespace MimeKit.Utils {
 		/// <remarks>
 		/// Parses an rfc822 date and time from the specified text.
 		/// </remarks>
-		/// <returns><c>true</c>, if the date was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the date was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="text">The input text.</param>
 		/// <param name="date">The parsed date.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (string text, out DateTimeOffset date)
+		public static bool TryParse (string? text, out DateTimeOffset date)
 		{
-			if (text == null)
-				throw new ArgumentNullException (nameof (text));
-
-			var buffer = Encoding.UTF8.GetBytes (text);
-			var tokens = new List<DateToken> (TokenizeDate (buffer, 0, buffer.Length));
-
-			if (TryParseStandardDateFormat (tokens, buffer, out date))
-				return true;
-
-			if (TryParseUnknownDateFormat (tokens, buffer, out date))
-				return true;
-
-			date = new DateTimeOffset ();
-
-			return false;
-		}
-
-		// Note: this method exists because BouncyCastle's DerUtcTime.ParseDateString() fails
-		// to parse date strings where the seconds value is not in the range 0 -> 59.
-		// See https://github.com/jstedfast/MimeKit/issues/103 for details.
-		internal static DateTime Parse (string text, string format)
-		{
-			int hour = 0, minute = 0, second = 0;
-			int year = 0, month = 0, day = 0;
-			TimeSpan offset;
-			int timezone;
-			int i = 0;
-
-			while (i < text.Length && i < format.Length && format[i] != 'z') {
-				if (text[i] < '0' || text[i] > '9')
-					throw new FormatException ();
-
-				int digit = text[i] - '0';
-
-				switch (format[i]) {
-				case 'y': year = (year * 10) + digit; break;
-				case 'M': month = (month * 10) + digit; break;
-				case 'd': day = (day * 10) + digit; break;
-				case 'H': hour = (hour * 10) + digit; break;
-				case 'm': minute = (minute * 10) + digit; break;
-				case 's': second = (second * 10) + digit; break;
-				}
-
-				i++;
+			if (text is null) {
+				date = DateTimeOffset.MinValue;
+				return false;
 			}
 
-			minute += second / 60;
-			second = second % 60;
+			var buffer = Encoding.UTF8.GetBytes (text);
 
-			hour += minute / 60;
-			minute = minute % 60;
-
-			if (!timezones.TryGetValue (text.Substring (i), out timezone))
-				timezone = 0;
-
-			offset = new TimeSpan (timezone / 100, timezone % 100, 0);
-
-			return new DateTime (year, month, day, hour, minute, second, DateTimeKind.Utc).Add (offset);
+			return TryParse (buffer, 0, buffer.Length, out date);
 		}
 
 		/// <summary>
-		/// Formats the <see cref="System.DateTimeOffset"/> as an rfc822 date string.
+		/// Format the <see cref="System.DateTimeOffset"/> as an rfc822 date string.
 		/// </summary>
 		/// <remarks>
 		/// Formats the date and time in the format specified by rfc822, suitable for use
@@ -716,9 +654,15 @@ namespace MimeKit.Utils {
 		/// <param name="date">The date.</param>
 		public static string FormatDate (DateTimeOffset date)
 		{
-			return string.Format (CultureInfo.InvariantCulture, "{0}, {1:00} {2} {3:0000} {4:00}:{5:00}:{6:00} {7:+00;-00}{8:00}",
+			var offset = date.Offset;
+			char sign = offset < TimeSpan.Zero ? '-' : '+';
+
+			if (offset < TimeSpan.Zero)
+				offset = offset.Negate ();
+
+			return string.Format (CultureInfo.InvariantCulture, "{0}, {1:00} {2} {3:0000} {4:00}:{5:00}:{6:00} {7}{8:00}{9:00}",
 				WeekDays[(int) date.DayOfWeek], date.Day, Months[date.Month - 1], date.Year,
-				date.Hour, date.Minute, date.Second, date.Offset.Hours, date.Offset.Minutes);
+				date.Hour, date.Minute, date.Second, sign, offset.Hours, offset.Minutes);
 		}
 	}
 }

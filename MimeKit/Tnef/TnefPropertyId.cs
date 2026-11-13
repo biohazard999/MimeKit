@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 //
+
+#pragma warning disable CA1069 // Enums values should not be duplicated
 
 namespace MimeKit.Tnef {
 	/// <summary>
@@ -583,6 +585,11 @@ namespace MimeKit.Tnef {
 		CreationVersion                          = 0x0E19,
 
 		/// <summary>
+		/// The MAPI property PR_CREATOR_SMTP_ADDRESS.
+		/// </summary>
+		CreatorSmtpAddress                       = 0x5D0A,
+
+		/// <summary>
 		/// The MAPI property PR_CURRENT_VERSION.
 		/// </summary>
 		CurrentVersion                           = 0x0E00,
@@ -1018,14 +1025,14 @@ namespace MimeKit.Tnef {
 		InternetArticleNumber                    = 0x0E23,
 
 		/// <summary>
+		/// The MAPI property PR_INTERNET_CPID.
+		/// </summary>
+		InternetCodepage                         = 0x3FDE,
+
+		/// <summary>
 		/// The MAPI property PR_INTERNET_CONTROL.
 		/// </summary>
 		InternetControl                          = 0x1031,
-
-		/// <summary>
-		/// The MAPI property PR_INTERNET_CPID.
-		/// </summary>
-		InternetCPID                             = 0x3FDE,
 
 		/// <summary>
 		/// The MAPI property PR_INTERNET_DISTRIBUTION.
@@ -1151,6 +1158,11 @@ namespace MimeKit.Tnef {
 		/// The MAPI property PR_LAST_MODIFIER_NAME.
 		/// </summary>
 		LastModifierName                         = 0x3FFA,
+
+		/// <summary>
+		/// THe MAPI property PR_LAST_MODIFIER_SMTP_ADDRESS.
+		/// </summary>
+		LastModifierSmtpAddress                  = 0x5D0B,
 
 		/// <summary>
 		/// The MAPI property PR_LATEST_DELIVERY_TIME.
@@ -1348,6 +1360,15 @@ namespace MimeKit.Tnef {
 		MiddleName                               = 0x3A44,
 
 		/// <summary>
+		/// The MAPI property PR_MIME_SKELETON (PidTagMimeSkeleton).
+		/// </summary>
+		/// <remarks>
+		/// Contains the top-level MIME message headers, all MIME body part headers, and the body part content that has
+		/// not already been converted to Message object properties ([MS-OXCMSG] section 2.2.1.28).
+		/// </remarks>
+		MimeSkeleton                             = 0x64F0,
+
+		/// <summary>
 		/// The MAPI property PR_MINI_ICON.
 		/// </summary>
 		MiniIcon                                 = 0x0FFC,
@@ -1366,6 +1387,15 @@ namespace MimeKit.Tnef {
 		/// The MAPI property PR_MSG_STATUS.
 		/// </summary>
 		MsgStatus                                = 0x0E17,
+
+		/// <summary>
+		/// The MAPI property PR_NATIVE_BODY_INFO (PidTagNativeBody).
+		/// </summary>
+		/// <remarks>
+		/// Indicates the best available format for storing the message body: 1 for plain text, 2 for RTF and 3 for HTML
+		/// ([MS-OXCMSG] section 2.2.1.58.2, [MS-OXBBODY] section 2.1.3.1).
+		/// </remarks>
+		NativeBody                               = 0x1016,
 
 		/// <summary>
 		/// The MAPI property PR_NDR_DIAG_CODE.
@@ -1993,6 +2023,11 @@ namespace MimeKit.Tnef {
 		RecipientDisplayName                     = 0x5FF6,
 
 		/// <summary>
+		/// The MAPI property PR_RECIPIENT_FLAGS.
+		/// </summary>
+		RecipientFlags                           = 0x5FFD,
+
+		/// <summary>
 		/// The MAPI property PR_RECIPIENT_NUMBER_FOR_ADVICE.
 		/// </summary>
 		RecipientNumberForAdvice                 = 0x0C14,
@@ -2006,6 +2041,11 @@ namespace MimeKit.Tnef {
 		/// The MAPI property PR_RECIPIENT_STATUS.
 		/// </summary>
 		RecipientStatus                          = 0x0E15,
+
+		/// <summary>
+		/// The MAPI property PR_RECIPIENT_TRACKSTATUS.
+		/// </summary>
+		RecipientTrackStatus                     = 0x5FFF,
 
 		/// <summary>
 		/// The MAPI property PR_RECIPIENT_TYPE.
@@ -2256,6 +2296,11 @@ namespace MimeKit.Tnef {
 		/// The MAPI property PR_SENDER_SIMPLE_DISP_NAME.
 		/// </summary>
 		SenderSimpleDispName                     = 0x4030,
+
+		/// <summary>
+		/// The MAPI property PR_SENDER_SMTP_ADDRESS.
+		/// </summary>
+		SenderSmtpAddress                        = 0x5D01,
 
 		/// <summary>
 		/// The MAPI property PR_SEND_INTERNET_ENCODING.
@@ -2568,3 +2613,5 @@ namespace MimeKit.Tnef {
 		Ypos                                     = 0x3F06,
 	}
 }
+
+#pragma warning restore

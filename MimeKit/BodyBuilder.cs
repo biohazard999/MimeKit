@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,8 @@
 // THE SOFTWARE.
 //
 
-using MimeKit.Utils;
+using System;
+using System.Text;
 
 namespace MimeKit {
 	/// <summary>
@@ -38,6 +39,8 @@ namespace MimeKit {
 	/// </example>
 	public class BodyBuilder
 	{
+		Encoding bodyEncoding;
+
 		/// <summary>
 		/// Initialize a new instance of the <see cref="BodyBuilder"/> class.
 		/// </summary>
@@ -51,6 +54,7 @@ namespace MimeKit {
 		{
 			LinkedResources = new AttachmentCollection (true);
 			Attachments = new AttachmentCollection ();
+			bodyEncoding = Encoding.UTF8;
 		}
 
 		/// <summary>
@@ -91,7 +95,7 @@ namespace MimeKit {
 		/// <code language="c#" source="Examples\BodyBuilder.cs" region="Complex" />
 		/// </example>
 		/// <value>The text body.</value>
-		public string TextBody {
+		public string? TextBody {
 			get; set;
 		}
 
@@ -105,8 +109,31 @@ namespace MimeKit {
 		/// <code language="c#" source="Examples\BodyBuilder.cs" region="Complex" />
 		/// </example>
 		/// <value>The html body.</value>
-		public string HtmlBody {
+		public string? HtmlBody {
 			get; set;
+		}
+
+		/// <summary>
+		/// Get or set the character encoding to be used for the message body.
+		/// </summary>
+		/// <remarks>
+		/// <para>Gets or sets the character encoding to be used for the body content.</para>
+		/// <para>The value specified for the <see cref="BodyEncoding"/> property sets the <c>charset</c>
+		/// parameter in the <c>Content-Type</c> headers for the <see cref="TextBody"/> and <see cref="HtmlBody"/>.
+		/// The default charset is "utf-8".</para>
+		/// </remarks>
+		/// <value>The character encoding.</value>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="value"/> is <see langword="null"/>.
+		/// </exception>
+		public Encoding BodyEncoding {
+			get { return bodyEncoding; }
+			set {
+				if (value is null)
+					throw new ArgumentNullException (nameof (value));
+
+				bodyEncoding = value;
+			}
 		}
 
 		/// <summary>
@@ -123,16 +150,17 @@ namespace MimeKit {
 		/// <returns>The message body.</returns>
 		public MimeEntity ToMessageBody ()
 		{
-			MultipartAlternative alternative = null;
-			MimeEntity body = null;
+			MultipartAlternative? alternative = null;
+			MimeEntity? body = null;
 
 			if (TextBody != null) {
 				var text = new TextPart ("plain");
-				text.Text = TextBody;
+				text.SetText (bodyEncoding, TextBody);
 
 				if (HtmlBody != null) {
-					alternative = new MultipartAlternative ();
-					alternative.Add (text);
+					alternative = new MultipartAlternative {
+						text
+					};
 					body = alternative;
 				} else {
 					body = text;
@@ -143,7 +171,7 @@ namespace MimeKit {
 				var text = new TextPart ("html");
 				MimeEntity html;
 
-				text.Text = HtmlBody;
+				text.SetText (bodyEncoding, HtmlBody);
 
 				if (LinkedResources.Count > 0) {
 					var related = new MultipartRelated {
@@ -165,7 +193,7 @@ namespace MimeKit {
 			}
 
 			if (Attachments.Count > 0) {
-				if (body == null && Attachments.Count == 1)
+				if (body is null && Attachments.Count == 1)
 					return Attachments[0];
 
 				var mixed = new Multipart ("mixed");
@@ -179,7 +207,13 @@ namespace MimeKit {
 				body = mixed;
 			}
 
-			return body ?? new TextPart ("plain") { Text = string.Empty };
+			if (body is null) {
+				var text = new TextPart ("plain");
+				text.SetText (bodyEncoding, string.Empty);
+				body = text;
+			}
+
+			return body;
 		}
 	}
 }

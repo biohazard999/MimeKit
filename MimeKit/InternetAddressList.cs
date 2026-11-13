@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,8 @@ using System;
 using System.Text;
 using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 
 #if ENABLE_SNM
 using System.Net.Mail;
@@ -50,9 +52,13 @@ namespace MimeKit {
 	/// types of addresses. They typically only contain mailbox addresses, but may also
 	/// contain other group addresses.</para>
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\InternetAddressExamples.cs" region="ParseAddressList"/>
+	/// </example>
+	[TypeConverter (typeof (InternetAddressListConverter))]
 	public class InternetAddressList : IList<InternetAddress>, IEquatable<InternetAddressList>, IComparable<InternetAddressList>
 	{
-		readonly List<InternetAddress> list = new List<InternetAddress> ();
+		readonly List<InternetAddress> list;
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="InternetAddressList"/> class.
@@ -62,12 +68,17 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="addresses">An initial list of addresses.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="addresses"/> is <c>null</c>.
+		/// <paramref name="addresses"/> is <see langword="null"/>.
 		/// </exception>
 		public InternetAddressList (IEnumerable<InternetAddress> addresses)
 		{
-			if (addresses == null)
+			if (addresses is null)
 				throw new ArgumentNullException (nameof (addresses));
+
+			if (addresses is IList<InternetAddress> lst)
+				list = new List<InternetAddress> (lst.Count);
+			else
+				list = new List<InternetAddress> ();
 
 			foreach (var address in addresses) {
 				address.Changed += AddressChanged;
@@ -83,22 +94,34 @@ namespace MimeKit {
 		/// </remarks>
 		public InternetAddressList ()
 		{
+			list = new List<InternetAddress> ();
+		}
+
+		// Note: This .ctor gets used by the Parse and TryParse methods and is meant to reduce duplicating an
+		// existing List<InternetAddress> for no reason.
+		InternetAddressList (List<InternetAddress> addresses)
+		{
+			list = addresses;
+
+			foreach (var address in addresses)
+				address.Changed += AddressChanged;
 		}
 
 		/// <summary>
-		/// Recursively get all of the mailboxes contained within the <see cref="InternetAddressList"/>.
+		/// Recursively get all the mailboxes contained within the <see cref="InternetAddressList"/>.
 		/// </summary>
 		/// <remarks>
 		/// This API is useful for collecting a flattened list of <see cref="MailboxAddress"/>
 		/// recipients for use with sending via SMTP or for encrypting via S/MIME or PGP/MIME.
 		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\InternetAddressExamples.cs" region="EnumerateMailboxes"/>
+		/// </example>
 		/// <value>The mailboxes.</value>
 		public IEnumerable<MailboxAddress> Mailboxes {
 			get {
 				foreach (var address in list) {
-					var group = address as GroupAddress;
-
-					if (group != null) {
+					if (address is GroupAddress group) {
 						foreach (var mailbox in group.Members.Mailboxes)
 							yield return mailbox;
 					} else {
@@ -121,11 +144,11 @@ namespace MimeKit {
 		/// <returns>The index of the specified address if found; otherwise <c>-1</c>.</returns>
 		/// <param name="address">The address to get the index of.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="address"/> is <c>null</c>.
+		/// <paramref name="address"/> is <see langword="null"/>.
 		/// </exception>
 		public int IndexOf (InternetAddress address)
 		{
-			if (address == null)
+			if (address is null)
 				throw new ArgumentNullException (nameof (address));
 
 			return list.IndexOf (address);
@@ -140,7 +163,7 @@ namespace MimeKit {
 		/// <param name="index">The index to insert the address.</param>
 		/// <param name="address">The address.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="address"/> is <c>null</c>.
+		/// <paramref name="address"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
@@ -150,7 +173,7 @@ namespace MimeKit {
 			if (index < 0 || index > list.Count)
 				throw new ArgumentOutOfRangeException (nameof (index));
 
-			if (address == null)
+			if (address is null)
 				throw new ArgumentNullException (nameof (address));
 
 			address.Changed += AddressChanged;
@@ -187,7 +210,7 @@ namespace MimeKit {
 		/// <value>The internet address at the specified index.</value>
 		/// <param name="index">The index of the address to get or set.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
@@ -198,7 +221,7 @@ namespace MimeKit {
 				if (index < 0 || index >= list.Count)
 					throw new ArgumentOutOfRangeException (nameof (index));
 
-				if (value == null)
+				if (value is null)
 					throw new ArgumentNullException (nameof (value));
 
 				if (list[index] == value)
@@ -232,7 +255,7 @@ namespace MimeKit {
 		/// <remarks>
 		/// A <see cref="InternetAddressList"/> is never read-only.
 		/// </remarks>
-		/// <value><c>true</c> if this instance is read only; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if this instance is read only; otherwise, <see langword="false" />.</value>
 		public bool IsReadOnly {
 			get { return false; }
 		}
@@ -245,11 +268,11 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="address">The address.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="address"/> is <c>null</c>.
+		/// <paramref name="address"/> is <see langword="null"/>.
 		/// </exception>
 		public void Add (InternetAddress address)
 		{
-			if (address == null)
+			if (address is null)
 				throw new ArgumentNullException (nameof (address));
 
 			address.Changed += AddressChanged;
@@ -265,11 +288,11 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="addresses">A colelction of addresses.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="addresses"/> is <c>null</c>.
+		/// <paramref name="addresses"/> is <see langword="null"/>.
 		/// </exception>
 		public void AddRange (IEnumerable<InternetAddress> addresses)
 		{
-			if (addresses == null)
+			if (addresses is null)
 				throw new ArgumentNullException (nameof (addresses));
 
 			bool changed = false;
@@ -288,7 +311,7 @@ namespace MimeKit {
 		/// Clear the address list.
 		/// </summary>
 		/// <remarks>
-		/// Removes all of the addresses from the list.
+		/// Removes all the addresses from the list.
 		/// </remarks>
 		public void Clear ()
 		{
@@ -306,17 +329,17 @@ namespace MimeKit {
 		/// Check if the <see cref="InternetAddressList"/> contains the specified address.
 		/// </summary>
 		/// <remarks>
-		/// Determines whether or not the address list contains the specified address.
+		/// Determines whether the address list contains the specified address.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified address exists;
-		/// otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the specified address exists;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="address">The address.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="address"/> is <c>null</c>.
+		/// <paramref name="address"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Contains (InternetAddress address)
 		{
-			if (address == null)
+			if (address is null)
 				throw new ArgumentNullException (nameof (address));
 
 			return list.Contains (address);
@@ -332,7 +355,7 @@ namespace MimeKit {
 		/// <param name="array">The array to copy the addresses to.</param>
 		/// <param name="arrayIndex">The index into the array.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="array"/> is <c>null</c>.
+		/// <paramref name="array"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="arrayIndex"/> is out of range.
@@ -343,19 +366,19 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Remove the specified address from the <see cref="InternetAddressList"/>.
+		/// Remove an address from the <see cref="InternetAddressList"/>.
 		/// </summary>
 		/// <remarks>
 		/// Removes the specified address.
 		/// </remarks>
-		/// <returns><value>true</value> if the address was removed; otherwise <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the address was removed; otherwise, <see langword="false" />.</returns>
 		/// <param name="address">The address.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="address"/> is <c>null</c>.
+		/// <paramref name="address"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Remove (InternetAddress address)
 		{
-			if (address == null)
+			if (address is null)
 				throw new ArgumentNullException (nameof (address));
 
 			if (list.Remove (address)) {
@@ -410,11 +433,11 @@ namespace MimeKit {
 		/// Determines whether the specified <see cref="InternetAddressList"/> is equal to the current <see cref="InternetAddressList"/>.
 		/// </remarks>
 		/// <param name="other">The <see cref="InternetAddressList"/> to compare with the current <see cref="InternetAddressList"/>.</param>
-		/// <returns><c>true</c> if the specified <see cref="InternetAddressList"/> is equal to the current
-		/// <see cref="InternetAddressList"/>; otherwise, <c>false</c>.</returns>
-		public bool Equals (InternetAddressList other)
+		/// <returns><see langword="true" /> if the specified <see cref="InternetAddressList"/> is equal to the current
+		/// <see cref="InternetAddressList"/>; otherwise, <see langword="false" />.</returns>
+		public bool Equals (InternetAddressList? other)
 		{
-			if (other == null)
+			if (other is null)
 				return false;
 
 			if (other.Count != Count)
@@ -441,13 +464,13 @@ namespace MimeKit {
 		/// <returns>The sort order of the current internet address list compared to the other internet address list.</returns>
 		/// <param name="other">The internet address list to compare to.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="other"/> is <c>null</c>.
+		/// <paramref name="other"/> is <see langword="null"/>.
 		/// </exception>
-		public int CompareTo (InternetAddressList other)
+		public int CompareTo (InternetAddressList? other)
 		{
 			int rv;
 
-			if (other == null)
+			if (other is null)
 				throw new ArgumentNullException (nameof (other));
 
 			for (int i = 0; i < Math.Min (Count, other.Count); i++) {
@@ -468,8 +491,8 @@ namespace MimeKit {
 		/// the current instance is a reference type or a value type.
 		/// </remarks>
 		/// <param name="obj">The object to compare with the current object.</param>
-		/// <returns><c>true</c> if the specified object is equal to the current object; otherwise, <c>false</c>.</returns>
-		public override bool Equals (object obj)
+		/// <returns><see langword="true" /> if the specified object is equal to the current object; otherwise, <see langword="false" />.</returns>
+		public override bool Equals (object? obj)
 		{
 			return Equals (obj as InternetAddressList);
 		}
@@ -502,13 +525,13 @@ namespace MimeKit {
 		/// Serialize an <see cref="InternetAddressList"/> to a string, optionally encoding the list of addresses for transport.
 		/// </summary>
 		/// <remarks>
-		/// <para>If <paramref name="encode"/> is <c>true</c>, each address in the list will be encoded
+		/// <para>If <paramref name="encode"/> is <see langword="true" />, each address in the list will be encoded
 		/// according to the rules defined in rfc2047.</para>
 		/// <para>If there are multiple addresses in the list, they will be separated by a comma.</para>
 		/// </remarks>
 		/// <returns>A string representing the <see cref="InternetAddressList"/>.</returns>
 		/// <param name="options">The formatting options.</param>
-		/// <param name="encode">If set to <c>true</c>, each <see cref="InternetAddress"/> in the list will be encoded.</param>
+		/// <param name="encode">If set to <see langword="true" />, each <see cref="InternetAddress"/> in the list will be encoded.</param>
 		public string ToString (FormatOptions options, bool encode)
 		{
 			var builder = new StringBuilder ();
@@ -535,12 +558,12 @@ namespace MimeKit {
 		/// Serialize an <see cref="InternetAddressList"/> to a string, optionally encoding the list of addresses for transport.
 		/// </summary>
 		/// <remarks>
-		/// <para>If <paramref name="encode"/> is <c>true</c>, each address in the list will be encoded
+		/// <para>If <paramref name="encode"/> is <see langword="true" />, each address in the list will be encoded
 		/// according to the rules defined in rfc2047.</para>
 		/// <para>If there are multiple addresses in the list, they will be separated by a comma.</para>
 		/// </remarks>
 		/// <returns>A string representing the <see cref="InternetAddressList"/>.</returns>
-		/// <param name="encode">If set to <c>true</c>, each <see cref="InternetAddress"/> in the list will be encoded.</param>
+		/// <param name="encode">If set to <see langword="true" />, each <see cref="InternetAddress"/> in the list will be encoded.</param>
 		public string ToString (bool encode)
 		{
 			return ToString (FormatOptions.Default, encode);
@@ -558,64 +581,27 @@ namespace MimeKit {
 			return ToString (FormatOptions.Default, false);
 		}
 
-		internal event EventHandler Changed;
+		internal event EventHandler<InternetAddressList, EventArgs>? Changed;
 
 		void OnChanged ()
 		{
-			if (Changed != null)
-				Changed (this, EventArgs.Empty);
+			Changed?.Invoke (this, EventArgs.Empty);
 		}
 
-		void AddressChanged (object sender, EventArgs e)
+		void AddressChanged (object? sender, EventArgs e)
 		{
 			OnChanged ();
 		}
 
-		internal static bool TryParse (ParserOptions options, byte[] text, ref int index, int endIndex, bool isGroup, int groupDepth, bool throwOnError, out List<InternetAddress> addresses)
+		internal static bool TryParse (AddressParserFlags flags, ParserOptions options, byte[] text, ref int index, int endIndex, bool isGroup, int groupDepth, [NotNullWhen (true)] out List<InternetAddress>? addresses)
 		{
-			var flags = throwOnError ? InternetAddress.AddressParserFlags.Parse : InternetAddress.AddressParserFlags.TryParse;
-			var list = new List<InternetAddress> ();
-			InternetAddress address;
+			var parser = AddressParser.Create (options, text, index, endIndex);
 
-			addresses = null;
-
-			if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
-				return false;
-
-			if (index == endIndex) {
-				if (throwOnError)
-					throw new ParseException ("No addresses found.", index, index);
-
-				return false;
+			try {
+				return parser.TryParseList (flags, isGroup, groupDepth, out addresses);
+			} finally {
+				index = parser.Position;
 			}
-
-			while (index < endIndex) {
-				if (isGroup && text[index] == (byte) ';')
-					break;
-
-				if (!InternetAddress.TryParse (options, text, ref index, endIndex, groupDepth, flags, out address)) {
-					// skip this address...
-					while (index < endIndex && text[index] != (byte) ',' && (!isGroup || text[index] != (byte) ';'))
-						index++;
-				} else {
-					list.Add (address);
-				}
-
-				// Note: we loop here in case there are any null addresses between commas
-				do {
-					if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
-						return false;
-
-					if (index >= endIndex || text[index] != (byte) ',')
-						break;
-
-					index++;
-				} while (true);
-			}
-
-			addresses = list;
-
-			return true;
 		}
 
 		/// <summary>
@@ -625,29 +611,22 @@ namespace MimeKit {
 		/// Parses a list of addresses from the supplied buffer starting at the given index
 		/// and spanning across the specified number of bytes.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address list was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address list was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <param name="addresses">The parsed addresses.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, int startIndex, int length, out InternetAddressList addresses)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, int startIndex, int length, [NotNullWhen (true)] out InternetAddressList? addresses)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex, length);
+			if (!ArgumentValidator.TryValidate (options, buffer, startIndex, length)) {
+				addresses = null;
+				return false;
+			}
 
-			List<InternetAddress> addrlist;
 			int index = startIndex;
 
-			if (!TryParse (options, buffer, ref index, startIndex + length, false, 0, false, out addrlist)) {
+			if (!TryParse (AddressParserFlags.TryParse, options, buffer, ref index, startIndex + length, false, 0, out var addrlist)) {
 				addresses = null;
 				return false;
 			}
@@ -664,19 +643,12 @@ namespace MimeKit {
 		/// Parses a list of addresses from the supplied buffer starting at the given index
 		/// and spanning across the specified number of bytes.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address list was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address list was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <param name="addresses">The parsed addresses.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, int length, out InternetAddressList addresses)
+		public static bool TryParse (byte[]? buffer, int startIndex, int length, [NotNullWhen (true)] out InternetAddressList? addresses)
 		{
 			return TryParse (ParserOptions.Default, buffer, startIndex, length, out addresses);
 		}
@@ -687,27 +659,21 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a list of addresses from the supplied buffer starting at the specified index.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address list was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address list was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="addresses">The parsed addresses.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> is out of range.
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, int startIndex, out InternetAddressList addresses)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, int startIndex, [NotNullWhen (true)] out InternetAddressList? addresses)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex);
+			if (!ArgumentValidator.TryValidate (options, buffer, startIndex)) {
+				addresses = null;
+				return false;
+			}
 
-			List<InternetAddress> addrlist;
 			int index = startIndex;
 
-			if (!TryParse (options, buffer, ref index, buffer.Length, false, 0, false, out addrlist)) {
+			if (!TryParse (AddressParserFlags.TryParse, options, buffer, ref index, buffer.Length, false, 0, out var addrlist)) {
 				addresses = null;
 				return false;
 			}
@@ -723,17 +689,11 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a list of addresses from the supplied buffer starting at the specified index.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address list was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address list was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="addresses">The parsed addresses.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> is out of range.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, out InternetAddressList addresses)
+		public static bool TryParse (byte[]? buffer, int startIndex, [NotNullWhen (true)] out InternetAddressList? addresses)
 		{
 			return TryParse (ParserOptions.Default, buffer, startIndex, out addresses);
 		}
@@ -744,23 +704,20 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a list of addresses from the specified buffer.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address list was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address list was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="addresses">The parsed addresses.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
-		/// </exception>
-		public static bool TryParse (ParserOptions options, byte[] buffer, out InternetAddressList addresses)
+		public static bool TryParse (ParserOptions? options, byte[]? buffer, [NotNullWhen (true)] out InternetAddressList? addresses)
 		{
-			ParseUtils.ValidateArguments (options, buffer);
+			if (!ArgumentValidator.TryValidate (options, buffer)) {
+				addresses = null;
+				return false;
+			}
 
-			List<InternetAddress> addrlist;
 			int index = 0;
 
-			if (!TryParse (options, buffer, ref index, buffer.Length, false, 0, false, out addrlist)) {
+			if (!TryParse (AddressParserFlags.TryParse, options, buffer, ref index, buffer.Length, false, 0, out var addrlist)) {
 				addresses = null;
 				return false;
 			}
@@ -776,13 +733,10 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a list of addresses from the specified buffer.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address list was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address list was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="addresses">The parsed addresses.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, out InternetAddressList addresses)
+		public static bool TryParse (byte[]? buffer, [NotNullWhen (true)] out InternetAddressList? addresses)
 		{
 			return TryParse (ParserOptions.Default, buffer, out addresses);
 		}
@@ -793,24 +747,20 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a list of addresses from the specified text.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address list was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address list was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="text">The text.</param>
 		/// <param name="addresses">The parsed addresses.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
-		/// <para>-or-</para>
-		/// <para><paramref name="text"/> is <c>null</c>.</para>
-		/// </exception>
-		public static bool TryParse (ParserOptions options, string text, out InternetAddressList addresses)
+		public static bool TryParse (ParserOptions? options, string? text, [NotNullWhen (true)] out InternetAddressList? addresses)
 		{
-			ParseUtils.ValidateArguments (options, text);
+			if (!ArgumentValidator.TryValidate (options, text)) {
+				addresses = null;
+				return false;
+			}
 
-			var buffer = Encoding.UTF8.GetBytes (text);
-			List<InternetAddress> addrlist;
-			int index = 0;
+			var parser = AddressParser.Create (options, text);
 
-			if (!TryParse (options, buffer, ref index, buffer.Length, false, 0, false, out addrlist)) {
+			if (!parser.TryParseList (AddressParserFlags.TryParse, false, 0, out var addrlist)) {
 				addresses = null;
 				return false;
 			}
@@ -826,13 +776,10 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a list of addresses from the specified text.
 		/// </remarks>
-		/// <returns><c>true</c>, if the address list was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the address list was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="text">The text.</param>
 		/// <param name="addresses">The parsed addresses.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (string text, out InternetAddressList addresses)
+		public static bool TryParse (string? text, [NotNullWhen (true)] out InternetAddressList? addresses)
 		{
 			return TryParse (ParserOptions.Default, text, out addresses);
 		}
@@ -850,9 +797,9 @@ namespace MimeKit {
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
+		/// <para><paramref name="buffer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -863,14 +810,13 @@ namespace MimeKit {
 		/// </exception>
 		public static InternetAddressList Parse (ParserOptions options, byte[] buffer, int startIndex, int length)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex, length);
+			ArgumentValidator.Validate (options, buffer, startIndex, length);
 
-			List<InternetAddress> addrlist;
 			int index = startIndex;
 
-			TryParse (options, buffer, ref index, startIndex + length, false, 0, true, out addrlist);
+			TryParse (AddressParserFlags.Parse, options, buffer, ref index, startIndex + length, false, 0, out var addrlist);
 
-			return new InternetAddressList (addrlist);
+			return new InternetAddressList (addrlist!);
 		}
 
 		/// <summary>
@@ -885,7 +831,7 @@ namespace MimeKit {
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -910,9 +856,9 @@ namespace MimeKit {
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
+		/// <para><paramref name="buffer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/>is out of range.
@@ -922,14 +868,13 @@ namespace MimeKit {
 		/// </exception>
 		public static InternetAddressList Parse (ParserOptions options, byte[] buffer, int startIndex)
 		{
-			ParseUtils.ValidateArguments (options, buffer, startIndex);
+			ArgumentValidator.Validate (options, buffer, startIndex);
 
-			List<InternetAddress> addrlist;
 			int index = startIndex;
 
-			TryParse (options, buffer, ref index, buffer.Length, false, 0, true, out addrlist);
+			TryParse (AddressParserFlags.Parse, options, buffer, ref index, buffer.Length, false, 0, out var addrlist);
 
-			return new InternetAddressList (addrlist);
+			return new InternetAddressList (addrlist!);
 		}
 
 		/// <summary>
@@ -942,7 +887,7 @@ namespace MimeKit {
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> is out of range.
@@ -965,23 +910,22 @@ namespace MimeKit {
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="buffer">The input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="buffer"/> is <c>null</c>.</para>
+		/// <para><paramref name="buffer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// <paramref name="buffer"/> could not be parsed.
 		/// </exception>
 		public static InternetAddressList Parse (ParserOptions options, byte[] buffer)
 		{
-			ParseUtils.ValidateArguments (options, buffer);
+			ArgumentValidator.Validate (options, buffer);
 
-			List<InternetAddress> addrlist;
 			int index = 0;
 
-			TryParse (options, buffer, ref index, buffer.Length, false, 0, true, out addrlist);
+			TryParse (AddressParserFlags.Parse, options, buffer, ref index, buffer.Length, false, 0, out var addrlist);
 
-			return new InternetAddressList (addrlist);
+			return new InternetAddressList (addrlist!);
 		}
 
 		/// <summary>
@@ -993,7 +937,7 @@ namespace MimeKit {
 		/// <returns>The parsed <see cref="InternetAddressList"/>.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// <paramref name="buffer"/> could not be parsed.
@@ -1013,24 +957,21 @@ namespace MimeKit {
 		/// <param name="options">The parser options to use.</param>
 		/// <param name="text">The text.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para><paramref name="options"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="text"/> is <c>null</c>.</para>
+		/// <para><paramref name="text"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// <paramref name="text"/> could not be parsed.
 		/// </exception>
 		public static InternetAddressList Parse (ParserOptions options, string text)
 		{
-			ParseUtils.ValidateArguments (options, text);
+			ArgumentValidator.Validate (options, text);
 
-			var buffer = Encoding.UTF8.GetBytes (text);
-			List<InternetAddress> addrlist;
-			int index = 0;
+			var parser = AddressParser.Create (options, text);
+			parser.TryParseList (AddressParserFlags.Parse, false, 0, out var addrlist);
 
-			TryParse (options, buffer, ref index, buffer.Length, false, 0, true, out addrlist);
-
-			return new InternetAddressList (addrlist);
+			return new InternetAddressList (addrlist!);
 		}
 
 		/// <summary>
@@ -1039,10 +980,13 @@ namespace MimeKit {
 		/// <remarks>
 		/// Parses a list of addresses from the specified text.
 		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\InternetAddressExamples.cs" region="ParseAddressList"/>
+		/// </example>
 		/// <returns>The parsed <see cref="InternetAddressList"/>.</returns>
 		/// <param name="text">The text.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// <paramref name="text"/> could not be parsed.
@@ -1066,9 +1010,10 @@ namespace MimeKit {
 		/// <exception cref="System.InvalidCastException">
 		/// <paramref name="addresses"/> contains one or more group addresses and cannot be converted.
 		/// </exception>
-		public static explicit operator MailAddressCollection (InternetAddressList addresses)
+		[return: NotNullIfNotNull (nameof (addresses))]
+		public static explicit operator MailAddressCollection? (InternetAddressList? addresses)
 		{
-			if (addresses == null)
+			if (addresses is null)
 				return null;
 
 			var collection = new MailAddressCollection ();
@@ -1090,13 +1035,14 @@ namespace MimeKit {
 		/// </summary>
 		/// <remarks>
 		/// Casts a <see cref="System.Net.Mail.MailAddressCollection"/> to a <see cref="InternetAddressList"/>
-		/// in cases where you might want to make use of the the superior MimeKit APIs.
+		/// in cases where you might want to make use of the superior MimeKit APIs.
 		/// </remarks>
 		/// <returns>The equivalent <see cref="InternetAddressList"/>.</returns>
 		/// <param name="addresses">The mail address.</param>
-		public static explicit operator InternetAddressList (MailAddressCollection addresses)
+		[return: NotNullIfNotNull (nameof (addresses))]
+		public static explicit operator InternetAddressList? (MailAddressCollection? addresses)
 		{
-			if (addresses == null)
+			if (addresses is null)
 				return null;
 
 			var list = new InternetAddressList ();

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,25 +24,20 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
 using System.Text;
-
-using NUnit.Framework;
 
 using MimeKit;
 using MimeKit.Cryptography;
 
-namespace UnitTests.Cryptography
-{
+namespace UnitTests.Cryptography {
 	[TestFixture]
 	public class ArcVerifierTests
 	{
 		[Test]
 		public void TestArgumentExceptions ()
 		{
-			var locator = new DkimPublicKeyLocator ();
-			var verifier = new ArcVerifier (locator);
+			var resolver = new MockDnsResolver ();
+			var verifier = new ArcVerifier (resolver);
 			var message = new MimeMessage ();
 
 			Assert.Throws<ArgumentNullException> (() => new ArcVerifier (null));
@@ -64,8 +59,8 @@ namespace UnitTests.Cryptography
 			var header = new Header (HeaderId.ArcMessageSignature, "i=1; a=rsa-sha256; ...");
 			var result = new ArcHeaderValidationResult (header, ArcSignatureValidationResult.Fail);
 
-			Assert.AreEqual (header, result.Header, "Header");
-			Assert.AreEqual (ArcSignatureValidationResult.Fail, result.Signature);
+			Assert.That (result.Header, Is.EqualTo (header), "Header");
+			Assert.That (result.Signature, Is.EqualTo (ArcSignatureValidationResult.Fail));
 		}
 
 		[Test]
@@ -79,14 +74,23 @@ namespace UnitTests.Cryptography
 
 			var result = new ArcValidationResult (ArcSignatureValidationResult.Pass, ams, new[] { seal });
 
-			Assert.AreEqual (ArcSignatureValidationResult.Pass, result.Chain, "Chain");
-			Assert.IsNotNull (result.MessageSignature, "MessageSignature != null");
-			Assert.AreEqual (HeaderId.ArcMessageSignature, result.MessageSignature.Header.Id, "MessageSignature.Header.Id");
-			Assert.AreEqual (ArcSignatureValidationResult.Pass, result.MessageSignature.Signature, "MessageSignature.Signature");
-			Assert.IsNotNull (result.Seals, "Seals != null");
-			Assert.AreEqual (1, result.Seals.Length, "Seals.Length");
-			Assert.AreEqual (HeaderId.ArcSeal, result.Seals[0].Header.Id, "Seals[0].Header.Id");
-			Assert.AreEqual (ArcSignatureValidationResult.Pass, result.Seals[0].Signature, "Seals[0].Signature");
+			Assert.That (result.Chain, Is.EqualTo (ArcSignatureValidationResult.Pass), "Chain");
+			Assert.That (result.MessageSignature, Is.Not.Null, "MessageSignature != null");
+			Assert.That (result.MessageSignature.Header.Id, Is.EqualTo (HeaderId.ArcMessageSignature), "MessageSignature.Header.Id");
+			Assert.That (result.MessageSignature.Signature, Is.EqualTo (ArcSignatureValidationResult.Pass), "MessageSignature.Signature");
+			Assert.That (result.Seals, Is.Not.Null, "Seals != null");
+			Assert.That (result.Seals.Length, Is.EqualTo (1), "Seals.Length");
+			Assert.That (result.Seals[0].Header.Id, Is.EqualTo (HeaderId.ArcSeal), "Seals[0].Header.Id");
+			Assert.That (result.Seals[0].Signature, Is.EqualTo (ArcSignatureValidationResult.Pass), "Seals[0].Signature");
+		}
+
+		[Test]
+		public void TestArcHeaderSetRejectsUnexpectedHeader ()
+		{
+			var set = new ArcHeaderSet ();
+			var header = new Header (HeaderId.Subject, "unexpected");
+
+			Assert.That (set.Add (header, null), Is.False);
 		}
 
 		[Test]
@@ -145,8 +149,8 @@ This is a test message.
 				broken = new Header (HeaderId.ArcAuthenticationResults, "this should be unparsable...");
 				message.Headers[index] = broken;
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "Broken AAR");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcAuthenticationResults, errors, "Errors");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "Broken AAR");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcAuthenticationResults), "Errors");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -159,8 +163,8 @@ This is a test message.
 				// set an AAR that is missing the instance value
 				broken.Value = aar.Value.Replace ("i=1; ", "");
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "AAR missing i=1");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcAuthenticationResults, errors, "Errors missing i=1");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "AAR missing i=1");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcAuthenticationResults), "Errors missing i=1");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -173,8 +177,8 @@ This is a test message.
 				// set an AAR that has an invalid instance value
 				broken.Value = aar.Value.Replace ("i=1; ", "i=0; ");
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "AAR i=0");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcAuthenticationResults, errors, "Errors i=0");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "AAR i=0");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcAuthenticationResults), "Errors i=0");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -187,8 +191,8 @@ This is a test message.
 				// remove the AAR completely
 				message.Headers.RemoveAt (index);
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "Missing AAR");
-				Assert.AreEqual (ArcValidationErrors.MissingArcAuthenticationResults, errors, "Errors removed AAR");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "Missing AAR");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.MissingArcAuthenticationResults), "Errors removed AAR");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -256,8 +260,8 @@ This is a test message.
 				broken = new Header (HeaderId.ArcMessageSignature, "this should be unparsable...");
 				message.Headers[index] = broken;
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "Broken AMS");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcMessageSignature, errors, "Errors");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "Broken AMS");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcMessageSignature), "Errors");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -270,8 +274,8 @@ This is a test message.
 				// set an AMS that is missing the instance value
 				broken.Value = ams.Value.Replace ("i=1; ", "");
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "AMS missing i=1");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcMessageSignature, errors, "Errors missing i=1");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "AMS missing i=1");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcMessageSignature), "Errors missing i=1");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -284,8 +288,8 @@ This is a test message.
 				// set an AMS that has an invalid instance value
 				broken.Value = ams.Value.Replace ("i=1; ", "i=0; ");
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "AMS i=0");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcMessageSignature, errors, "Errors i=0");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "AMS i=0");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcMessageSignature), "Errors i=0");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -298,8 +302,8 @@ This is a test message.
 				// remove the AMS completely
 				message.Headers.RemoveAt (index);
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "Missing AMS");
-				Assert.AreEqual (ArcValidationErrors.MissingArcMessageSignature, errors, "Errors removed AMS");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "Missing AMS");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.MissingArcMessageSignature), "Errors removed AMS");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -367,8 +371,8 @@ This is a test message.
 				broken = new Header (HeaderId.ArcSeal, "this should be unparsable...");
 				message.Headers[index] = broken;
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "Broken AS");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcSeal, errors, "Errors");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "Broken AS");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcSeal), "Errors");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -381,8 +385,8 @@ This is a test message.
 				// set an AS that is missing the instance value
 				broken.Value = seal.Value.Replace ("i=1; ", "");
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "AS missing i=1");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcSeal, errors, "Errors missing i=1");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "AS missing i=1");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcSeal), "Errors missing i=1");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -395,8 +399,8 @@ This is a test message.
 				// set an AS that has an invalid instance value
 				broken.Value = seal.Value.Replace ("i=1; ", "i=0; ");
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "AS i=0");
-				Assert.AreEqual (ArcValidationErrors.InvalidArcSeal, errors, "Errors i=0");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "AS i=0");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.InvalidArcSeal), "Errors i=0");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -409,8 +413,8 @@ This is a test message.
 				// remove the AS completely
 				message.Headers.RemoveAt (index);
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "Missing AS");
-				Assert.AreEqual (ArcValidationErrors.MissingArcSeal, errors, "Errors removed AS");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "Missing AS");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.MissingArcSeal), "Errors removed AS");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -496,8 +500,8 @@ This is a test message.
 				index = message.Headers.LastIndexOf (HeaderId.ArcAuthenticationResults);
 				message.Headers.RemoveAt (index);
 
-				Assert.AreEqual (ArcSignatureValidationResult.Fail, ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), "Missing set");
-				Assert.AreEqual (ArcValidationErrors.MissingArcAuthenticationResults | ArcValidationErrors.MissingArcMessageSignature | ArcValidationErrors.MissingArcSeal, errors, "Errors");
+				Assert.That (ArcVerifier.GetArcHeaderSets (message, false, out sets, out count, out errors), Is.EqualTo (ArcSignatureValidationResult.Fail), "Missing set");
+				Assert.That (errors, Is.EqualTo (ArcValidationErrors.MissingArcAuthenticationResults | ArcValidationErrors.MissingArcMessageSignature | ArcValidationErrors.MissingArcSeal), "Errors");
 
 				try {
 					ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors);
@@ -509,31 +513,318 @@ This is a test message.
 			}
 		}
 
-		static void Validate (string description, string input, DkimPublicKeyLocator locator, ArcSignatureValidationResult expected, ArcValidationErrors expectedErrors = ArcValidationErrors.None)
+		[Test]
+		public void TestGetArcHeaderSetsDuplicateHeaderThrows ()
+		{
+			using (var message = LoadDiagnosticsMessage ()) {
+				ArcValidationErrors errors;
+				ArcHeaderSet[] sets;
+				int count;
+
+				message.Headers.Insert (0, new Header (HeaderId.ArcSeal, message.Headers[HeaderId.ArcSeal]));
+
+				var ex = Assert.Throws<FormatException> (() => ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors));
+
+				Assert.That (ex.Message, Is.EqualTo ("Duplicate ARC-Seal header for i=1"));
+			}
+		}
+
+		[Test]
+		public void TestGetArcHeaderSetsMissingChainValidationThrows ()
+		{
+			using (var message = LoadDiagnosticsMessage ()) {
+				ArcValidationErrors errors;
+				ArcHeaderSet[] sets;
+				int count;
+
+				message.Headers[HeaderId.ArcSeal] = message.Headers[HeaderId.ArcSeal].Replace ("cv=none; ", string.Empty);
+
+				var ex = Assert.Throws<FormatException> (() => ArcVerifier.GetArcHeaderSets (message, true, out sets, out count, out errors));
+
+				Assert.That (ex.Message, Is.EqualTo ("Missing chain validation tag in ARC-Seal header for i=1."));
+			}
+		}
+
+		static void Validate (string description, string input, MockDnsResolver resolver, ArcSignatureValidationResult expected, ArcValidationErrors expectedErrors = ArcValidationErrors.None)
 		{
 			if (string.IsNullOrEmpty (input)) {
-				Assert.AreEqual (expected, ArcSignatureValidationResult.None, description);
+				Assert.That (expected, Is.EqualTo (ArcSignatureValidationResult.None), description);
 				return;
 			}
 
 			var buffer = Encoding.UTF8.GetBytes (input);
 
 			using (var stream = new MemoryStream (buffer, false)) {
-				var verifier = new ArcVerifier (locator);
+				var verifier = new ArcVerifier (resolver);
 				var message = MimeMessage.Load (stream);
 				ArcValidationResult result;
 
 				// Test Verify
 				result = verifier.Verify (message);
-				Assert.AreEqual (expected, result.Chain, description);
-				Assert.AreEqual (expectedErrors, result.ChainErrors, "chain errors");
+				Assert.That (result.Chain, Is.EqualTo (expected), description);
+				Assert.That (result.ChainErrors, Is.EqualTo (expectedErrors), "chain errors");
 
 				// Test VerifyAsync
 				result = verifier.VerifyAsync (message).GetAwaiter ().GetResult ();
-				Assert.AreEqual (expected, result.Chain, description);
-				Assert.AreEqual (expectedErrors, result.ChainErrors, "async chain errors");
+				Assert.That (result.Chain, Is.EqualTo (expected), description);
+				Assert.That (result.ChainErrors, Is.EqualTo (expectedErrors), "async chain errors");
 			}
 		}
+
+		#region Diagnostics
+
+		const string DiagnosticsKeyName = "dummy._domainkey.example.org";
+		const string DiagnosticsPublicKey = "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3idY6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lxj+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB";
+		const string DiagnosticsMessage = @"MIME-Version: 1.0
+Return-Path: <jqd@d1.example.org>
+ARC-Seal: a=rsa-sha256;
+    b=dOdFEyhrk/tw5wl3vMIogoxhaVsKJkrkEhnAcq2XqOLSQhPpGzhGBJzR7k1sWGokon3TmQ
+    7TX9zQLO6ikRpwd/pUswiRW5DBupy58fefuclXJAhErsrebfvfiueGyhHXV7C1LyJTztywzn
+    QGG4SCciU/FTlsJ0QANrnLRoadfps=; cv=none; d=example.org; i=1; s=dummy;
+    t=12345
+ARC-Message-Signature: a=rsa-sha256;
+    b=QsRzR/UqwRfVLBc1TnoQomlVw5qi6jp08q8lHpBSl4RehWyHQtY3uOIAGdghDk/mO+/Xpm
+    9JA5UVrPyDV0f+2q/YAHuwvP11iCkBQkocmFvgTSxN8H+DwFFPrVVUudQYZV7UDDycXoM6UE
+    cdfzLLzVNPOAHEDIi/uzoV4sUqZ18=;
+    bh=KWSe46TZKCcDbH4klJPo+tjk5LWJnVRlP5pvjXFZYLQ=; c=relaxed/relaxed;
+    d=example.org; h=from:to:date:subject:mime-version:arc-authentication-results;
+    i=1; s=dummy; t=12345
+ARC-Authentication-Results: i=1; lists.example.org;
+    spf=pass smtp.mfrom=jqd@d1.example;
+    dkim=pass (1024-bit key) header.i=@d1.example;
+    dmarc=pass
+Received: from segv.d1.example (segv.d1.example [72.52.75.15])
+    by lists.example.org (8.14.5/8.14.5) with ESMTP id t0EKaNU9010123
+    for <arc@example.org>; Thu, 14 Jan 2015 15:01:30 -0800 (PST)
+    (envelope-from jqd@d1.example)
+Authentication-Results: lists.example.org;
+    spf=pass smtp.mfrom=jqd@d1.example;
+    dkim=pass (1024-bit key) header.i=@d1.example;
+    dmarc=pass
+Received: by 10.157.14.6 with HTTP; Tue, 3 Jan 2017 12:22:54 -0800 (PST)
+Message-ID: <54B84785.1060301@d1.example.org>
+Date: Thu, 14 Jan 2015 15:00:01 -0800
+From: John Q Doe <jqd@d1.example.org>
+To: arc@dmarc.org
+Subject: Example 1
+
+Hey gang,
+This is a test message.
+--J.
+";
+
+		static MimeMessage LoadDiagnosticsMessage (string input = DiagnosticsMessage)
+		{
+			using (var stream = new MemoryStream (Encoding.UTF8.GetBytes (input), false))
+				return MimeMessage.Load (stream);
+		}
+
+		static MockDnsResolver CreateDiagnosticsResolver ()
+		{
+			var resolver = new MockDnsResolver ();
+
+			resolver.Add (DiagnosticsKeyName, DiagnosticsPublicKey);
+
+			return resolver;
+		}
+
+		static void AssertHeaderResult (ArcHeaderValidationResult result, ArcSignatureValidationResult expected, string reason, Exception exception, string description)
+		{
+			Assert.That (result.Signature, Is.EqualTo (expected), $"{description}: Signature");
+
+			if (reason != null)
+				Assert.That (result.Reason, Is.EqualTo (reason), $"{description}: Reason");
+			else if (expected == ArcSignatureValidationResult.Pass)
+				Assert.That (result.Reason, Is.Null, $"{description}: Reason");
+			else
+				Assert.That (result.Reason, Is.Not.Null.And.Not.Empty, $"{description}: Reason");
+
+			Assert.That (result.Exception, Is.SameAs (exception), $"{description}: Exception");
+		}
+
+		static void AssertPass (ArcValidationResult result)
+		{
+			Assert.That (result.Chain, Is.EqualTo (ArcSignatureValidationResult.Pass), "Chain");
+			Assert.That (result.ChainErrors, Is.EqualTo (ArcValidationErrors.None), "ChainErrors");
+			AssertHeaderResult (result.MessageSignature, ArcSignatureValidationResult.Pass, null, null, "AMS");
+			AssertHeaderResult (result.Seals[0], ArcSignatureValidationResult.Pass, null, null, "AS");
+		}
+
+		[Test]
+		public void TestDiagnosticsPass ()
+		{
+			var verifier = new ArcVerifier (CreateDiagnosticsResolver ());
+
+			AssertPass (verifier.Verify (LoadDiagnosticsMessage ()));
+		}
+
+		[Test]
+		public async Task TestDiagnosticsPassAsync ()
+		{
+			var verifier = new ArcVerifier (CreateDiagnosticsResolver ());
+
+			AssertPass (await verifier.VerifyAsync (LoadDiagnosticsMessage ()));
+		}
+
+		static void AssertTemporaryFailure (ArcValidationResult result, Exception exception)
+		{
+			const ArcValidationErrors expected = ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed | ArcValidationErrors.DnsTemporaryFailure;
+
+			// RFC 8617, Section 5.2.1: All failures (including DNS failures) are permanent.
+			Assert.That (result.Chain, Is.EqualTo (ArcSignatureValidationResult.Fail), "Chain");
+			Assert.That (result.ChainErrors, Is.EqualTo (expected), "ChainErrors");
+			AssertHeaderResult (result.MessageSignature, ArcSignatureValidationResult.Fail, null, exception, "AMS");
+			AssertHeaderResult (result.Seals[0], ArcSignatureValidationResult.Fail, null, exception, "AS");
+		}
+
+		[Test]
+		public void TestDiagnosticsDnsTemporaryFailure ()
+		{
+			var resolver = new MockDnsResolver ();
+
+			resolver.AddFailure (DiagnosticsKeyName, DnsQueryStatus.TemporaryFailure);
+
+			var verifier = new ArcVerifier (resolver);
+
+			AssertTemporaryFailure (verifier.Verify (LoadDiagnosticsMessage ()), null);
+		}
+
+		[Test]
+		public async Task TestDiagnosticsDnsTemporaryFailureAsync ()
+		{
+			var resolver = new MockDnsResolver ();
+
+			resolver.AddFailure (DiagnosticsKeyName, DnsQueryStatus.TemporaryFailure);
+
+			var verifier = new ArcVerifier (resolver);
+
+			AssertTemporaryFailure (await verifier.VerifyAsync (LoadDiagnosticsMessage ()), null);
+		}
+
+		[Test]
+		public void TestDiagnosticsResolverException ()
+		{
+			var resolver = new MockDnsResolver ();
+			var exception = new IOException ("Network unreachable");
+
+			resolver.AddException (DiagnosticsKeyName, exception);
+
+			var verifier = new ArcVerifier (resolver);
+
+			AssertTemporaryFailure (verifier.Verify (LoadDiagnosticsMessage ()), exception);
+		}
+
+		[Test]
+		public async Task TestDiagnosticsResolverExceptionAsync ()
+		{
+			var resolver = new MockDnsResolver ();
+			var exception = new IOException ("Network unreachable");
+
+			resolver.AddException (DiagnosticsKeyName, exception);
+
+			var verifier = new ArcVerifier (resolver);
+
+			AssertTemporaryFailure (await verifier.VerifyAsync (LoadDiagnosticsMessage ()), exception);
+		}
+
+		static void AssertNonExistentDomain (ArcValidationResult result)
+		{
+			Assert.That (result.Chain, Is.EqualTo (ArcSignatureValidationResult.Fail), "Chain");
+			Assert.That (result.ChainErrors, Is.EqualTo (ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed), "ChainErrors");
+			AssertHeaderResult (result.MessageSignature, ArcSignatureValidationResult.Fail, null, null, "AMS");
+			AssertHeaderResult (result.Seals[0], ArcSignatureValidationResult.Fail, null, null, "AS");
+		}
+
+		[Test]
+		public void TestDiagnosticsNonExistentDomain ()
+		{
+			var verifier = new ArcVerifier (new MockDnsResolver ());
+
+			AssertNonExistentDomain (verifier.Verify (LoadDiagnosticsMessage ()));
+		}
+
+		[Test]
+		public async Task TestDiagnosticsNonExistentDomainAsync ()
+		{
+			var verifier = new ArcVerifier (new MockDnsResolver ());
+
+			AssertNonExistentDomain (await verifier.VerifyAsync (LoadDiagnosticsMessage ()));
+		}
+
+		static void AssertMessageSignatureFailure (ArcValidationResult result, string reason)
+		{
+			Assert.That (result.Chain, Is.EqualTo (ArcSignatureValidationResult.Fail), "Chain");
+			Assert.That (result.ChainErrors, Is.EqualTo (ArcValidationErrors.MessageSignatureValidationFailed), "ChainErrors");
+			AssertHeaderResult (result.MessageSignature, ArcSignatureValidationResult.Fail, reason, null, "AMS");
+			AssertHeaderResult (result.Seals[0], ArcSignatureValidationResult.Pass, null, null, "AS");
+		}
+
+		[Test]
+		public void TestDiagnosticsBodyHashMismatch ()
+		{
+			var message = LoadDiagnosticsMessage (DiagnosticsMessage.Replace ("This is a test message.", "This is a modified message."));
+			var verifier = new ArcVerifier (CreateDiagnosticsResolver ());
+
+			AssertMessageSignatureFailure (verifier.Verify (message), "body hash did not verify");
+		}
+
+		[Test]
+		public async Task TestDiagnosticsBodyHashMismatchAsync ()
+		{
+			var message = LoadDiagnosticsMessage (DiagnosticsMessage.Replace ("This is a test message.", "This is a modified message."));
+			var verifier = new ArcVerifier (CreateDiagnosticsResolver ());
+
+			AssertMessageSignatureFailure (await verifier.VerifyAsync (message), "body hash did not verify");
+		}
+
+		[Test]
+		public void TestDiagnosticsSignatureMismatch ()
+		{
+			var message = LoadDiagnosticsMessage (DiagnosticsMessage.Replace ("Subject: Example 1", "Subject: Example 2"));
+			var verifier = new ArcVerifier (CreateDiagnosticsResolver ());
+
+			AssertMessageSignatureFailure (verifier.Verify (message), "signature did not verify");
+		}
+
+		[Test]
+		public async Task TestDiagnosticsSignatureMismatchAsync ()
+		{
+			var message = LoadDiagnosticsMessage (DiagnosticsMessage.Replace ("Subject: Example 1", "Subject: Example 2"));
+			var verifier = new ArcVerifier (CreateDiagnosticsResolver ());
+
+			AssertMessageSignatureFailure (await verifier.VerifyAsync (message), "signature did not verify");
+		}
+
+		static void AssertAlgorithmDisabled (ArcValidationResult result)
+		{
+			Assert.That (result.Chain, Is.EqualTo (ArcSignatureValidationResult.Fail), "Chain");
+			Assert.That (result.ChainErrors, Is.EqualTo (ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed), "ChainErrors");
+			AssertHeaderResult (result.MessageSignature, ArcSignatureValidationResult.Fail, "signature algorithm disabled", null, "AMS");
+			AssertHeaderResult (result.Seals[0], ArcSignatureValidationResult.Fail, "signature algorithm disabled", null, "AS");
+		}
+
+		[Test]
+		public void TestDiagnosticsAlgorithmDisabled ()
+		{
+			var verifier = new ArcVerifier (CreateDiagnosticsResolver ());
+
+			verifier.Disable (DkimSignatureAlgorithm.RsaSha256);
+
+			AssertAlgorithmDisabled (verifier.Verify (LoadDiagnosticsMessage ()));
+		}
+
+		[Test]
+		public async Task TestDiagnosticsAlgorithmDisabledAsync ()
+		{
+			var verifier = new ArcVerifier (CreateDiagnosticsResolver ());
+
+			verifier.Disable (DkimSignatureAlgorithm.RsaSha256);
+
+			AssertAlgorithmDisabled (await verifier.VerifyAsync (LoadDiagnosticsMessage ()));
+		}
+
+		#endregion Diagnostics
+		#pragma warning disable IDE1006 // Naming Styles
 
 		#region Chain Validation
 
@@ -541,11 +832,11 @@ This is a test message.
 		public void cv_empty ()
 		{
 			const string input = @"";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("empty message", input, locator, ArcSignatureValidationResult.None);
+			Validate ("empty message", input, resolver, ArcSignatureValidationResult.None);
 		}
 
 		[Test]
@@ -556,11 +847,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("message with no headers", input, locator, ArcSignatureValidationResult.None);
+			Validate ("message with no headers", input, resolver, ArcSignatureValidationResult.None);
 		}
 
 		[Test]
@@ -575,11 +866,11 @@ From: John Q Doe <jqd@d1.example.org>
 To: arc@dmarc.org
 Subject: Example 1
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("message with no body", input, locator, ArcSignatureValidationResult.None);
+			Validate ("message with no body", input, resolver, ArcSignatureValidationResult.None);
 		}
 
 		[Test]
@@ -598,11 +889,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("base test message1", input, locator, ArcSignatureValidationResult.None);
+			Validate ("base test message1", input, resolver, ArcSignatureValidationResult.None);
 		}
 
 		[Test]
@@ -633,11 +924,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("base test message2", input, locator, ArcSignatureValidationResult.None);
+			Validate ("base test message2", input, resolver, ArcSignatureValidationResult.None);
 		}
 
 		[Test]
@@ -680,11 +971,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("passing message i=1 base1", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("passing message i=1 base1", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -741,11 +1032,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("passing message i=1 base2", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("passing message i=1 base2", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -805,11 +1096,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("passing message i=2 base1", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("passing message i=2 base1", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -884,11 +1175,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("passing message i=2 base2", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("passing message i=2 base2", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -948,11 +1239,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 modified from header, ams(1) no longer valid", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("i=2 base1 modified from header, ams(1) no longer valid", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -1030,11 +1321,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("passing message i=3 base1", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("passing message i=3 base1", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -1128,11 +1419,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("passing message i=4 base1", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("passing message i=4 base1", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -1242,11 +1533,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("passing message i=5 base1", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("passing message i=5 base1", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -1282,11 +1573,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("failing message i=i no ams", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcMessageSignature);
+			Validate ("failing message i=i no ams", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcMessageSignature);
 		}
 
 		[Test]
@@ -1329,11 +1620,11 @@ Hey gang,
 This is an invalid test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("failing message i=i invalid ams", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("failing message i=i invalid ams", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -1371,11 +1662,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("failing message i=i no as", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSeal);
+			Validate ("failing message i=i no as", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSeal);
 		}
 
 		[Test]
@@ -1418,11 +1709,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("failing message i=i as cv=Pass", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
+			Validate ("failing message i=i as cv=Pass", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
 		}
 
 		[Test]
@@ -1465,11 +1756,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("failing message i=i as cv=fail", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
+			Validate ("failing message i=i as cv=fail", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
 		}
 
 		[Test]
@@ -1512,11 +1803,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("failing message i=i invalid as b=", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("failing message i=i invalid as b=", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -1569,11 +1860,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 missing AMS(2)", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcMessageSignature);
+			Validate ("i=2 base1 missing AMS(2)", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcMessageSignature);
 		}
 
 		[Test]
@@ -1633,11 +1924,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 AMS(2) invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("i=2 base1 AMS(2) invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -1692,11 +1983,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 AS(1) NA", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSeal);
+			Validate ("i=2 base1 AS(1) NA", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSeal);
 		}
 
 		[Test]
@@ -1756,11 +2047,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 AS(2) invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("i=2 base1 AS(2) invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -1820,11 +2111,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 cv2=none", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
+			Validate ("i=2 base1 cv2=none", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
 		}
 
 		[Test]
@@ -1884,11 +2175,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 cv2=fail", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
+			Validate ("i=2 base1 cv2=fail", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
 		}
 
 		[Test]
@@ -1943,11 +2234,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 as(1) not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSeal);
+			Validate ("i=2 base1 as(1) not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSeal);
 		}
 
 		[Test]
@@ -2007,11 +2298,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 as(1) invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("i=2 base1 as(1) invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -2071,11 +2362,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 as(1) cv=pass", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
+			Validate ("i=2 base1 as(1) cv=pass", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
 		}
 
 		[Test]
@@ -2135,11 +2426,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("i=2 base1 as(1) cv=fail", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
+			Validate ("i=2 base1 as(1) cv=fail", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
 		}
 
 		#endregion
@@ -2185,11 +2476,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AMS i= NA", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
+			Validate ("AMS i= NA", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
 		}
 
 		[Test]
@@ -2232,11 +2523,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AMS i= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
+			Validate ("AMS i= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
 		}
 
 		[Test]
@@ -2279,11 +2570,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AMS i= zero", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
+			Validate ("AMS i= zero", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
 		}
 
 		[Test]
@@ -2326,11 +2617,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AMS i= invalid value", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
+			Validate ("AMS i= invalid value", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
 		}
 
 		[Test]
@@ -2380,11 +2671,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("Duplicate AMS i=1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcMessageSignature);
+			Validate ("Duplicate AMS i=1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcMessageSignature);
 		}
 
 		[Test]
@@ -2420,11 +2711,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("Missing AMS i=1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcMessageSignature);
+			Validate ("Missing AMS i=1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcMessageSignature);
 		}
 
 		#endregion
@@ -2470,11 +2761,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams format tag whitespace around semicolon ignored", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams format tag whitespace around semicolon ignored", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -2517,11 +2808,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams format tag whitespace around equals ignored", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams format tag whitespace around equals ignored", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -2564,11 +2855,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams trailing semi colon no effect", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams trailing semi colon no effect", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -2611,11 +2902,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("unknown tags still valid", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("unknown tags still valid", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -2658,11 +2949,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams format invalid tag key", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
+			Validate ("ams format invalid tag key", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
 		}
 
 		[Test]
@@ -2705,11 +2996,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("tags are not de duplicated", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
+			Validate ("tags are not de duplicated", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
 		}
 
 		[Test]
@@ -2752,11 +3043,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("tag keys are case sensitive", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("tag keys are case sensitive", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -2799,11 +3090,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("tag values are case sensitive", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("tag values are case sensitive", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -2846,11 +3137,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams tag values whitespace sensitive", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams tag values whitespace sensitive", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -2893,11 +3184,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("additional semicolons are invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
+			Validate ("additional semicolons are invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcMessageSignature);
 		}
 
 		#endregion
@@ -2950,11 +3241,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("duplicate ams i=1 order 1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcMessageSignature);
+			Validate ("duplicate ams i=1 order 1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcMessageSignature);
 		}
 
 		[Test]
@@ -3004,11 +3295,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("duplicate ams i=1 order 2", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcMessageSignature);
+			Validate ("duplicate ams i=1 order 2", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcMessageSignature);
 		}
 
 		[Test]
@@ -3051,11 +3342,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("a= unknown algorithm", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
+			Validate ("a= unknown algorithm", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
 		}
 
 		[Test]
@@ -3098,11 +3389,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("a= not avaliable", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
+			Validate ("a= not avaliable", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
 		}
 
 		[Test]
@@ -3145,11 +3436,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("a= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
+			Validate ("a= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
 		}
 
 		[Test]
@@ -3192,11 +3483,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("a= unknown algorithm", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
+			Validate ("a= unknown algorithm", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
 		}
 
 		[Test]
@@ -3239,11 +3530,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= ignores whitespace", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams b= ignores whitespace", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3286,11 +3577,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= canonicalization header key case insensitive", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams b= canonicalization header key case insensitive", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3334,11 +3625,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= canonicalization headers unfolded", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams b= canonicalization headers unfolded", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3381,11 +3672,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= canonicalization eol whitespace stripped", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams b= canonicalization eol whitespace stripped", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3428,11 +3719,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= canonicalization inline whitespace reduced", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams b= canonicalization inline whitespace reduced", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3475,11 +3766,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= canonicalization colon whitespace removed", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams b= canonicalization colon whitespace removed", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3519,11 +3810,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams b= not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -3563,11 +3854,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
+			Validate ("ams b= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
 		}
 
 		[Test]
@@ -3608,11 +3899,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b=", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
+			Validate ("ams b=", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed); // FIXME: better error reporting?
 		}
 
 		[Test]
@@ -3655,11 +3946,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= w/ modified value", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams b= w/ modified value", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -3702,11 +3993,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= w/ modified headers 1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams b= w/ modified headers 1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -3749,11 +4040,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams b= w/ modified headers 2", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams b= w/ modified headers 2", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -3796,11 +4087,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= ignores wsp", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams bh= ignores wsp", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3843,11 +4134,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= simple canonicalization", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams bh= simple canonicalization", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3890,11 +4181,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= simple canonicalization ignores ending empty lines", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams bh= simple canonicalization ignores ending empty lines", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -3937,11 +4228,11 @@ Hey gang,
 This is a   test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= simple canonicalization doesnt reduce wsp", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams bh= simple canonicalization doesnt reduce wsp", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -3984,11 +4275,11 @@ Hey gang,
 This is a test message.  
 --J.  
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= relaxed canonicalization deletes trailing whitespace", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams bh= relaxed canonicalization deletes trailing whitespace", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4031,11 +4322,11 @@ Hey       gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= relaxed canonicalization reduces inline whitespace", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams bh= relaxed canonicalization reduces inline whitespace", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4078,11 +4369,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= relaxed canonicalization ignores end of body empty lines", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams bh= relaxed canonicalization ignores end of body empty lines", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4125,11 +4416,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= relaxed canonicalization adds crlf at end of body if non existant", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams bh= relaxed canonicalization adds crlf at end of body if non existant", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4172,11 +4463,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams bh= not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -4219,11 +4510,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams bh= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -4266,11 +4557,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= not base64", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams bh= not base64", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -4313,11 +4604,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= modified sig", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams bh= modified sig", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -4360,11 +4651,11 @@ Hey gang,
 This is a modified test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams bh= modified body", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams bh= modified body", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -4409,11 +4700,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams c= not available", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams c= not available", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4456,11 +4747,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams c= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams c= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -4503,11 +4794,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams c= relaxed/relaxed", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams c= relaxed/relaxed", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4550,11 +4841,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams c= relaxed/simple", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams c= relaxed/simple", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4588,11 +4879,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams c= simple/relaxed", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams c= simple/relaxed", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4626,11 +4917,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams c= simple/simple", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams c= simple/simple", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4673,11 +4964,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams c= invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams c= invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -4720,11 +5011,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams d= not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams d= not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -4767,11 +5058,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams d= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams d= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -4814,11 +5105,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams d= not valid domain name", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams d= not valid domain name", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -4861,11 +5152,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= empty", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams h= empty", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4908,11 +5199,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= colon folding whitspace ignored", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams h= colon folding whitspace ignored", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -4956,11 +5247,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= colon folding whitspace ignored", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams h= colon folding whitspace ignored", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -5003,11 +5294,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= case insensitive", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams h= case insensitive", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -5051,11 +5342,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= with duplicated header correct order(bottom up)", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams h= with duplicated header correct order(bottom up)", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -5097,11 +5388,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= signing non-existant header field", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams h= signing non-existant header field", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -5144,11 +5435,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= blank sig-header", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams h= blank sig-header", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -5190,11 +5481,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= duplicated non-existant header field", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams h= duplicated non-existant header field", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -5253,11 +5544,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams fields h includes AMS1", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams fields h includes AMS1", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -5299,11 +5590,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams h= not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -5347,11 +5638,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= with duplicated header not correct order(bottom up)", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams h= with duplicated header not correct order(bottom up)", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -5394,11 +5685,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= mis ordered", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams h= mis ordered", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -5441,11 +5732,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams h= signing non-existant header field is then added(MIME-Version)", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams h= signing non-existant header field is then added(MIME-Version)", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -5506,11 +5797,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams fields h includes AS(1)", input, locator, ArcSignatureValidationResult.Fail);
+			Validate ("ams fields h includes AS(1)", input, resolver, ArcSignatureValidationResult.Fail);
 		}
 
 		[Test]
@@ -5553,11 +5844,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams s= not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams s= not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -5600,11 +5891,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams s= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
+			Validate ("ams s= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed);
 		}
 
 		[Test]
@@ -5647,11 +5938,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams t= not available", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("ams t= not available", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -5694,11 +5985,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams t= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams t= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -5741,11 +6032,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("ams t= invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("ams t= invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		#endregion
@@ -5791,11 +6082,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AS i= NA", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
+			Validate ("AS i= NA", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
 		}
 
 		[Test]
@@ -5838,11 +6129,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AS i= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
+			Validate ("AS i= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
 		}
 
 		[Test]
@@ -5885,11 +6176,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AS i= 0", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
+			Validate ("AS i= 0", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
 		}
 
 		[Test]
@@ -5932,11 +6223,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AS i= invalid value", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
+			Validate ("AS i= invalid value", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
 		}
 
 		[Test]
@@ -5984,11 +6275,11 @@ Hey gang,
 This is a test message.
 --J.      
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("Duplicate AS for i=1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcSeal);
+			Validate ("Duplicate AS for i=1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcSeal);
 		}
 
 		[Test]
@@ -6026,11 +6317,11 @@ Hey gang,
 This is a test message.
 --J.      
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("Missing AS for i=1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSeal);
+			Validate ("Missing AS for i=1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSeal);
 		}
 
 		#endregion
@@ -6090,11 +6381,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as format tag whitespace around semicolon ignored", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as format tag whitespace around semicolon ignored", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -6151,11 +6442,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as format tag whitespace around equals ignored", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as format tag whitespace around equals ignored", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -6212,11 +6503,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as trailing ; no effect", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as trailing ; no effect", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -6273,11 +6564,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as unknown tags no effect", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as unknown tags no effect", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -6334,11 +6625,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as format invalid tag key", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
+			Validate ("as format invalid tag key", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
 		}
 
 		[Test]
@@ -6395,11 +6686,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as dup tag error", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
+			Validate ("as dup tag error", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
 		}
 
 		[Test]
@@ -6456,11 +6747,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as tag key case", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as tag key case", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -6517,11 +6808,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as tag value case", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as tag value case", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -6578,11 +6869,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as whitespace sensitive", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("as whitespace sensitive", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -6639,11 +6930,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("as random semi colon error", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
+			Validate ("as random semi colon error", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
 		}
 
 		#endregion
@@ -6708,15 +6999,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("duplicate as", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcSeal);
+			Validate ("duplicate as", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcSeal);
 		}
 
 		[Test]
@@ -6781,15 +7072,15 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("duplicate AS i=2", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcSeal);
+			Validate ("duplicate AS i=2", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcSeal);
 		}
 
 		[Test]
@@ -6846,15 +7137,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as fields i= missing", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
+			Validate ("as fields i= missing", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSeal);
 		}
 
 		[Test]
@@ -6911,15 +7202,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as a= is sha1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as a= is sha1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -6976,15 +7267,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as a= not avaliable", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as a= not avaliable", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -7041,15 +7332,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as a= is empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as a= is empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -7106,15 +7397,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as a= unknown", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as a= unknown", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -7171,15 +7462,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= ignores whitespace", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= ignores whitespace", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7236,15 +7527,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization ignores header case", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization ignores header case", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7300,15 +7591,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization headers unfolded", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization headers unfolded", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7365,15 +7656,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization strips eol whitespace", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization strips eol whitespace", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7430,15 +7721,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization reduces inline whitespace", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization reduces inline whitespace", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7495,15 +7786,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization strips whitespace around colon", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization strips whitespace around colon", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7546,15 +7837,15 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization header key case insensitive", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization header key case insensitive", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7596,15 +7887,15 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization headers unfolded", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization headers unfolded", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7647,15 +7938,15 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization eol whitespace stripped", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization eol whitespace stripped", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7698,15 +7989,15 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= canonicalization inline whitespace reduced", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= canonicalization inline whitespace reduced", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7761,15 +8052,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= with 512 bit key", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("as b= with 512 bit key", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -7826,15 +8117,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= with 1024 bit key", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= with 1024 bit key", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7895,15 +8186,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= with 2048 bit key", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as b= with 2048 bit key", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -7958,15 +8249,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as b= not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8021,15 +8312,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as b= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8084,15 +8375,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= not base64", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as b= not base64", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8149,15 +8440,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= with modified signature", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as b= with modified signature", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8214,15 +8505,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= modified aar1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
+			Validate ("as b= modified aar1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
 		}
 
 		[Test]
@@ -8279,15 +8570,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= modified ams1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as b= modified ams1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8344,15 +8635,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as b= modified asb1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as b= modified asb1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8409,15 +8700,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as cv= not avaliable", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSealChainValidationValue);
+			Validate ("as cv= not avaliable", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcSealChainValidationValue);
 		}
 
 		[Test]
@@ -8474,15 +8765,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as cv= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
+			Validate ("as cv= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
 		}
 
 		[Test]
@@ -8539,15 +8830,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as cv= invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
+			Validate ("as cv= invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcSealChainValidationValue);
 		}
 
 		[Test]
@@ -8604,15 +8895,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as d= not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as d= not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8669,15 +8960,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as d= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as d= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8734,15 +9025,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as d= invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as d= invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8776,15 +9067,15 @@ Subject: Testing
 
 This is a test message.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as has h= which is invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("as has h= which is invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8841,15 +9132,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as s= not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as s= not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8906,15 +9197,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as s= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as s= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -8970,15 +9261,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as t= na", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("as t= na", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		[Test]
@@ -9035,15 +9326,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as t= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("as t= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -9100,15 +9391,15 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
-			locator.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
-			locator.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("512._domainkey.example.org", "v=DKIM1; k=rsa; p= MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAIWmlgix/84GJ+dfgjm7LTc9EPdfk ftlgiPpCq4/kbDAZmU0VvYKDljjleJ1dfvS+CGy9U/kk1tG3EeEvb82xAcCAwEAAQ==");
+			resolver.Add ("1024._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCyBwu6PiaDN87t3DVZ84zIrE hCoxtFuv7g52oCwAUXTDnXZ+0XHM/rhkm8XSGr1yLsDc1zLGX8IfITY1dL2CzptdgyiX7vgYjzZqG368 C8BtGB5m6nj26NyhSKEdlV7MS9KbASd359ggCeGTT5QjRKEMSauVyVSeapq6ZcpZ9JwQIDAQAB");
+			resolver.Add ("2048._domainkey.example.org", "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv+7VkwpTtICeJFM4Hf UZsvv2OaA+QMrW9Af1PpTOzVP0uvUFK20lcaxMvt81ia/sGYW4gHp/WUIk0BIQMPVhUeCIuM1mcOQNFS OflR8pLo916rjEZXpRP/XGo4HwWzdqD2qQeb3+fv1IrzfHiDb9THbamoz05EX7JX+wVSAhdSW/igwhA/ +beuzWR0RDDyGMT1b1Sb/lrGfwSXm7QoZQtj5PRiTX+fsL7WlzL+fBThySwS8ZBZcHcd8iWOSGKZ0gYK zxyuOf8VCX71C4xDhahN+HXWZFn9TZb+uZX9m+WXM3t+P8CdfxsaOdnVg6imgNDlUWX4ClLTZhco0Kmi BU+QIDAQAB");
 
-			Validate ("as t= invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
+			Validate ("as t= invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MessageSignatureValidationFailed | ArcValidationErrors.SealValidationFailed);
 		}
 
 		#endregion
@@ -9154,11 +9445,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AAR i= NA", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
+			Validate ("AAR i= NA", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9201,11 +9492,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AAR i= empty", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
+			Validate ("AAR i= empty", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9248,11 +9539,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AAR i=0", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
+			Validate ("AAR i=0", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9295,11 +9586,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("AAR i= invalid value", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
+			Validate ("AAR i= invalid value", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9346,11 +9637,11 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("Duplicated AAR for i=1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcAuthenticationResults);
+			Validate ("Duplicated AAR for i=1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.DuplicateArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9389,11 +9680,11 @@ Hey gang,
 This is a test message.
 --J.      
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("Missing AAR for i=1", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcAuthenticationResults);
+			Validate ("Missing AAR for i=1", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcAuthenticationResults);
 		}
 
 		#endregion
@@ -9449,11 +9740,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("missing arc authentication results", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcAuthenticationResults);
+			Validate ("missing arc authentication results", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9510,11 +9801,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("arc authentication results no i= tag", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
+			Validate ("arc authentication results no i= tag", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9571,11 +9862,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("arc authentication results wrong i= tag", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcAuthenticationResults | ArcValidationErrors.MissingArcMessageSignature | ArcValidationErrors.MissingArcSeal);
+			Validate ("arc authentication results wrong i= tag", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcAuthenticationResults | ArcValidationErrors.MissingArcMessageSignature | ArcValidationErrors.MissingArcSeal);
 		}
 
 		[Test]
@@ -9632,11 +9923,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("arc authentication results i= not prefixed", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
+			Validate ("arc authentication results i= not prefixed", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9693,11 +9984,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("arc authentication results i= no semicolon", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
+			Validate ("arc authentication results i= no semicolon", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.InvalidArcAuthenticationResults);
 		}
 
 		[Test]
@@ -9768,11 +10059,11 @@ Content-Type: text/html; charset=UTF-8
 
 --001a113e15fcdd0f9e0545366e8f--
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
 
-			Validate ("aar missing for i=2", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcAuthenticationResults);
+			Validate ("aar missing for i=2", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.MissingArcAuthenticationResults);
 		}
 
 		#endregion
@@ -9818,13 +10109,13 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example2.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDR3lRpGZS+xO96Znv/BPNQxi m7ZD0v6yFmZa9Rni5FHCeWuQwcp+PH/XXOyF6JsmB+kS0ybxJnx594ulqH2KvLMNsGAD+yRl2bJSXbBH ea7K9C5WX8Vjx3oPoGgw7QCONptnjUsbIIoxUZBEUe17eG44H/PbDqGwCBiyI20KEC/wIDAQAB");
-			locator.Add ("invalid._domainkey.example.org", "v=DKIM1; k=rsa; omgwhatsgoingon");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example2.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDR3lRpGZS+xO96Znv/BPNQxi m7ZD0v6yFmZa9Rni5FHCeWuQwcp+PH/XXOyF6JsmB+kS0ybxJnx594ulqH2KvLMNsGAD+yRl2bJSXbBH ea7K9C5WX8Vjx3oPoGgw7QCONptnjUsbIIoxUZBEUe17eG44H/PbDqGwCBiyI20KEC/wIDAQAB");
+			resolver.Add ("invalid._domainkey.example.org", "v=DKIM1; k=rsa; omgwhatsgoingon");
 
-			Validate ("public key not available", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("public key not available", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -9867,13 +10158,13 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example2.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDR3lRpGZS+xO96Znv/BPNQxi m7ZD0v6yFmZa9Rni5FHCeWuQwcp+PH/XXOyF6JsmB+kS0ybxJnx594ulqH2KvLMNsGAD+yRl2bJSXbBH ea7K9C5WX8Vjx3oPoGgw7QCONptnjUsbIIoxUZBEUe17eG44H/PbDqGwCBiyI20KEC/wIDAQAB");
-			locator.Add ("invalid._domainkey.example.org", "v=DKIM1; k=rsa; omgwhatsgoingon");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example2.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDR3lRpGZS+xO96Znv/BPNQxi m7ZD0v6yFmZa9Rni5FHCeWuQwcp+PH/XXOyF6JsmB+kS0ybxJnx594ulqH2KvLMNsGAD+yRl2bJSXbBH ea7K9C5WX8Vjx3oPoGgw7QCONptnjUsbIIoxUZBEUe17eG44H/PbDqGwCBiyI20KEC/wIDAQAB");
+			resolver.Add ("invalid._domainkey.example.org", "v=DKIM1; k=rsa; omgwhatsgoingon");
 
-			Validate ("public key invalid", input, locator, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
+			Validate ("public key invalid", input, resolver, ArcSignatureValidationResult.Fail, ArcValidationErrors.SealValidationFailed);
 		}
 
 		[Test]
@@ -9916,15 +10207,17 @@ Hey gang,
 This is a test message.
 --J.
 ";
-			var locator = new DkimPublicKeyLocator ();
+			var resolver = new MockDnsResolver ();
 
-			locator.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
-			locator.Add ("dummy2._domainkey.example2.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDR3lRpGZS+xO96Znv/BPNQxi m7ZD0v6yFmZa9Rni5FHCeWuQwcp+PH/XXOyF6JsmB+kS0ybxJnx594ulqH2KvLMNsGAD+yRl2bJSXbBH ea7K9C5WX8Vjx3oPoGgw7QCONptnjUsbIIoxUZBEUe17eG44H/PbDqGwCBiyI20KEC/wIDAQAB");
-			locator.Add ("invalid._domainkey.example.org", "v=DKIM1; k=rsa; omgwhatsgoingon");
+			resolver.Add ("dummy._domainkey.example.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWRiGs5V6NpP3id Y6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutACDfzwQ/BC/e/8uBsCR+yz1Lx j+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3Ip3G+2kryOTIKT+l/K4w3QIDAQAB");
+			resolver.Add ("dummy2._domainkey.example2.org", "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDR3lRpGZS+xO96Znv/BPNQxi m7ZD0v6yFmZa9Rni5FHCeWuQwcp+PH/XXOyF6JsmB+kS0ybxJnx594ulqH2KvLMNsGAD+yRl2bJSXbBH ea7K9C5WX8Vjx3oPoGgw7QCONptnjUsbIIoxUZBEUe17eG44H/PbDqGwCBiyI20KEC/wIDAQAB");
+			resolver.Add ("invalid._domainkey.example.org", "v=DKIM1; k=rsa; omgwhatsgoingon");
 
-			Validate ("differing domains & selectors across ams & as", input, locator, ArcSignatureValidationResult.Pass);
+			Validate ("differing domains & selectors across ams & as", input, resolver, ArcSignatureValidationResult.Pass);
 		}
 
 		#endregion
+
+		#pragma warning restore IDE1006 // Naming Styles
 	}
 }

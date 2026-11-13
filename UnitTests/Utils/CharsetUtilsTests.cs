@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,7 @@
 // THE SOFTWARE.
 //
 
-using System;
 using System.Text;
-
-using NUnit.Framework;
 
 using MimeKit;
 using MimeKit.Utils;
@@ -63,44 +60,51 @@ namespace UnitTests.Utils {
 		}
 
 		[Test]
+		public void TestNotSupportedExceptions ()
+		{
+			Assert.Throws<NotSupportedException> (() => CharsetUtils.GetEncoding ("x-undefined"));
+			Assert.Throws<NotSupportedException> (() => CharsetUtils.GetEncoding ("x-undefined", "?"));
+		}
+
+		[Test]
 		public void TestParseCodePage ()
 		{
-			Assert.AreEqual (1201, CharsetUtils.ParseCodePage ("iso10646"));
-			Assert.AreEqual (1201, CharsetUtils.ParseCodePage ("iso-10646"));
-			Assert.AreEqual (1201, CharsetUtils.ParseCodePage ("iso10646-1"));
-			Assert.AreEqual (1201, CharsetUtils.ParseCodePage ("iso-10646-1"));
+			Assert.That (CharsetUtils.ParseCodePage ("iso10646"), Is.EqualTo (1201));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-10646"), Is.EqualTo (1201));
+			Assert.That (CharsetUtils.ParseCodePage ("iso10646-1"), Is.EqualTo (1201));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-10646-1"), Is.EqualTo (1201));
 
-			Assert.AreEqual (28591, CharsetUtils.ParseCodePage ("iso8859-1"));
-			Assert.AreEqual (28591, CharsetUtils.ParseCodePage ("iso8859_1"));
-			Assert.AreEqual (28591, CharsetUtils.ParseCodePage ("iso-8859-1"));
-			Assert.AreEqual (28591, CharsetUtils.ParseCodePage ("iso_8859_1"));
-			Assert.AreEqual (28591, CharsetUtils.ParseCodePage ("latin1"));
+			Assert.That (CharsetUtils.ParseCodePage ("iso8859-1"), Is.EqualTo (28591));
+			Assert.That (CharsetUtils.ParseCodePage ("iso8859_1"), Is.EqualTo (28591));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-8859-1"), Is.EqualTo (28591));
+			Assert.That (CharsetUtils.ParseCodePage ("iso_8859_1"), Is.EqualTo (28591));
+			Assert.That (CharsetUtils.ParseCodePage ("latin1"), Is.EqualTo (28591));
 
-			Assert.AreEqual (50220, CharsetUtils.ParseCodePage ("iso2022-jp"));
-			Assert.AreEqual (50220, CharsetUtils.ParseCodePage ("iso-2022-jp"));
-			Assert.AreEqual (50220, CharsetUtils.ParseCodePage ("iso_2022_jp"));
-			Assert.AreEqual (50225, CharsetUtils.ParseCodePage ("iso2022-kr"));
-			Assert.AreEqual (50225, CharsetUtils.ParseCodePage ("iso-2022-kr"));
-			Assert.AreEqual (50225, CharsetUtils.ParseCodePage ("iso_2022_kr"));
+			Assert.That (CharsetUtils.ParseCodePage ("iso2022-jp"), Is.EqualTo (50220));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-2022-jp"), Is.EqualTo (50220));
+			Assert.That (CharsetUtils.ParseCodePage ("iso_2022_jp"), Is.EqualTo (50220));
+			Assert.That (CharsetUtils.ParseCodePage ("iso2022-kr"), Is.EqualTo (50225));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-2022-kr"), Is.EqualTo (50225));
+			Assert.That (CharsetUtils.ParseCodePage ("iso_2022_kr"), Is.EqualTo (50225));
 
-			Assert.AreEqual (1252, CharsetUtils.ParseCodePage ("windows-cp1252"));
-			Assert.AreEqual (1252, CharsetUtils.ParseCodePage ("windows-1252"));
-			Assert.AreEqual (1252, CharsetUtils.ParseCodePage ("cp-1252"));
-			Assert.AreEqual (1252, CharsetUtils.ParseCodePage ("cp1252"));
+			Assert.That (CharsetUtils.ParseCodePage ("windows-cp1252"), Is.EqualTo (1252));
+			Assert.That (CharsetUtils.ParseCodePage ("windows-1252"), Is.EqualTo (1252));
+			Assert.That (CharsetUtils.ParseCodePage ("cp-1252"), Is.EqualTo (1252));
+			Assert.That (CharsetUtils.ParseCodePage ("cp1252"), Is.EqualTo (1252));
 
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("cp"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("iso"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("ibm"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("windows"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("windows-"));
+			Assert.That (CharsetUtils.ParseCodePage ("cp"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("iso"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("ibm"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("windows"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("windows-"), Is.EqualTo (-1));
 
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("iso-8859"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("iso-BB59"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("iso-8859-"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("iso-8859-A"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("iso-2022-US"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("iso-4999-1"));
-			Assert.AreEqual (-1, CharsetUtils.ParseCodePage ("iso-abcd-1"));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-8859"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-BB59"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-8859-"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-8859-A"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-2022-US"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-4999-1"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("iso-abcd-1"), Is.EqualTo (-1));
 		}
 
 		[Test]
@@ -115,8 +119,10 @@ namespace UnitTests.Utils {
 			var input = gb2312.GetBytes (expected);
 
 			var actual = CharsetUtils.ConvertToUnicode (options, input, 0, input.Length);
+			Assert.That (actual, Is.EqualTo (expected), "ConvertToUnicode(ParserOptions,byte[],int,int)");
 
-			Assert.AreEqual (expected, actual);
+			actual = CharsetUtils.ConvertToUnicode (gb2312, input, 0, input.Length);
+			Assert.That (actual, Is.EqualTo (expected), "ConvertToUnicode(Encoding,byte[],int,int)");
 		}
 
 		[Test]
@@ -124,13 +130,14 @@ namespace UnitTests.Utils {
 		{
 			Encoding encoding;
 
-			Assert.AreEqual ("iso-8859-1", CharsetUtils.GetMimeCharset ("latin1"));
-			Assert.AreEqual ("iso-8859-1", CharsetUtils.GetMimeCharset (CharsetUtils.Latin1));
-			Assert.AreEqual ("gibberish", CharsetUtils.GetMimeCharset ("gibberish"));
+			Assert.That (CharsetUtils.GetMimeCharset ("latin1"), Is.EqualTo ("iso-8859-1"));
+			Assert.That (CharsetUtils.GetMimeCharset (CharsetUtils.Latin1), Is.EqualTo ("iso-8859-1"));
+			Assert.That (CharsetUtils.GetMimeCharset ("gibberish"), Is.EqualTo ("gibberish"));
 
-			Assert.AreEqual ("iso-2022-jp", CharsetUtils.GetMimeCharset (Encoding.GetEncoding (932)));
-			Assert.AreEqual ("iso-2022-jp", CharsetUtils.GetMimeCharset (Encoding.GetEncoding (50220)));
-			Assert.AreEqual ("iso-2022-jp", CharsetUtils.GetMimeCharset (Encoding.GetEncoding (50221)));
+			Assert.That (CharsetUtils.GetMimeCharset (Encoding.GetEncoding (932)), Is.EqualTo ("shift_jis"));
+			Assert.That (CharsetUtils.GetMimeCharset (Encoding.GetEncoding (50220)), Is.EqualTo ("iso-2022-jp"));
+			Assert.That (CharsetUtils.GetMimeCharset (Encoding.GetEncoding (50221)), Is.EqualTo ("iso-2022-jp"));
+			Assert.That (CharsetUtils.GetMimeCharset (Encoding.GetEncoding (50222)), Is.EqualTo ("iso-2022-jp"));
 
 			try {
 				encoding = Encoding.GetEncoding (50225);
@@ -139,9 +146,261 @@ namespace UnitTests.Utils {
 			}
 
 			if (encoding != null)
-				Assert.AreEqual ("euc-kr", CharsetUtils.GetMimeCharset (encoding));
+				Assert.That (CharsetUtils.GetMimeCharset (encoding), Is.EqualTo ("euc-kr"));
 
-			Assert.AreEqual ("euc-kr", CharsetUtils.GetMimeCharset (Encoding.GetEncoding (949)));
+			Assert.That (CharsetUtils.GetMimeCharset (Encoding.GetEncoding (949)), Is.EqualTo ("euc-kr"));
+		}
+
+		[TestCase ("")]
+		[TestCase ("plain ASCII")]
+		[TestCase ("Ren\u00e9e M\u00fcller")]
+		[TestCase ("\u674e\u5c0f\u9f8d")]
+		[TestCase ("\0\u007f\u0080\u07ff\u0800\ud7ff\ue000\uffff\U00010000\U0010ffff")]
+		public void TestConvertToUnicodePrefersValidUtf8 (string expected)
+		{
+			var bytes = Encoding.UTF8.GetBytes (expected);
+			var input = new byte[bytes.Length + 2];
+
+			input[0] = input[input.Length - 1] = 0xff;
+			bytes.CopyTo (input, 1);
+
+			foreach (int codepage in new[] { 65001, 28591, 1252, 936, 932 }) {
+				var options = new ParserOptions { CharsetEncoding = Encoding.GetEncoding (codepage) };
+				var output = CharsetUtils.ConvertToUnicode (options, input, 1, bytes.Length, out int count);
+
+				Assert.That (count, Is.EqualTo (expected.Length));
+				Assert.That (new string (output, 0, count), Is.EqualTo (expected));
+			}
+		}
+
+		static long MeasureUtf8ConversionAllocation (byte[] input, bool guessCharset)
+		{
+			long before = GC.GetAllocatedBytesForCurrentThread ();
+
+			for (int i = 0; i < 10; i++) {
+				if (guessCharset)
+					CharsetUtils.ConvertToUnicode (ParserOptions.Default, input, 0, input.Length, out _);
+				else
+					Encoding.UTF8.GetChars (input, 0, input.Length);
+			}
+
+			return GC.GetAllocatedBytesForCurrentThread () - before;
+		}
+
+		[Test]
+		public void TestConvertValidUtf8AllocatesOnlyOutput ()
+		{
+			if (TestHelper.IsCodeCoverageEnabled)
+				Assert.Ignore ("The code-coverage recorder allocates memory, so allocation budgets cannot be measured.");
+
+			var input = Encoding.UTF8.GetBytes ("Ren\u00e9e M\u00fcller");
+
+			MeasureUtf8ConversionAllocation (input, true);
+			MeasureUtf8ConversionAllocation (input, false);
+
+			Assert.That (MeasureUtf8ConversionAllocation (input, true), Is.EqualTo (MeasureUtf8ConversionAllocation (input, false)));
+		}
+
+		[Test]
+		public void TestAppendValidUtf8DoesNotAllocate ()
+		{
+			if (TestHelper.IsCodeCoverageEnabled)
+				Assert.Ignore ("The code-coverage recorder allocates memory, so allocation budgets cannot be measured.");
+
+			var input = Encoding.UTF8.GetBytes ("Ren\u00e9e M\u00fcller \U0001f600");
+			var output = new ValueStringBuilder (input.Length * 101);
+
+			try {
+				CharsetUtils.ConvertToUnicode (ParserOptions.Default, input, 0, input.Length, ref output);
+				long before = GC.GetAllocatedBytesForCurrentThread ();
+
+				for (int i = 0; i < 100; i++)
+					CharsetUtils.ConvertToUnicode (ParserOptions.Default, input, 0, input.Length, ref output);
+
+				Assert.That (GC.GetAllocatedBytesForCurrentThread () - before, Is.EqualTo (0));
+			} finally {
+				output.Dispose ();
+			}
+		}
+
+		[TestCase (new byte[] { 0xc3 }, 28591, "\u00c3")]
+		[TestCase (new byte[] { 0xc0, 0xaf }, 28591, "\u00c0\u00af")]
+		[TestCase (new byte[] { 0xed, 0xa0, 0x80 }, 28591, "\u00ed\u00a0\u0080")]
+		[TestCase (new byte[] { 0xf4, 0x90, 0x80, 0x80 }, 28591, "\u00f4\u0090\u0080\u0080")]
+		[TestCase (new byte[] { 0x80 }, 1252, "\u20ac")]
+		[TestCase (new byte[] { 0xc3, 0xa9, 0xff }, 28591, "\u00c3\u00a9\u00ff")]
+		public void TestConvertInvalidUtf8UsesCharsetFallback (byte[] input, int codepage, string expected)
+		{
+			var options = new ParserOptions { CharsetEncoding = Encoding.GetEncoding (codepage) };
+
+			Assert.That (CharsetUtils.ConvertToUnicode (options, input, 0, input.Length), Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestParseInvalidCodePageNames ()
+		{
+			Assert.That (CharsetUtils.ParseCodePage ("cp-"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("cp125x"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("ibm-"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("ibm437x"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("windows_"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.ParseCodePage ("windows-125x"), Is.EqualTo (-1));
+		}
+
+		[Test]
+		public void TestParseCodePageAliases ()
+		{
+			Assert.That (CharsetUtils.ParseCodePage ("ibm437"), Is.EqualTo (437));
+			Assert.That (CharsetUtils.ParseCodePage ("ibm-437"), Is.EqualTo (437));
+			Assert.That (CharsetUtils.ParseCodePage ("windowscp1252"), Is.EqualTo (1252));
+		}
+
+		[Test]
+		public void TestParseCodePageIsCaseInsensitive ()
+		{
+			Assert.That (CharsetUtils.ParseCodePage ("WINDOWS-CP1252"), Is.EqualTo (1252));
+			Assert.That (CharsetUtils.ParseCodePage ("Windows-Cp1252"), Is.EqualTo (1252));
+			Assert.That (CharsetUtils.ParseCodePage ("windows_cP1252"), Is.EqualTo (1252));
+			Assert.That (CharsetUtils.ParseCodePage ("WINDOWSCP1252"), Is.EqualTo (1252));
+			Assert.That (CharsetUtils.ParseCodePage ("IBM-437"), Is.EqualTo (437));
+			Assert.That (CharsetUtils.ParseCodePage ("CP-1252"), Is.EqualTo (1252));
+			Assert.That (CharsetUtils.ParseCodePage ("ISO-8859-1"), Is.EqualTo (28591));
+			Assert.That (CharsetUtils.ParseCodePage ("ISO-2022-JP"), Is.EqualTo (50220));
+			Assert.That (CharsetUtils.ParseCodePage ("LATIN1"), Is.EqualTo (28591));
+		}
+
+		[Test]
+		public void TestGetCodePageUnsupportedCharsets ()
+		{
+			Assert.That (CharsetUtils.GetCodePage ("x-undefined"), Is.EqualTo (-1));
+			Assert.That (CharsetUtils.GetCodePage ("cp999999"), Is.EqualTo (-1));
+		}
+
+		[Test]
+		public void TestGetEncodingWithReplacementFallback ()
+		{
+			var encoding = CharsetUtils.GetEncoding ("us-ascii", "_");
+
+			Assert.That (encoding.GetString (new byte[] { 0x41, 0xff, 0x42 }), Is.EqualTo ("A_B"));
+			Assert.That (encoding.GetString (encoding.GetBytes ("A\u0100B")), Is.EqualTo ("A_B"));
+		}
+
+		[Test]
+		public void TestGetEncodingOrDefault ()
+		{
+			Assert.That (CharsetUtils.GetEncodingOrDefault (65001, Encoding.ASCII).CodePage, Is.EqualTo (65001));
+			Assert.That (CharsetUtils.GetEncodingOrDefault (999999, Encoding.ASCII), Is.SameAs (Encoding.ASCII));
+		}
+
+		[Test]
+		public void TestConvertToUnicodeFallsBackToLatin1 ()
+		{
+			var input = new byte[] { 0x48, 0x65, 0xc3, 0x28, 0x6f };
+
+			Assert.That (CharsetUtils.ConvertToUnicode (ParserOptions.Default, input, 0, input.Length), Is.EqualTo ("HeÃ(o"));
+		}
+
+		[Test]
+		public void TestConvertToUnicodeWithUnsupportedCodePageFallsBackToBestEncoding ()
+		{
+			var input = Encoding.UTF8.GetBytes ("hello");
+			var output = new ValueStringBuilder (1);
+
+			CharsetUtils.ConvertToUnicode (ParserOptions.Default, 999999, input, 0, input.Length, ref output);
+
+			Assert.That (output.Length, Is.EqualTo (5));
+			Assert.That (output.ToString (), Is.EqualTo ("hello"));
+		}
+
+		[Test]
+		public void TestConvertToUnicodeReturnsEmptyStringWhenDecoderGetCharsThrows ()
+		{
+			var input = new byte[] { 0x41 };
+
+			Assert.That (CharsetUtils.ConvertToUnicode (new ThrowingGetCharsEncoding (), input, 0, input.Length), Is.EqualTo (string.Empty));
+		}
+
+		[Test]
+		public void TestConvertToUnicodeDoesNotSwallowUnexpectedDecoderExceptions ()
+		{
+			var input = new byte[] { 0x41 };
+			var expected = new InvalidOperationException ("Unexpected decoder failure.");
+			var encoding = new ThrowingGetCharsEncoding (expected);
+
+			var exception = Assert.Throws<InvalidOperationException> (() => CharsetUtils.ConvertToUnicode (encoding, input, 0, input.Length));
+			Assert.That (exception, Is.SameAs (expected));
+		}
+
+		class ThrowingGetCharsEncoding : Encoding
+		{
+			readonly Exception exception;
+
+			public ThrowingGetCharsEncoding () : this (new DecoderFallbackException ("GetChars failed."))
+			{
+			}
+
+			public ThrowingGetCharsEncoding (Exception exception)
+			{
+				this.exception = exception;
+			}
+
+			public override int GetByteCount (char[] chars, int index, int count)
+			{
+				return count;
+			}
+
+			public override int GetBytes (char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex)
+			{
+				for (int i = 0; i < charCount; i++)
+					bytes[byteIndex + i] = (byte) chars[charIndex + i];
+
+				return charCount;
+			}
+
+			public override int GetCharCount (byte[] bytes, int index, int count)
+			{
+				return count;
+			}
+
+			public override int GetChars (byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex)
+			{
+				throw exception;
+			}
+
+			public override Decoder GetDecoder ()
+			{
+				return new ThrowingGetCharsDecoder (exception);
+			}
+
+			public override int GetMaxByteCount (int charCount)
+			{
+				return charCount;
+			}
+
+			public override int GetMaxCharCount (int byteCount)
+			{
+				return byteCount;
+			}
+		}
+
+		class ThrowingGetCharsDecoder : Decoder
+		{
+			readonly Exception exception;
+
+			public ThrowingGetCharsDecoder (Exception exception)
+			{
+				this.exception = exception;
+			}
+
+			public override int GetCharCount (byte[] bytes, int index, int count)
+			{
+				return count;
+			}
+
+			public override int GetChars (byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex)
+			{
+				throw exception;
+			}
 		}
 	}
 }

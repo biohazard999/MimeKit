@@ -1,0 +1,1083 @@
+﻿//
+// MemoryTests.cs
+//
+// Author: Jeffrey Stedfast <jestedfa@microsoft.com>
+//
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+//
+
+using System;
+using System.Buffers;
+
+#if NETCOREAPP
+using System.Numerics;
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
+#endif
+
+using MimeKit.Utils;
+
+namespace UnitTests.Utils {
+	[TestFixture]
+	public class MemoryTests
+	{
+		delegate int IndexOfDelegate (byte[] buffer, int offset, int length, byte value, ByteDetectionOptions options, out ByteDetectionResults detected);
+
+		static readonly byte[] EolnWithNullAnd8Bit = new byte[] { 0x00, 0xFF, (byte) '\r', (byte) '\n' };
+		static readonly byte[] EolnWithNull = new byte[] { 0x00, (byte) '\r', (byte) '\n' };
+		static readonly byte[] EolnWith8Bit = new byte[] { 0xFF, (byte) '\r', (byte) '\n' };
+		static readonly byte[] Eoln = new byte[] { (byte) '\r', (byte) '\n' };
+
+		const int BufferLength = 1000;
+
+		public enum HeaderScanKernel
+		{
+			Dispatch,
+			Scalar,
+			Vector128,
+			Vector256
+		}
+
+		unsafe delegate int HeaderScanFunc (byte* input, int length, ByteDetectionOptions options, out int nullIndex, out int eightBitIndex);
+
+		static unsafe HeaderScanFunc GetHeaderScanKernel (HeaderScanKernel kernel)
+		{
+			switch (kernel) {
+			case HeaderScanKernel.Vector256:
+				if (!Vector256.IsHardwareAccelerated)
+					Assert.Ignore ("Vector256 is not hardware accelerated on this machine.");
+				return Memory.IndexOfLineFeedVector256;
+			case HeaderScanKernel.Vector128:
+				if (!Vector128.IsHardwareAccelerated)
+					Assert.Ignore ("Vector128 is not hardware accelerated on this machine.");
+				return Memory.IndexOfLineFeedVector128;
+			case HeaderScanKernel.Scalar:
+				return Memory.IndexOfLineFeedScalar;
+			default:
+				return Memory.IndexOfLineFeed;
+			}
+		}
+
+		static unsafe void AssertHeaderScan (HeaderScanFunc scan, byte[] data, int start, int length, ByteDetectionOptions options)
+		{
+			int expectedNull = -1, expectedEightBit = -1, expectedLineFeed = -1;
+
+			for (int i = 0; i < length; i++) {
+				byte value = data[start + i];
+				if (value == (byte) '\n') {
+					expectedLineFeed = i;
+					break;
+				}
+				if (value == 0 && expectedNull == -1 && (options & ByteDetectionOptions.DetectNulls) != 0)
+					expectedNull = i;
+				if (value >= 0x80 && expectedEightBit == -1 && (options & ByteDetectionOptions.Detect8Bit) != 0)
+					expectedEightBit = i;
+			}
+
+			fixed (byte* input = data) {
+				int lineFeed = scan (input + start, length, options, out int nullIndex, out int eightBitIndex);
+
+				if (lineFeed != expectedLineFeed || nullIndex != expectedNull || eightBitIndex != expectedEightBit)
+					Assert.Fail ($"start={start}, length={length}, options={options}: expected LF/NUL/8bit={expectedLineFeed}/{expectedNull}/{expectedEightBit}, actual={lineFeed}/{nullIndex}/{eightBitIndex}");
+			}
+		}
+
+		[Test]
+		public unsafe void TestHeaderLineScannerBytePositions ([Values] HeaderScanKernel kind, [Values (0, 1, 2, 3)] int flags)
+		{
+			var scan = GetHeaderScanKernel (kind);
+			var options = (ByteDetectionOptions) flags;
+			var data = new byte[160];
+			int[] lineFeeds = { -1, 0, 1, 15, 16, 31, 32, 63, 64, 95 };
+
+			for (int start = 0; start < 32; start++) {
+				foreach (int lineFeed in lineFeeds) {
+					for (int special = 0; special < 96; special++) {
+						data.AsSpan ().Fill (0xff);
+						data.AsSpan (start, 96).Fill ((byte) 'a');
+						data[start + special] = 0;
+						data[start + (special + 37) % 96] = 0x80;
+						data[start + (special + 7) % 96] = 0;
+						data[start + (special + 53) % 96] = 0xff;
+						data[start + 96] = 0;
+						data[start + 97] = (byte) '\n';
+						if (lineFeed >= 0)
+							data[start + lineFeed] = (byte) '\n';
+
+						AssertHeaderScan (scan, data, start, 96, options);
+					}
+				}
+			}
+		}
+
+		[Test]
+		public unsafe void TestHeaderLineScannerBoundsAndRandomData ([Values] HeaderScanKernel kind)
+		{
+			var scan = GetHeaderScanKernel (kind);
+			var random = new Random (7319);
+			var data = new byte[576];
+
+			for (int iteration = 0; iteration < 20000; iteration++) {
+				int start = random.Next (32);
+				int length = iteration < 513 ? iteration : random.Next (513);
+				random.NextBytes (data);
+				if ((iteration & 1) == 0)
+					data.AsSpan (start, length).Fill ((byte) 'a');
+
+				// Poison bytes outside the bounded search, including an LF that must never match.
+				data[start + length] = 0;
+				data[start + length + 1] = 0xff;
+				data[start + length + 2] = (byte) '\n';
+				for (int flags = 0; flags < 4; flags++)
+					AssertHeaderScan (scan, data, start, length, (ByteDetectionOptions) flags);
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestIndexOfOptions_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestIndexOfOptions_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestIndexOfOptions_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestIndexOfOptions_DetectBinary")]
+		public void TestIndexOfOptions (int opts)
+		{
+			ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+			VerifyIndexOfOptions (Eoln, options, IndexOf);
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestIndexOfOptionsWithNull_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestIndexOfOptionsWithNull_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestIndexOfOptionsWithNull_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestIndexOfOptionsWithNull_DetectBinary")]
+		public void TestIndexOfOptionsWithNull (int opts)
+		{
+			ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+			VerifyIndexOfOptions (EolnWithNull, options, IndexOf);
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestIndexOfOptionsWith8Bit_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestIndexOfOptionsWith8Bit_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestIndexOfOptionsWith8Bit_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestIndexOfOptionsWith8Bit_DetectBinary")]
+		public void TestIndexOfOptionsWith8Bit (int opts)
+		{
+			ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+			VerifyIndexOfOptions (EolnWith8Bit, options, IndexOf);
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestIndexOfOptionsWithNullAnd8Bit_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestIndexOfOptionsWithNullAnd8Bit_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestIndexOfOptionsWithNullAnd8Bit_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestIndexOfOptionsWithNullAnd8Bit_DetectBinary")]
+		public void TestIndexOfOptionsWithNullAnd8Bit (int opts)
+		{
+			ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+			VerifyIndexOfOptions (EolnWithNullAnd8Bit, options, IndexOf);
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestIndexOfOptionsUnaligned (int alignmentOffset)
+		{
+			VerifyIndexOfOptionsUnaligned (Eoln, alignmentOffset, IndexOf);
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestIndexOfOptionsUnalignedWithNull (int alignmentOffset)
+		{
+			VerifyIndexOfOptionsUnaligned (EolnWithNull, alignmentOffset, IndexOf);
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestIndexOfOptionsUnalignedWith8Bit (int alignmentOffset)
+		{
+			VerifyIndexOfOptionsUnaligned (EolnWith8Bit, alignmentOffset, IndexOf);
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestIndexOfOptionsUnalignedWithNullAnd8Bit (int alignmentOffset)
+		{
+			VerifyIndexOfOptionsUnaligned (EolnWithNullAnd8Bit, alignmentOffset, IndexOf);
+		}
+
+		[Test]
+		public unsafe void TestIndexOfOptions_NotFound ()
+		{
+			var options = ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls;
+			var buffer = ArrayPool<byte>.Shared.Rent (BufferLength);
+
+			buffer.AsSpan ().Fill ((byte) 'A');
+
+			try {
+				fixed (byte* buf = buffer) {
+					// Note: Assume AVX2 is supported. The SSE2 and Vector test cases will cover the other scenarios.
+					nint alignment = ((nint) buf) & (Vector256<byte>.Count - 1);
+					int alignmentOffset = Vector256<byte>.Count - (int) alignment;
+					byte* searchSpace = buf + alignmentOffset;
+					ByteDetectionResults results;
+					int index;
+
+					index = Memory.IndexOf (searchSpace, Vector256<byte>.Count * 2, (byte) '\n', options, out results);
+					Assert.That (index, Is.EqualTo (-1), "index");
+					Assert.That (results, Is.EqualTo (ByteDetectionResults.Nothing), "results");
+
+					// Now test with a length that will cause PostSequentialScan() to return -1
+					index = Memory.IndexOf (searchSpace, Vector256<byte>.Count * 2 + 3, (byte) '\n', options, out results);
+					Assert.That (index, Is.EqualTo (-1), "PostSequentialScan index");
+					Assert.That (results, Is.EqualTo (ByteDetectionResults.Nothing), "PostSequentialScan results");
+				}
+			} finally {
+				ArrayPool<byte>.Shared.Return (buffer);
+			}
+		}
+
+#if NETCOREAPP
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestSwAccelIndexOfOptions_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestSwAccelIndexOfOptions_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestSwAccelIndexOfOptions_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestSwAccelIndexOfOptions_DetectBinary")]
+		public void TestSwAccelIndexOfOptions (int opts)
+		{
+			ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+			VerifyIndexOfOptions (Eoln, options, SwAccelIndexOf);
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestSwAccelIndexOfOptionsWithNull_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestSwAccelIndexOfOptionsWithNull_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestSwAccelIndexOfOptionsWithNull_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestSwAccelIndexOfOptionsWithNull_DetectBinary")]
+		public void TestSwAccelIndexOfOptionsWithNull (int opts)
+		{
+			ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+			VerifyIndexOfOptions (EolnWithNull, options, SwAccelIndexOf);
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestSwAccelIndexOfOptionsWith8Bit_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestSwAccelIndexOfOptionsWith8Bit_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestSwAccelIndexOfOptionsWith8Bit_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestSwAccelIndexOfOptionsWith8Bit_DetectBinary")]
+		public void TestSwAccelIndexOfOptionsWith8Bit (int opts)
+		{
+			ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+			VerifyIndexOfOptions (EolnWith8Bit, options, SwAccelIndexOf);
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestSwAccelIndexOfOptionsWithNullAnd8Bit_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestSwAccelIndexOfOptionsWithNullAnd8Bit_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestSwAccelIndexOfOptionsWithNullAnd8Bit_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestSwAccelIndexOfOptionsWithNullAnd8Bit_DetectBinary")]
+		public void TestSwAccelIndexOfOptionsWithNullAnd8Bit (int opts)
+		{
+			ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+			VerifyIndexOfOptions (EolnWithNullAnd8Bit, options, SwAccelIndexOf);
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestSwAccelIndexOfOptionsUnaligned (int alignmentOffset)
+		{
+			VerifyIndexOfOptionsUnaligned (Eoln, alignmentOffset, SwAccelIndexOf);
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestSwAccelIndexOfOptionsUnalignedWithNull (int alignmentOffset)
+		{
+			VerifyIndexOfOptionsUnaligned (EolnWithNull, alignmentOffset, SwAccelIndexOf);
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestSwAccelIndexOfOptionsUnalignedWith8Bit (int alignmentOffset)
+		{
+			VerifyIndexOfOptionsUnaligned (EolnWith8Bit, alignmentOffset, SwAccelIndexOf);
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestSwAccelIndexOfOptionsUnalignedWithNullAnd8Bit (int alignmentOffset)
+		{
+			VerifyIndexOfOptionsUnaligned (EolnWithNullAnd8Bit, alignmentOffset, SwAccelIndexOf);
+		}
+
+		[Test]
+		public unsafe void TestSwAccelIndexOfOptions_NotFound ()
+		{
+			var options = ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls;
+			var buffer = ArrayPool<byte>.Shared.Rent (BufferLength);
+
+			buffer.AsSpan ().Fill ((byte) 'A');
+
+			try {
+				fixed (byte* buf = buffer) {
+					nint alignment = ((nint) buf) & (4 - 1);
+					int alignmentOffset = 4 - (int) alignment;
+					byte* searchSpace = buf + alignmentOffset;
+					ByteDetectionResults results;
+					int index;
+
+					index = Memory.SwAccelIndexOf (searchSpace, 9, (byte) '\n', options, out results);
+					Assert.That (index, Is.EqualTo (-1), "index");
+					Assert.That (results, Is.EqualTo (ByteDetectionResults.Nothing), "results");
+				}
+			} finally {
+				ArrayPool<byte>.Shared.Return (buffer);
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestSse2IndexOfOptions_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestSse2IndexOfOptions_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestSse2IndexOfOptions_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestSse2IndexOfOptions_DetectBinary")]
+		public void TestSse2IndexOfOptions (int opts)
+		{
+			if (Sse2.IsSupported) {
+				ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+				VerifyIndexOfOptions (Eoln, options, Sse2IndexOf);
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestSse2IndexOfOptionsWithNull_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestSse2IndexOfOptionsWithNull_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestSse2IndexOfOptionsWithNull_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestSse2IndexOfOptionsWithNull_DetectBinary")]
+		public void TestSse2IndexOfOptionsWithNull (int opts)
+		{
+			if (Sse2.IsSupported) {
+				ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+				VerifyIndexOfOptions (EolnWithNull, options, Sse2IndexOf);
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestSse2IndexOfOptionsWith8Bit_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestSse2IndexOfOptionsWith8Bit_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestSse2IndexOfOptionsWith8Bit_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestSse2IndexOfOptionsWith8Bit_DetectBinary")]
+		public void TestSse2IndexOfOptionsWith8Bit (int opts)
+		{
+			if (Sse2.IsSupported) {
+				ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+				VerifyIndexOfOptions (EolnWith8Bit, options, Sse2IndexOf);
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestSse2IndexOfOptionsWithNullAnd8Bit_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestSse2IndexOfOptionsWithNullAnd8Bit_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestSse2IndexOfOptionsWithNullAnd8Bit_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestSse2IndexOfOptionsWithNullAnd8Bit_DetectBinary")]
+		public void TestSse2IndexOfOptionsWithNullAnd8Bit (int opts)
+		{
+			if (Sse2.IsSupported) {
+				ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+				VerifyIndexOfOptions (EolnWithNullAnd8Bit, options, Sse2IndexOf);
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestSse2IndexOfOptionsUnaligned (int alignmentOffset)
+		{
+			if (Sse2.IsSupported) {
+				VerifyIndexOfOptionsUnaligned (Eoln, alignmentOffset, Sse2IndexOf);
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestSse2IndexOfOptionsUnalignedWithNull (int alignmentOffset)
+		{
+			if (Sse2.IsSupported) {
+				VerifyIndexOfOptionsUnaligned (EolnWithNull, alignmentOffset, Sse2IndexOf);
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestSse2IndexOfOptionsUnalignedWith8Bit (int alignmentOffset)
+		{
+			if (Sse2.IsSupported) {
+				VerifyIndexOfOptionsUnaligned (EolnWith8Bit, alignmentOffset, Sse2IndexOf);
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestSse2IndexOfOptionsUnalignedWithNullAnd8Bit (int alignmentOffset)
+		{
+			if (Sse2.IsSupported) {
+				VerifyIndexOfOptionsUnaligned (EolnWithNullAnd8Bit, alignmentOffset, Sse2IndexOf);
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[Test]
+		public unsafe void TestSse2IndexOfOptions_NotFound ()
+		{
+			if (Sse2.IsSupported) {
+				var options = ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls;
+				var buffer = ArrayPool<byte>.Shared.Rent (BufferLength);
+
+				buffer.AsSpan ().Fill ((byte) 'A');
+
+				try {
+					fixed (byte* buf = buffer) {
+						nint alignment = ((nint) buf) & (Vector128<byte>.Count - 1);
+						int alignmentOffset = Vector128<byte>.Count - (int) alignment;
+						byte* searchSpace = buf + alignmentOffset;
+						ByteDetectionResults results;
+						int index;
+
+						index = Memory.Sse2IndexOf (searchSpace, Vector128<byte>.Count * 2, (byte) '\n', options, out results);
+						Assert.That (index, Is.EqualTo (-1), "index");
+						Assert.That (results, Is.EqualTo (ByteDetectionResults.Nothing), "results");
+
+						// Now test with a length that will cause PostSequentialScan() to return -1
+						index = Memory.Sse2IndexOf (searchSpace, Vector128<byte>.Count * 2 + 3, (byte) '\n', options, out results);
+						Assert.That (index, Is.EqualTo (-1), "PostSequentialScan index");
+						Assert.That (results, Is.EqualTo (ByteDetectionResults.Nothing), "PostSequentialScan results");
+					}
+				} finally {
+					ArrayPool<byte>.Shared.Return (buffer);
+				}
+			} else {
+				Assert.Ignore ("SSE2 is not supported on this platform.");
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestVectorIndexOfOptions_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestVectorIndexOfOptions_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestVectorIndexOfOptions_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestVectorIndexOfOptions_DetectBinary")]
+		public void TestVectorIndexOfOptions (int opts)
+		{
+			if (Vector.IsHardwareAccelerated) {
+				ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+				VerifyIndexOfOptions (Eoln, options, VectorIndexOf);
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestVectorIndexOfOptionsWithNull_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestVectorIndexOfOptionsWithNull_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestVectorIndexOfOptionsWithNull_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestVectorIndexOfOptionsWithNull_DetectBinary")]
+		public void TestVectorIndexOfOptionsWithNull (int opts)
+		{
+			if (Vector.IsHardwareAccelerated) {
+				ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+				VerifyIndexOfOptions (EolnWithNull, options, VectorIndexOf);
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestVectorIndexOfOptionsWith8Bit_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestVectorIndexOfOptionsWith8Bit_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestVectorIndexOfOptionsWith8Bit_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestVectorIndexOfOptionsWith8Bit_DetectBinary")]
+		public void TestVectorIndexOfOptionsWith8Bit (int opts)
+		{
+			if (Vector.IsHardwareAccelerated) {
+				ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+				VerifyIndexOfOptions (EolnWith8Bit, options, VectorIndexOf);
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[TestCase ((int) ByteDetectionOptions.None, TestName = "TestVectorIndexOfOptionsWithNullAnd8Bit_None")]
+		[TestCase ((int) ByteDetectionOptions.Detect8Bit, TestName = "TestVectorIndexOfOptionsWithNullAnd8Bit_Detect8Bit")]
+		[TestCase ((int) ByteDetectionOptions.DetectNulls, TestName = "TestVectorIndexOfOptionsWithNullAnd8Bit_DetectNulls")]
+		[TestCase ((int) (ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls), TestName = "TestVectorIndexOfOptionsWithNullAnd8Bit_DetectBinary")]
+		public void TestVectorIndexOfOptionsWithNullAnd8Bit (int opts)
+		{
+			if (Vector.IsHardwareAccelerated) {
+				ByteDetectionOptions options = (ByteDetectionOptions) opts;
+
+				VerifyIndexOfOptions (EolnWithNullAnd8Bit, options, VectorIndexOf);
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestVectorIndexOfOptionsUnaligned (int alignmentOffset)
+		{
+			if (Vector.IsHardwareAccelerated) {
+				VerifyIndexOfOptionsUnaligned (Eoln, alignmentOffset, VectorIndexOf);
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestVectorIndexOfOptionsUnalignedWithNull (int alignmentOffset)
+		{
+			if (Vector.IsHardwareAccelerated) {
+				VerifyIndexOfOptionsUnaligned (EolnWithNull, alignmentOffset, VectorIndexOf);
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestVectorIndexOfOptionsUnalignedWith8Bit (int alignmentOffset)
+		{
+			if (Vector.IsHardwareAccelerated) {
+				VerifyIndexOfOptionsUnaligned (EolnWith8Bit, alignmentOffset, VectorIndexOf);
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[TestCase (1)]
+		[TestCase (2)]
+		[TestCase (3)]
+		[TestCase (4)]
+		[TestCase (5)]
+		[TestCase (6)]
+		[TestCase (7)]
+		[TestCase (8)]
+		[TestCase (9)]
+		[TestCase (10)]
+		[TestCase (11)]
+		[TestCase (12)]
+		[TestCase (13)]
+		[TestCase (14)]
+		[TestCase (15)]
+		[TestCase (16)]
+		public void TestVectorIndexOfOptionsUnalignedWithNullAnd8Bit (int alignmentOffset)
+		{
+			if (Vector.IsHardwareAccelerated) {
+				VerifyIndexOfOptionsUnaligned (EolnWithNullAnd8Bit, alignmentOffset, VectorIndexOf);
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[Test]
+		public unsafe void TestVectorIndexOfOptions_NotFound ()
+		{
+			if (Vector.IsHardwareAccelerated) {
+				var options = ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls;
+				var buffer = ArrayPool<byte>.Shared.Rent (BufferLength);
+
+				buffer.AsSpan ().Fill ((byte) 'A');
+
+				try {
+					fixed (byte* buf = buffer) {
+						nint alignment = ((nint) buf) & (Vector<byte>.Count - 1);
+						int alignmentOffset = Vector<byte>.Count - (int) alignment;
+						byte* searchSpace = buf + alignmentOffset;
+						ByteDetectionResults results;
+						int index;
+
+						index = Memory.VectorIndexOf (searchSpace, Vector<byte>.Count * 2, (byte) '\n', options, out results);
+						Assert.That (index, Is.EqualTo (-1), "index");
+						Assert.That (results, Is.EqualTo (ByteDetectionResults.Nothing), "results");
+
+						// Now test with a length that will cause PostSequentialScan() to return -1
+						index = Memory.VectorIndexOf (searchSpace, Vector<byte>.Count * 2 + 3, (byte) '\n', options, out results);
+						Assert.That (index, Is.EqualTo (-1), "PostSequentialScan index");
+						Assert.That (results, Is.EqualTo (ByteDetectionResults.Nothing), "PostSequentialScan results");
+					}
+				} finally {
+					ArrayPool<byte>.Shared.Return (buffer);
+				}
+			} else {
+				Assert.Ignore ("Vector acceleration is not supported on this platform.");
+			}
+		}
+
+		[Test]
+		public unsafe void TestAlignmentLogicInPreSequentialScan ()
+		{
+			// Note: This buffer is specifically designed to only have data in the first 3 bytes and 0's after (that we will detect if we go past the end of bounds)
+			byte[] buffer = new byte[] { (byte) 'A', (byte) 'B', (byte) 'C', 0, 0, 0, 0, 0 };
+			ByteDetectionResults detected;
+
+			fixed (byte *searchSpace = buffer) {
+				// We index into our buffer at offset 1 ('B') so that alignment = 1 and we specify the length as 2 bytes ('B' and 'C').
+				// If we detect any null bytes, then it means that the IndexOf() code scanned past the end of the buffer.
+				int index = Memory.IndexOf (searchSpace + 1, 2, (byte) '\n', ByteDetectionOptions.DetectNulls, out detected);
+
+				Assert.That (index, Is.EqualTo (-1));
+				Assert.That (detected, Is.EqualTo (ByteDetectionResults.Nothing));
+			}
+		}
+
+		static unsafe int Sse2IndexOf (byte[] buffer, int offset, int length, byte value, ByteDetectionOptions options, out ByteDetectionResults detected)
+		{
+			fixed (byte* searchSpace = buffer) {
+				ByteDetectionResults mask = (ByteDetectionResults) ((int) options);
+
+				int index = Memory.Sse2IndexOf (searchSpace + offset, length, value, options, out detected);
+
+				detected &= mask;
+
+				if (index >= 0)
+					index += offset;
+
+				return index;
+			}
+		}
+
+		static unsafe int VectorIndexOf (byte[] buffer, int offset, int length, byte value, ByteDetectionOptions options, out ByteDetectionResults detected)
+		{
+			fixed (byte* searchSpace = buffer) {
+				ByteDetectionResults mask = (ByteDetectionResults) ((int) options);
+
+				int index = Memory.VectorIndexOf (searchSpace + offset, length, value, options, out detected);
+
+				detected &= mask;
+
+				if (index >= 0)
+					index += offset;
+
+				return index;
+			}
+		}
+#endif
+
+		static unsafe int SwAccelIndexOf (byte[] buffer, int offset, int length, byte value, ByteDetectionOptions options, out ByteDetectionResults detected)
+		{
+			fixed (byte* searchSpace = buffer) {
+				ByteDetectionResults mask = (ByteDetectionResults) ((int) options);
+
+				int index = Memory.SwAccelIndexOf (searchSpace + offset, length, value, options, out detected);
+
+				detected &= mask;
+
+				if (index >= 0)
+					index += offset;
+
+				return index;
+			}
+		}
+
+		static unsafe int IndexOf (byte[] buffer, int offset, int length, byte value, ByteDetectionOptions options, out ByteDetectionResults detected)
+		{
+			fixed (byte* searchSpace = buffer) {
+				ByteDetectionResults mask = (ByteDetectionResults) ((int) options);
+
+				int index = Memory.IndexOf (searchSpace + offset, length, value, options, out detected);
+
+				detected &= mask;
+
+				if (index >= 0)
+					index += offset;
+
+				return index;
+			}
+		}
+
+		static void VerifyIndexOfOptions (byte[] eoln, ByteDetectionOptions options, IndexOfDelegate indexOf)
+		{
+			var buffer = ArrayPool<byte>.Shared.Rent (BufferLength);
+			ByteDetectionResults expectedResults;
+
+			buffer.AsSpan ().Fill ((byte) 'A');
+
+			try {
+				for (int expectedIndex = 0; expectedIndex < 1000; expectedIndex++) {
+					Span<byte> region;
+
+					if (expectedIndex >= eoln.Length) {
+						region = buffer.AsSpan ((expectedIndex - eoln.Length) + 1, eoln.Length);
+						eoln.CopyTo (region);
+
+						expectedResults = ByteDetectionResults.Nothing;
+						for (int i = 0; i < eoln.Length; i++) {
+							if (eoln[i] > 127 && (options & ByteDetectionOptions.Detect8Bit) != 0) {
+								expectedResults |= ByteDetectionResults.Detected8Bit;
+							} else if (eoln[i] == 0 && (options & ByteDetectionOptions.DetectNulls) != 0) {
+								expectedResults |= ByteDetectionResults.DetectedNulls;
+							}
+						}
+					} else {
+						int eolnOffset = eoln.Length - (expectedIndex + 1);
+
+						region = buffer.AsSpan (0, expectedIndex + 1);
+						eoln.AsSpan (eolnOffset).CopyTo (region);
+
+						expectedResults = ByteDetectionResults.Nothing;
+						for (int i = 0; i < region.Length; i++) {
+							if (region[i] > 127 && (options & ByteDetectionOptions.Detect8Bit) != 0) {
+								expectedResults |= ByteDetectionResults.Detected8Bit;
+							} else if (region[i] == 0 && (options & ByteDetectionOptions.DetectNulls) != 0) {
+								expectedResults |= ByteDetectionResults.DetectedNulls;
+							}
+						}
+					}
+
+					int index = indexOf (buffer, 0, BufferLength, (byte) '\n', options, out var results);
+					Assert.That (index, Is.EqualTo (expectedIndex), "index");
+					Assert.That (results, Is.EqualTo (expectedResults), $"results for index={index}");
+
+					region.Fill ((byte) 'A');
+				}
+			} finally {
+				ArrayPool<byte>.Shared.Return (buffer);
+			}
+		}
+
+		static void VerifyIndexOfOptionsUnaligned (byte[] eoln, int alignmentOffset, IndexOfDelegate indexOf)
+		{
+			var buffer = ArrayPool<byte>.Shared.Rent (alignmentOffset + BufferLength);
+			var options = ByteDetectionOptions.Detect8Bit | ByteDetectionOptions.DetectNulls;
+			ByteDetectionResults expectedResults;
+
+			buffer.AsSpan ().Fill ((byte) 'A');
+
+			try {
+				// Test every possible index for the eoln (we use the SMTP max line length as our stopping point)
+				for (int expectedIndex = 0; expectedIndex < 1000; expectedIndex++) {
+					Span<byte> region;
+
+					if (expectedIndex >= eoln.Length) {
+						region = buffer.AsSpan (alignmentOffset + (expectedIndex - eoln.Length) + 1, eoln.Length);
+						eoln.CopyTo (region);
+
+						expectedResults = ByteDetectionResults.Nothing;
+						for (int i = 0; i < eoln.Length; i++) {
+							if (eoln[i] > 127 && (options & ByteDetectionOptions.Detect8Bit) != 0) {
+								expectedResults |= ByteDetectionResults.Detected8Bit;
+							} else if (eoln[i] == 0 && (options & ByteDetectionOptions.DetectNulls) != 0) {
+								expectedResults |= ByteDetectionResults.DetectedNulls;
+							}
+						}
+					} else {
+						int eolnOffset = eoln.Length - (expectedIndex + 1);
+
+						region = buffer.AsSpan (alignmentOffset, expectedIndex + 1);
+						eoln.AsSpan (eolnOffset).CopyTo (region);
+
+						expectedResults = ByteDetectionResults.Nothing;
+						for (int i = 0; i < region.Length; i++) {
+							if (region[i] > 127 && (options & ByteDetectionOptions.Detect8Bit) != 0) {
+								expectedResults |= ByteDetectionResults.Detected8Bit;
+							} else if (region[i] == 0 && (options & ByteDetectionOptions.DetectNulls) != 0) {
+								expectedResults |= ByteDetectionResults.DetectedNulls;
+							}
+						}
+					}
+
+					int index = indexOf (buffer, alignmentOffset, BufferLength, (byte) '\n', options, out var results);
+					Assert.That (index, Is.EqualTo (alignmentOffset + expectedIndex), $"index for alignmentOffset={alignmentOffset}");
+					Assert.That (results, Is.EqualTo (expectedResults), $"results for index={index} (alignmentOffset={alignmentOffset})");
+
+					region.Fill ((byte) 'A');
+				}
+			} finally {
+				ArrayPool<byte>.Shared.Return (buffer);
+			}
+		}
+
+#if NETCOREAPP
+		// Matched bytes may be any non-zero value: 0xFF from Vector.Equals(), 0x80 when masking the high bit, etc.
+		static readonly byte[] MatchByteValues = new byte[] { 0x01, 0x80, 0xFF };
+
+		[Test]
+		public void TestIndexOfFirstMatchUInt64 ()
+		{
+			foreach (var value in MatchByteValues) {
+				for (int i = 0; i < 8; i++) {
+					ulong match = (ulong) value << (i * 8);
+
+					Assert.That (Memory.IndexOfFirstMatch (match), Is.EqualTo (i), $"0x{value:X2} at byte {i}");
+
+					// Any matches after the first must be ignored.
+					for (int j = i + 1; j < 8; j++)
+						match |= (ulong) value << (j * 8);
+
+					Assert.That (Memory.IndexOfFirstMatch (match), Is.EqualTo (i), $"0x{value:X2} at bytes {i}-7");
+				}
+			}
+		}
+
+		[Test]
+		public void TestIndexOfFirstMatchVector ()
+		{
+			var bytes = new byte[Vector<byte>.Count];
+
+			foreach (var value in MatchByteValues) {
+				for (int i = 0; i < bytes.Length; i++) {
+					Array.Clear (bytes, 0, bytes.Length);
+					bytes[i] = value;
+
+					Assert.That (Memory.IndexOfFirstMatch (new Vector<byte> (bytes)), Is.EqualTo (i), $"0x{value:X2} at byte {i}");
+
+					// Any matches after the first must be ignored.
+					for (int j = i + 1; j < bytes.Length; j++)
+						bytes[j] = value;
+
+					Assert.That (Memory.IndexOfFirstMatch (new Vector<byte> (bytes)), Is.EqualTo (i), $"0x{value:X2} at bytes {i}-{bytes.Length - 1}");
+				}
+			}
+		}
+#endif
+	}
+}

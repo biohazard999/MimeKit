@@ -1,21 +1,72 @@
 # MimeKit
 
-[![Join the chat at https://gitter.im/jstedfast/MimeKit](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/jstedfast/MimeKit?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-
-|    Package    |Latest Release|Latest Build|
-|:--------------|:------------:|:----------:|
-|**MimeKit**    |[![NuGet Badge MimeKit](https://buildstats.info/nuget/MimeKit)](https://www.nuget.org/packages/MimeKit)|[![MyGet Badge MimeKit](https://buildstats.info/myget/mimekit/MimeKit)](https://www.myget.org/feed/mimekit/package/nuget/MimeKit)|
-|**MimeKitLite**|[![NuGet Badge MimeKitLite](https://buildstats.info/nuget/MimeKitLite)](https://www.nuget.org/packages/MimeKitLite)||
+|  Package  |Latest Release|Latest Build|
+|:----------|:------------:|:----------:|
+|**MimeKit**|[![MimeKit NuGet](https://img.shields.io/nuget/v/MimeKit.svg?logo=nuget&style=flat-square)](https://www.nuget.org/packages/MimeKit)[![MimeKit NuGet Downloads](https://img.shields.io/nuget/dt/MimeKit.svg?style=flat-square)](https://www.nuget.org/packages/MimeKit)|[![MimeKit MyGet](https://img.shields.io/myget/mimekit/v/MimeKit.svg?logo=nuget&style=flat-square&label=myget)](https://www.myget.org/feed/mimekit/package/nuget/MimeKit)|
+|**MimeKit.Core**|[![MimeKit.Core NuGet](https://img.shields.io/nuget/v/MimeKit.Core.svg?logo=nuget&style=flat-square)](https://www.nuget.org/packages/MimeKit.Core)[![MimeKit.Core NuGet Downloads](https://img.shields.io/nuget/dt/MimeKit.Core.svg?style=flat-square)](https://www.nuget.org/packages/MimeKit.Core)|[![MimeKit.Core MyGet](https://img.shields.io/myget/mimekit/v/MimeKit.Core.svg?logo=nuget&style=flat-square&label=myget)](https://www.myget.org/feed/mimekit/package/nuget/MimeKit.Core)|
+|**MimeKit.Cryptography**|[![MimeKit.Cryptography NuGet](https://img.shields.io/nuget/v/MimeKit.Cryptography.svg?logo=nuget&style=flat-square)](https://www.nuget.org/packages/MimeKit.Cryptography)[![MimeKit.Cryptography NuGet Downloads](https://img.shields.io/nuget/dt/MimeKit.Cryptography.svg?style=flat-square)](https://www.nuget.org/packages/MimeKit.Cryptography)|[![MimeKit.Cryptography MyGet](https://img.shields.io/myget/mimekit/v/MimeKit.Cryptography.svg?logo=nuget&style=flat-square&label=myget)](https://www.myget.org/feed/mimekit/package/nuget/MimeKit.Cryptography)|
+|**MailKit**|[![MailKit NuGet](https://img.shields.io/nuget/v/MailKit.svg?logo=nuget&style=flat-square)](https://www.nuget.org/packages/MailKit)[![MailKit NuGet Downloads](https://img.shields.io/nuget/dt/MailKit.svg?style=flat-square)](https://www.nuget.org/packages/MailKit)|[![MailKit MyGet](https://img.shields.io/myget/mimekit/v/MailKit.svg?logo=nuget&style=flat-square&label=myget)](https://www.myget.org/feed/mimekit/package/nuget/MailKit)|
 
 |   Platform   |Build Status|Code Coverage|Static Analysis|
 |:-------------|:----------:|:-----------:|:-------------:|
-|**Linux/Mac**|[![Build Status](https://github.com/jstedfast/MimeKit/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/jstedfast/MimeKit/actions/workflows/main.yml)|[![Code Coverage](https://coveralls.io/repos/jstedfast/MimeKit/badge.svg?branch=master)](https://coveralls.io/r/jstedfast/MimeKit?branch=master)|[![Static Analysis](https://scan.coverity.com/projects/3201/badge.svg)](https://scan.coverity.com/projects/3201)|
-|**Windows**  |[![Build Status](https://github.com/jstedfast/MimeKit/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/jstedfast/MimeKit/actions/workflows/main.yml)|[![Code Coverage](https://coveralls.io/repos/jstedfast/MimeKit/badge.svg?branch=master)](https://coveralls.io/r/jstedfast/MimeKit?branch=master)|[![Static Analysis](https://scan.coverity.com/projects/3201/badge.svg)](https://scan.coverity.com/projects/3201)|
+|**Linux/Mac**|[![Build Status](https://github.com/jstedfast/MimeKit/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/jstedfast/MimeKit/actions/workflows/main.yml)|[![Code Coverage](https://img.shields.io/coverallsCoverage/github/jstedfast/MimeKit?branch=master)](https://coveralls.io/r/jstedfast/MimeKit?branch=master)|[![Static Analysis](https://img.shields.io/coverity/scan/3201)](https://scan.coverity.com/projects/3201)|
+|**Windows**  |[![Build Status](https://github.com/jstedfast/MimeKit/actions/workflows/main.yml/badge.svg?event=push)](https://github.com/jstedfast/MimeKit/actions/workflows/main.yml)|[![Code Coverage](https://img.shields.io/coverallsCoverage/github/jstedfast/MimeKit?branch=master)](https://coveralls.io/r/jstedfast/MimeKit?branch=master)|[![Static Analysis](https://img.shields.io/coverity/scan/3201)](https://scan.coverity.com/projects/3201)|
+
+**Obsolete Packages:**
+|  Package  |Latest Release|
+|:----------|:------------:|
+|**MimeKitLite**|[![MimeKitLite NuGet](https://img.shields.io/nuget/v/MimeKitLite.svg?logo=nuget&style=flat-square)](https://www.nuget.org/packages/MimeKitLite)[![MimeKit NuGet Downloads](https://img.shields.io/nuget/dt/MimeKitLite.svg?style=flat-square)](https://www.nuget.org/packages/MimeKitLite)|
+|**MailKitLite**|[![MailKitLite NuGet](https://img.shields.io/nuget/v/MailKitLite.svg?logo=nuget&style=flat-square)](https://www.nuget.org/packages/MailKitLite)[![MailKitLite NuGet Downloads](https://img.shields.io/nuget/dt/MailKitLite.svg?style=flat-square)](https://www.nuget.org/packages/MailKitLite)|
 
 ## What is MimeKit?
 
 MimeKit is a C# library which may be used for the creation and parsing of messages using the Multipurpose
 Internet Mail Extension (MIME), as defined by [numerous IETF specifications](https://github.com/jstedfast/MimeKit/blob/master/RFCs.md).
+
+**Upgrading from MimeKit 4.x?** MimeKit 5.0 contains a number of breaking changes. See the
+[Porting Guide](https://github.com/jstedfast/MimeKit/blob/master/PortingGuide.md) for step-by-step migration instructions
+and the [Release Notes](https://github.com/jstedfast/MimeKit/blob/master/ReleaseNotes.md) for the complete list of changes.
+
+## Contents
+
+* [Donate](#donate)
+* [History](#history)
+* [Performance](#performance)
+* [License Information](#license-information)
+* [Installing via NuGet](#installing-via-nuget)
+* [Getting the Source Code](#getting-the-source-code)
+* [Building](#building)
+* [Using MimeKit](#using-mimekit)
+  * [Parsing Messages](#parsing-messages)
+  * [Getting the Body of a Message](#getting-the-body-of-a-message)
+  * [Converting HTML to Plain Text](#converting-html-to-plain-text)
+  * [Converting Enriched Text to HTML](#converting-enriched-text-to-html)
+  * [Traversing a MimeMessage](#traversing-a-mimemessage)
+  * [Quick and Dirty Enumeration of Message Body Parts](#quick-and-dirty-enumeration-of-message-body-parts)
+  * [Getting the Decoded Content of a MIME Part](#getting-the-decoded-content-of-a-mime-part)
+  * [Extracting TNEF (winmail.dat) Attachments](#extracting-tnef-winmaildat-attachments)
+  * [Checking Messages for MIME Compliance Problems](#checking-messages-for-mime-compliance-problems)
+  * [Creating a Simple Message](#creating-a-simple-message)
+  * [Creating a Message with Attachments](#creating-a-message-with-attachments)
+  * [Creating a Message Using a BodyBuilder (not Arnold Schwarzenegger)](#creating-a-message-using-a-bodybuilder-not-arnold-schwarzenegger)
+  * [Initializing MimeKit's Cryptography Support](#initializing-mimekits-cryptography-support)
+  * [Preparing to use MimeKit's S/MIME support](#preparing-to-use-mimekits-smime-support)
+  * [Preparing to use MimeKit's PGP/MIME support](#preparing-to-use-mimekits-pgpmime-support)
+  * [Encrypting Messages with S/MIME](#encrypting-messages-with-smime)
+  * [Decrypting S/MIME Messages](#decrypting-smime-messages)
+  * [Encrypting Messages with PGP/MIME](#encrypting-messages-with-pgpmime)
+  * [Decrypting PGP/MIME Messages](#decrypting-pgpmime-messages)
+  * [Digitally Signing Messages with S/MIME or PGP/MIME](#digitally-signing-messages-with-smime-or-pgpmime)
+  * [Verifying S/MIME and PGP/MIME Digital Signatures](#verifying-smime-and-pgpmime-digital-signatures)
+  * [Signing Messages with DKIM](#signing-messages-with-dkim)
+  * [Verifying DKIM Signatures](#verifying-dkim-signatures)
+  * [Signing Messages with ARC](#signing-messages-with-arc)
+  * [Verifying ARC Signatures](#verifying-arc-signatures)
+  * [Verifying DMARC](#verifying-dmarc)
+* [Contributing](#contributing)
+* [Reporting Bugs](#reporting-bugs)
+* [Documentation](#documentation)
+* [.NET Foundation](#net-foundation)
 
 ## Donate
 
@@ -26,7 +77,7 @@ Donating helps pay for things such as web hosting, domain registration and licen
 such as a performance profiler, memory profiler, a static code analysis tool, and more. It also helps
 motivate me to continue working on the project.
 
-<a href="https://paypal.me/pools/c/857bnxBTXg" _target="blank"><img alt="Click here to lend your support to MimeKit by making a donation!" src="https://www.paypal.com/en_US/i/btn/x-click-but21.gif"></a>
+<a href="https://github.com/sponsors/jstedfast" _target="blank"><img alt="Click here to lend your support to MimeKit by making a donation!" src="https://www.paypal.com/en_US/i/btn/x-click-but21.gif"></a>
 
 ## History
 
@@ -45,43 +96,29 @@ flexibility in that I'd be able to use Generics and create a more .NET-compliant
 
 ## Performance
 
-While mainstream beliefs may suggest that C# can never be as fast as C, it turns out that with a bit of creative
-parser design and a few clever optimizations 
-<sup>[[1](http://jeffreystedfast.blogspot.com/2013/09/optimization-tips-tricks-used-by.html)]
-[[2](http://jeffreystedfast.blogspot.com/2013/10/optimization-tips-tricks-used-by.html)]</sup>, MimeKit's
-performance is actually [on par with GMime](http://jeffreystedfast.blogspot.com/2014/03/gmime-gets-speed-boost.html).
+Performance has been a core design goal of MimeKit from the very beginning. MimeKit's parser works directly on
+raw byte buffers rather than first converting the input into strings or splitting it into lines, which keeps
+both CPU time and memory allocations to a minimum. Some of the techniques it relies on:
 
-Since GMime is pretty well-known as a high-performance native MIME parser and MimeKit more-or-less matches GMime's
-performance, it stands to reason that MimeKit is likely unsurpassed in performance in the .NET MIME parser space.
+* A low-level, allocation-conscious streaming reader (`MimeReader`) that the higher-level `MimeParser` builds on.
+* Pooled buffers and lazily-decoded headers so that only the data you actually access is ever decoded.
+* Hardware-accelerated (SIMD) scanning and base64/uuencode encoding and decoding on x64 and ARM64 platforms
+  when supported by the runtime.
+* Source stream storage (`MimeParser` with `storage: MimeContentStorage.Source`) so that MIME part content can reference
+  the original stream instead of being copied into memory.
 
-For a comparison, as I [blogged here](http://jeffreystedfast.blogspot.com/2013/10/optimization-tips-tricks-used-by.html)
-(I have since optimized MimeKit by at least another 30%), MimeKit is more than 25x faster than OpenPOP.NET, 75x
-faster than SharpMimeTools, and 65x faster than regex-based parsers. Even the commercial MIME parser offerings such
-as LimiLabs' Mail.dll and NewtonIdeas' Mime4Net cannot even come close to matching MimeKit's performance (they are
-both orders of magnitude slower than MimeKit).
+The result is a parser that can comfortably process very large messages and multi-gigabyte mbox files while
+remaining spec-compliant and resilient against malformed or malicious input.
 
-For comparison purposes, I've published a [MIME parser benchmark](https://github.com/jstedfast/MimeParserBenchmark)
-to make it easier for anyone else to compare the performance of MimeKit to their favourite MIME parser.
+Long before .NET Core made SIMD available to C# developers, MimeKit was already fast thanks to a number of
+parser design choices and optimizations that are described in more detail in the following blog posts:
 
-Here are the results:
+* [Optimization Tips & Tricks used by MimeKit: Part 1](http://jeffreystedfast.blogspot.com/2013/09/optimization-tips-tricks-used-by.html)
+* [Optimization Tips & Tricks used by MimeKit: Part 2](http://jeffreystedfast.blogspot.com/2013/10/optimization-tips-tricks-used-by.html)
 
-```
-Parsing startrek.msg (1000 iterations):
-MimeKit:        0.6989221 seconds
-OpenPop:        25.3056064 seconds
-AE.Net.Mail:    17.5971438 seconds
-MailSystem.NET: 26.3891218 seconds
-MIMER:          76.4538978 seconds
-
-Parsing xamarin3.msg (1000 iterations):
-MimeKit:        3.4215505 seconds
-OpenPop:        159.3308053 seconds
-AE.Net.Mail:    132.3044291 seconds
-MailSystem.NET: 133.5832078 seconds
-MIMER:          784.433441 seconds
-```
-
-How does your MIME parser compare?
+If you are curious about the details, the [Benchmarks](https://github.com/jstedfast/MimeKit/tree/master/Benchmarks)
+directory contains a [BenchmarkDotNet](https://benchmarkdotnet.org/) suite covering the parser, encoders,
+decoders, filters and more, which you can run on your own hardware.
 
 
 ## License Information
@@ -89,7 +126,7 @@ How does your MIME parser compare?
 ```
 MIT License
 
-Copyright (C) 2012-2021 .NET Foundation and Contributors
+Copyright (C) 2012-2026 .NET Foundation and Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -112,59 +149,86 @@ THE SOFTWARE.
 
 ## Installing via NuGet
 
-The easiest way to install MimeKit is via [NuGet](https://www.nuget.org/packages/MimeKit/).
+The easiest way to install MimeKit is via [NuGet](https://www.nuget.org/packages/MimeKit/):
 
-In Visual Studio's [Package Manager Console](http://docs.nuget.org/docs/start-here/using-the-package-manager-console),
-enter the following command:
+```bash
+dotnet add package MimeKit
+```
 
-    Install-Package MimeKit
+Or, in Visual Studio's [Package Manager Console](https://learn.microsoft.com/nuget/consume-packages/install-use-packages-powershell):
+
+```powershell
+Install-Package MimeKit
+```
+
+MimeKit is split into the following packages:
+
+* [MimeKit.Core](https://www.nuget.org/packages/MimeKit.Core) - MIME parsing and message construction, along with
+  everything else that does not require cryptography (address parsing, encoders and decoders, HTML, RTF and text
+  converters, TNEF, etc.).
+* [MimeKit.Cryptography](https://www.nuget.org/packages/MimeKit.Cryptography) - S/MIME, PGP/MIME, DKIM, ARC and DMARC
+  support. It depends on MimeKit.Core and BouncyCastle.
+* [MimeKit](https://www.nuget.org/packages/MimeKit) - a meta-package that references both MimeKit.Core and
+  MimeKit.Cryptography.
+
+If you don't need any of the cryptography features, you can reference MimeKit.Core instead:
+
+```bash
+dotnet add package MimeKit.Core
+```
+
+If you do use the cryptography features, see [Initializing MimeKit's Cryptography Support](#initializing-mimekits-cryptography-support).
 
 ## Getting the Source Code
 
-First, you'll need to clone MimeKit from my GitHub repository. To do this using the command-line version of Git,
-you'll need to issue the following command in your terminal:
+To clone MimeKit's source code:
 
-    git clone --recursive https://github.com/jstedfast/MimeKit.git
+```bash
+git clone https://github.com/jstedfast/MimeKit.git
+```
 
-If you are using [TortoiseGit](https://tortoisegit.org) on Windows, you'll need to right-click in the directory
-where you'd like to clone MimeKit and select **Git Clone...** in the menu. Once you do that, you'll get the
-following dialog:
+To update an existing clone later:
 
-![Download the source code using TortoiseGit](https://github.com/jstedfast/MimeKit/blob/master/Documentation/media/clone.png)
-
-Fill in the areas outlined in red and then click **OK**. This will recursively clone MimeKit onto your local machine.
-
-## Updating the Source Code
-
-Occasionally you might want to update your local copy of the source code if I have made changes to MimeKit since you
-downloaded the source code in the step above. To do this using the command-line version fo Git, you'll need to issue
-the following commands in your terminal within the MimeKit directory:
-
-    git pull
-    git submodule update
-
-If you are using [TortoiseGit](https://tortoisegit.org) on Windows, you'll need to right-click on the MimeKit
-directory and select **Git Sync...** in the menu. Once you do that, you'll need to click the **Pull** and
-**Submodule Update** buttons in the following dialog:
-
-![Update the source code using TortoiseGit](https://github.com/jstedfast/MimeKit/blob/master/Documentation/media/update.png)
+```bash
+git pull
+```
 
 ## Building
 
-In the top-level MimeKit directory, there are a number of solution files; they are:
+In the top-level MimeKit directory, you'll find the following solution file:
 
-* **MimeKit.sln** - includes projects for .NET 4.5/4.6/4.7/4.8, .NETStandard 1.3/1.6/2.0 as well as the unit tests.
-* **MimeKitLite.sln** - includes projects for the stripped-down versions of MimeKit that drop support for crypto.
+* **MimeKit.sln** - includes the MimeKit.Core and MimeKit.Cryptography projects (targeting .NET Framework 4.6.2/4.7/4.8,
+  .NETStandard 2.0/2.1, .NET 8.0 and .NET 10.0) as well as the unit tests.
 
-Once you've opened the appropriate MimeKit solution file in [Visual Studio](https://www.visualstudio.com/downloads/),
+Once you've opened the MimeKit solution file in [Visual Studio](https://www.visualstudio.com/downloads/),
 you can choose the **Debug** or **Release** build configuration and then build.
 
-Both Visual Studio 2017 and Visual Studio 2019 should be able to build MimeKit without any issues, but older versions such as
-Visual Studio 2015 will require modifications to the projects in order to build correctly. It has been reported that adding
-NuGet package references to [Microsoft.Net.Compilers](https://www.nuget.org/packages/Microsoft.Net.Compilers/) >= 3.6.0
-and [System.ValueTuple](https://www.nuget.org/packages/System.ValueTuple/) >= 4.5.0 will allow MimeKit to build successfully.
+Building MimeKit requires the [.NET 10.0 SDK](https://dotnet.microsoft.com/download) (or a version of Visual Studio that
+includes it). The unit tests target .NET 8.0, so you will also need the .NET 8.0 runtime in order to run them.
 
-Note: The **Release** build will generate the xml API documentation, but the **Debug** build will not.
+You can also build MimeKit from the command line:
+
+```
+dotnet build MimeKit.sln -c Release
+```
+
+Note: The .NET Framework 4.8 target is only built on Windows.
+
+### Regenerating the HTML entity decoder
+
+The standalone `tools\HtmlEntityDecoderGenerator` project generates
+`MimeKit\Text\HtmlEntityDecoder.g.cs` from the checked-in
+`UnitTests\TestData\html\HtmlEntities.json` snapshot, which is also used by the decoder tests.
+From the repository root, run:
+
+```powershell
+dotnet run --project tools\HtmlEntityDecoderGenerator
+```
+
+The tool requires the .NET 10.0 SDK and does not download entity data. It preserves the snapshot's
+entity order and writes UTF-8 without a BOM, with CRLF line endings. Optional arguments
+`-- <entities.json> [<output.cs>]` override the input and output paths. After changing the snapshot,
+regenerate the decoder and run the `UnitTests.Text.HtmlEntityDecoderTests` fixture.
 
 ## Using MimeKit
 
@@ -173,7 +237,7 @@ Note: The **Release** build will generate the xml API documentation, but the **D
 One of the more common operations that MimeKit is meant for is parsing email messages from arbitrary streams.
 There are two ways of accomplishing this task.
 
-The first way is to use one of the [Load](http://www.mimekit.net/docs/html/Overload_MimeKit_MimeMessage_Load.htm) methods
+The first way is to use one of the [Load](https://www.mimekit.net/docs/html/Overload_MimeKit_MimeMessage_Load.htm) methods
 on `MimeMessage`:
 
 ```csharp
@@ -188,7 +252,7 @@ Or you can load a message from a file path:
 var message = MimeMessage.Load ("message.eml");
 ```
 
-The second way is to use the [MimeParser](http://www.mimekit.net/docs/html/T_MimeKit_MimeParser.htm) class. For the most
+The second way is to use the [MimeParser](https://www.mimekit.net/docs/html/T_MimeKit_MimeParser.htm) class. For the most
 part, using the `MimeParser` directly is not necessary unless you wish to parse a Unix mbox file stream. However, this is
 how you would do it:
 
@@ -247,7 +311,8 @@ saw in his or her WYSIWYG editor, the receiving client *should* walk over the li
 at the end and working backwards until it finds a part that it is capable of displaying.
 
 Example:
-```
+
+```text
 multipart/alternative
   text/plain
   text/html
@@ -261,7 +326,8 @@ MIME container instead of a simple `text/html` part in order to embed images and
 within the HTML.
 
 Example:
-```
+
+```text
 multipart/alternative
   text/plain
   multipart/related
@@ -286,6 +352,72 @@ a child of a `multipart/related`, allowing it to refer to images and other types
 are also contained within that `multipart/related` entity. This property is really only a convenience
 property and is not a really good substitute for traversing the MIME structure yourself so that you
 may properly interpret related content.
+
+### Converting HTML to Plain Text
+
+Use `MimeKit.Text.HtmlToText` to turn an HTML document or fragment into readable plain text:
+
+```csharp
+var converter = new MimeKit.Text.HtmlToText {
+    OutputLinkUrls = true,
+    OutputImageAltText = true
+};
+
+string text = converter.Convert ("<h1>Hello</h1><p>Visit <a href=\"https://example.com\">Example</a>.</p>");
+```
+
+The result is:
+
+```text
+# Hello
+
+Visit Example (https://example.com).
+```
+
+The converter preserves paragraph breaks, nested lists, blockquotes and preformatted whitespace.
+It accepts strings, streams or a `TextReader`/`TextWriter` pair. Output is not word-wrapped;
+line endings follow the destination writer's `NewLine` property. Headers and footers are literal
+text, and caller-owned readers, writers and streams remain open.
+
+This is a structural text conversion, not browser rendering or Markdown serialization. CSS and
+inline emphasis styling are not reproduced; tables are flattened without borders or aligned columns.
+Script, style, title, template and hidden-element content is omitted, and external resources are
+never fetched. Link URLs and image alt text are enabled by default and can be disabled independently.
+
+For untrusted input, `MaxElementDepth` defaults to 4096, `MaxInputLength` to 16,777,216 UTF-16
+characters and `MaxOutputLength` to 67,108,864 UTF-16 characters. The input limit includes markup
+and suppressed content; the output limit includes generated indentation, URLs and line endings.
+The literal header and footer are excluded from these length limits. Exceeding a limit throws
+`FormatException`; a streaming destination may already contain partial output.
+
+### Converting Enriched Text to HTML
+
+Use `MimeKit.Text.EnrichedToHtml` to convert RFC 1896 `text/enriched` content:
+
+```csharp
+var converter = new MimeKit.Text.EnrichedToHtml {
+    OutputHtmlFragment = true
+};
+
+string html = converter.Convert ("<bold>Hello</bold> <color><param>red</param>world</color>!");
+```
+
+The converter supports emphasis, font families, colors, relative font sizes, alignment,
+paragraph indentation, excerpts, language tags and `nofill`. It applies enriched-text newline
+folding and escapes literal text, including `<<` for a literal less-than sign. Unknown commands
+are ignored, their body text is retained, and parameter content is never displayed. This does
+not support the older `text/richtext` format.
+
+Strings, streams and `TextReader`/`TextWriter` pairs are supported. By default the result is
+wrapped in `<html><body>`; set `OutputHtmlFragment` to omit that wrapper. Caller-owned readers,
+writers and streams remain open. Text headers and footers are converted with `TextToHtml`;
+headers and footers explicitly marked as HTML are trusted markup, not sanitized input.
+
+For untrusted input, `MaxElementDepth` and `MaxParameterLength` default to 4096, `MaxInputLength`
+to 16,777,216 UTF-16 characters and `MaxOutputLength` to 67,108,864 UTF-16 characters. The input
+limit includes commands and suppressed parameters, but excludes configured headers and footers.
+The output limit includes all markup, escaping, headers and footers. Exceeding a limit throws
+`FormatException`; a streaming destination may already contain partial output.
 
 ### Traversing a MimeMessage
 
@@ -368,6 +500,85 @@ There are a number of useful filters that can be applied to a `FilteredStream`, 
 interface appealing, I suggest taking a look at the available filters in the `MimeKit.IO.Filters` namespace
 or even write your own! The possibilities are limited only by your imagination.
 
+### Extracting TNEF (winmail.dat) Attachments
+
+Outlook and Exchange sometimes send messages with an `application/ms-tnef` attachment, usually named
+`winmail.dat`. It holds the message's real bodies and attachments, packed in Microsoft's Transport Neutral
+Encapsulation Format, which most mail clients can't read. MimeKit parses these attachments as `TnefPart`s.
+
+The easiest way to handle a `TnefPart` is to convert it to MIME:
+
+```csharp
+foreach (var tnefPart in message.BodyParts.OfType<TnefPart> ()) {
+    using (var tnef = tnefPart.LoadTnefMessage ())
+    using (var result = tnef.ConvertToMime ()) {
+        // result.Message is a regular MimeMessage with the bodies and attachments from the TNEF part.
+        // It doesn't depend on the TnefMessage, but it is disposed along with the result.
+        foreach (var attachment in result.Message.Attachments.OfType<MimePart> ()) {
+            // The file name comes from the sender, so never use it as a path without sanitizing it.
+            var fileName = Path.GetFileName (attachment.FileName ?? "attachment.dat");
+
+            using (var stream = File.Create (fileName))
+                attachment.Content.DecodeTo (stream);
+        }
+
+        // result.Losses lists anything that couldn't be represented in MIME.
+    }
+}
+```
+
+If you don't need MIME, `TnefMessage` exposes the `Subject`, `Recipients`, `TextBody`, `HtmlBody`, `RtfBody`,
+`Attachments` and raw MAPI `Properties` directly. `TnefMessage.Load (stream)` loads a standalone `winmail.dat`
+file. TNEF data is untrusted input, so `TnefOptions` limits nesting depth, attachment count and data sizes.
+
+If you're porting TNEF code from MimeKit 4.x, see the
+[FAQ](FAQ.md#port-tnef-code) and the [TNEF section of the Porting Guide](PortingGuide.md#tnef).
+
+### Checking Messages for MIME Compliance Problems
+
+MimeKit's parser is very forgiving: it will happily parse messages that violate the MIME specifications in
+all sorts of ways. Sometimes, though, you'll want to know about those violations, whether you are debugging
+a mail client, rejecting malformed messages, or looking for messages that different mail components might
+interpret differently (a common technique used to smuggle content past spam and malware filters).
+
+To find out, set the `ComplianceLogger` property of the `MimeParser` (or `MimeReader`) to an
+[IMimeComplianceLogger](https://www.mimekit.net/docs/html/T_MimeKit_IMimeComplianceLogger.htm) implementation.
+The parser will then report a [MimeComplianceIssue](https://www.mimekit.net/docs/html/T_MimeKit_MimeComplianceIssue.htm)
+for each problem that it finds, including the type of violation, its severity, its categories (interoperability,
+data loss and/or security) and where in the stream it was found:
+
+```csharp
+class ConsoleComplianceLogger : IMimeComplianceLogger
+{
+    public void Log (in MimeComplianceIssue issue)
+    {
+        Console.WriteLine ("{0}:{1}: {2}: {3} [{4}]", issue.LineNumber, issue.ColumnNumber,
+            issue.Severity, issue.Description, issue.Violation);
+    }
+}
+
+// ...
+
+using (var stream = File.OpenRead ("message.eml")) {
+    var parser = new MimeParser (stream) {
+        ComplianceLogger = new ConsoleComplianceLogger (),
+        ComplianceOptions = new MimeComplianceOptions {
+            // Since the issues can be produced by untrusted input, limit how many times each one gets reported.
+            MaxIssuesPerViolation = 10
+        }
+    };
+
+    var message = parser.ParseMessage ();
+}
+```
+
+If you only need the compliance report and not the `MimeMessage`, use a `MimeReader` instead; it scans the message
+without building the object tree. For a complete example, see the
+[MimeAnalyzer](https://github.com/jstedfast/MimeKit/tree/master/samples/MimeAnalyzer) sample, which reports the issues
+in a compiler-style `file:line:column: severity: message` format.
+
+`HtmlTokenizer`/`HtmlToHtml`, `RtfToText`/`RtfToHtml` and `TnefReader` have similar `ComplianceLogger` properties of their own.
+
 ### Creating a Simple Message
 
 Creating MIME messages using MimeKit is really trivial.
@@ -429,7 +640,7 @@ Will you be my +1?
 
 // create an image attachment for the file located at path
 var attachment = new MimePart ("image", "gif") {
-    Content = new MimeContent (File.OpenRead (path), ContentEncoding.Default),
+    Content = new MimeContent (File.OpenRead (path), ContentEncoding.Unspecified),
     ContentDisposition = new ContentDisposition (ContentDisposition.Attachment),
     ContentTransferEncoding = ContentEncoding.Base64,
     FileName = Path.GetFileName (path)
@@ -520,21 +731,42 @@ builder.Attachments.Add (@"C:\Users\Joey\Documents\party.ics");
 message.Body = builder.ToMessageBody ();
 ```
 
+### Initializing MimeKit's Cryptography Support
+
+As of MimeKit 5.0, MimeKit's S/MIME, PGP/MIME, DKIM, ARC and DMARC support lives in the `MimeKit.Cryptography`
+assembly. In order for the parser to create cryptographic MIME entities such as `MultipartSigned`,
+`MultipartEncrypted` and `ApplicationPkcs7Mime` (instead of a plain `Multipart` or `MimePart`), the
+cryptography module needs to be initialized before any messages are parsed. The best place to do this
+is during your application's startup:
+
+```csharp
+using MimeKit.Cryptography;
+
+CryptographyModule.Initialize ();
+```
+
+Note: The cryptography module is also initialized automatically the first time the `CryptographyContext`
+class is used (for example, when calling `CryptographyContext.Register ()`), and it is safe to call
+`CryptographyModule.Initialize ()` more than once.
+
 ### Preparing to use MimeKit's S/MIME support
 
 Before you can begin using MimeKit's S/MIME support, you will need to decide which
-database to use for certificate storage.
+S/MIME implementation to use.
 
-If you are targetting any of the Xamarin platforms (or Linux), you won't need to do
-anything (although you certainly can if you want to) because, by default, I've
-configured MimeKit to use the Mono.Data.Sqlite binding to SQLite.
+If your application runs exclusively on Windows, you'll probably want to use the
+`WindowsSecureMimeContext` backend which is based on the Windows Certificate
+Store and uses Microsoft's built-in S/MIME implementation.
 
-If you are on any of the Windows platforms, however, you'll need to decide on whether
-to use one of the conveniently available backends such as the `WindowsSecureMimeContext`
-backend or the `TemporarySecureMimeContext` backend or else you'll need to pick a
-System.Data provider such as
-[System.Data.SQLite](https://www.nuget.org/packages/System.Data.SQLite) to use with
-the `DefaultSecureMimeContext` base class.
+On the other hand, if your application or service runs on other platforms such as Linux,
+macOS, iOS, or Android or is expected to run cross-platform, then you will need to use
+one of the BouncyCastle-based S/MIME context classes:
+
+- The `TemporarySecureMimeContext` backend uses an in-memory certificate store and will
+  require your application to load all of the certificates it expects to use into the
+  context before it can be used.
+- The `DefaultSecureMimeContext` backend is designed to use a SQL database for certificate
+  storage such as [System.Data.SQLite](https://www.nuget.org/packages/System.Data.SQLite).
 
 If you opt for using the `DefaultSecureMimeContext` backend, you'll need to implement
 your own `DefaultSecureMimeContext` subclass. Luckily, it's very simple to do.
@@ -545,7 +777,7 @@ Assuming you've chosen System.Data.SQLite, here's how you'd implement your own
 using System.Data.SQLite;
 using MimeKit.Cryptography;
 
-using MyAppNamespace {
+namespace MyAppNamespace {
     class MySecureMimeContext : DefaultSecureMimeContext
     {
         public MySecureMimeContext () : base (OpenDatabase ("C:\\wherever\\certdb.sqlite"))
@@ -570,7 +802,7 @@ using MyAppNamespace {
 }
 ```
 
-Now that you've implemented your own `SecureMimeContext`, you'll want to register it with MimeKit:
+Once you've implemented or chosen a suitable `SecureMimeContext`, you'll need to register it with MimeKit:
 
 ```csharp
 CryptographyContext.Register (typeof (MySecureMimeContext));
@@ -843,10 +1075,10 @@ file called **privatekey.pem**:
 ```csharp
 var headers = new HeaderId[] { HeaderId.From, HeaderId.Subject, HeaderId.Date };
 var signer = new DkimSigner ("privatekey.pem", "example.com", "brisbane", DkimSignatureAlgorithm.RsaSha256) {
-	HeaderCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Simple,
-	BodyCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Simple,
-	AgentOrUserIdentifier = "@eng.example.com",
-	QueryMethod = "dns/txt",
+    HeaderCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Simple,
+    BodyCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Simple,
+    AgentOrUserIdentifier = "@eng.example.com",
+    QueryMethod = "dns/txt",
 };
 
 // Prepare the message body to be sent over a 7bit transport (such as older versions of SMTP).
@@ -862,156 +1094,170 @@ As you can see, it's fairly straight forward.
 ### Verifying DKIM Signatures
 
 Verifying DKIM signatures is slightly more involved than creating them because you'll need to write a custom
-implementation of the `IDkimPublicKeyLocator` interface. Typically, this custom class will need to download
-the DKIM public keys via your chosen DNS library as they are requested by MimeKit during verification of
-DKIM signature headers.
+implementation of the `IDnsResolver` interface. Typically, this custom class will use your chosen DNS library
+to look up the DNS TXT records requested by MimeKit during verification of DKIM signature headers. MimeKit
+takes care of parsing the DKIM public key records, so all your resolver needs to do is return the raw TXT
+record strings along with whether the domain exists or the lookup failed.
 
-Once you've implemented a custom `IDkimPublicKeyLocator`, verifying signatures is fairly trivial. Most of the work
-needed will be in the `IDkimPublicKeyLocator` implementation. As an example of how to implement this interface,
-here is one possible implementation using the [Heijden.DNS](http://www.nuget.org/packages/Heijden.Dns/) library:
+Once you've implemented a custom `IDnsResolver`, verifying signatures is fairly trivial. Most of the work
+needed will be in the `IDnsResolver` implementation. As an example of how to implement this interface,
+here is one possible implementation using the [DnsClient](https://www.nuget.org/packages/DnsClient/) library:
 
 ```csharp
 using System;
 using System.IO;
-using System.Text;
+using System.Net;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 
-using Heijden.DNS;
-
-using Org.BouncyCastle.Crypto;
+using DnsClient;
 
 using MimeKit;
 using MimeKit.Cryptography;
 
 namespace DkimVerifierExample
 {
-	// Note: By using the DkimPublicKeyLocatorBase, we avoid having to parse the DNS TXT records
-	// in order to get the public key ourselves.
-	class DkimPublicKeyLocator : DkimPublicKeyLocatorBase
-	{
-		readonly Dictionary<string, AsymmetricKeyParameter> cache;
-		readonly Resolver resolver;
+    class DnsResolver : IDnsResolver
+    {
+        readonly ConcurrentDictionary<string, DnsTxtResponse> cache;
+        readonly LookupClient dnsClient;
 
-		public DkimPublicKeyLocator ()
-		{
-			cache = new Dictionary<string, AsymmetricKeyParameter> ();
+        public DnsResolver ()
+        {
+            cache = new ConcurrentDictionary<string, DnsTxtResponse> (StringComparer.OrdinalIgnoreCase);
 
-			resolver = new Resolver ("8.8.8.8") {
-				TransportType = TransportType.Udp,
-				UseCache = true,
-				Retries = 3
-			};
-		}
+            var options = new LookupClientOptions (IPAddress.Parse ("8.8.8.8")) {
+                UseCache = true,
+                Retries = 3
+            };
 
-		AsymmetricKeyParameter DnsLookup (string domain, string selector, CancellationToken cancellationToken)
-		{
-			var query = selector + "._domainkey." + domain;
-			AsymmetricKeyParameter pubkey;
+            dnsClient = new LookupClient (options);
+        }
 
-			// checked if we've already fetched this key
-			if (cache.TryGetValue (query, out pubkey))
-				return pubkey;
+        DnsTxtResponse GetTxtResponse (string domain, IDnsQueryResponse response)
+        {
+            DnsTxtResponse result;
 
-			// make a DNS query
-			var response = resolver.Query (query, QType.TXT);
-			var builder = new StringBuilder ();
+            if (response.HasError) {
+                if (response.Header.ResponseCode == DnsHeaderResponseCode.NotExistentDomain)
+                    result = new DnsTxtResponse (DnsQueryStatus.NonExistentDomain);
+                else
+                    return new DnsTxtResponse (DnsQueryStatus.TemporaryFailure);
+            } else {
+                // Each TXT record may be split into multiple character-strings which must be concatenated.
+                // Note: separate TXT records must *not* be concatenated together.
+                var records = response.Answers.TxtRecords ().Select (record => string.Concat (record.Text));
 
-			// combine the TXT records into 1 string buffer
-			foreach (var record in response.RecordsTXT) {
-				foreach (var text in record.TXT)
-					builder.Append (text);
-			}
+                result = new DnsTxtResponse (records);
+            }
 
-			var txt = builder.ToString ();
+            // only cache definitive answers
+            cache[domain] = result;
 
-                        // DkimPublicKeyLocatorBase provides us with this helpful method.
-                        pubkey = GetPublicKey (txt);
-			
-			cache.Add (query, pubkey);
-			
-			return pubkey;
-		}
+            return result;
+        }
 
-		public AsymmetricKeyParameter LocatePublicKey (string methods, string domain, string selector, CancellationToken cancellationToken = default (CancellationToken))
-		{
-			var methodList = methods.Split (new char[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
-			for (int i = 0; i < methodList.Length; i++) {
-				if (methodList[i] == "dns/txt")
-					return DnsLookup (domain, selector, cancellationToken);
-			}
+        public DnsTxtResponse QueryTxt (string domain, CancellationToken cancellationToken = default)
+        {
+            // check if we've already fetched this record
+            if (cache.TryGetValue (domain, out var cached))
+                return cached;
 
-			throw new NotSupportedException (string.Format ("{0} does not include any suported lookup methods.", methods));
-		}
+            try {
+                var response = dnsClient.Query (domain, QueryType.TXT, QueryClass.IN);
 
-		public Task<AsymmetricKeyParameter> LocatePublicKeyAsync (string methods, string domain, string selector, CancellationToken cancellationToken = default (CancellationToken))
-		{
-			return Task.Run (() => {
-				return LocatePublicKey (methods, domain, selector, cancellationToken);
-			}, cancellationToken);
-		}
-	}
+                return GetTxtResponse (domain, response);
+            } catch (DnsResponseException) {
+                return new DnsTxtResponse (DnsQueryStatus.TemporaryFailure);
+            }
+        }
 
-	class Program
-	{
-		public static void Main (string[] args)
-		{
-			if (args.Length == 0) {
-				Help ();
-				return;
-			}
+        public async Task<DnsTxtResponse> QueryTxtAsync (string domain, CancellationToken cancellationToken = default)
+        {
+            // check if we've already fetched this record
+            if (cache.TryGetValue (domain, out var cached))
+                return cached;
 
-			for (int i = 0; i < args.Length; i++) {
-				if (args[i] == "--help") {
-					Help ();
-					return;
-				}
-			}
+            try {
+                var response = await dnsClient.QueryAsync (domain, QueryType.TXT, QueryClass.IN, cancellationToken).ConfigureAwait (false);
 
-			var locator = new DkimPublicKeyLocator ();
-			var verifier = new DkimVerifier (locator);
+                return GetTxtResponse (domain, response);
+            } catch (DnsResponseException) {
+                return new DnsTxtResponse (DnsQueryStatus.TemporaryFailure);
+            }
+        }
+    }
 
-			for (int i = 0; i < args.Length; i++) {
-				if (!File.Exists (args[i])) {
-					Console.Error.WriteLine ("{0}: No such file.", args[i]);
-					continue;
-				}
+    class Program
+    {
+        public static void Main (string[] args)
+        {
+            if (args.Length == 0) {
+                Help ();
+                return;
+            }
 
-				Console.Write ("{0} -> ", args[i]);
+            for (int i = 0; i < args.Length; i++) {
+                if (args[i] == "--help") {
+                    Help ();
+                    return;
+                }
+            }
 
-				var message = MimeMessage.Load (args[i]);
-				var index = message.Headers.IndexOf (HeaderId.DkimSignature);
+            var resolver = new DnsResolver ();
+            var verifier = new DkimVerifier (resolver);
 
-				if (index == -1) {
-					Console.WriteLine ("NO SIGNATURE");
-					continue;
-				}
+            for (int i = 0; i < args.Length; i++) {
+                if (!File.Exists (args[i])) {
+                    Console.Error.WriteLine ("{0}: No such file.", args[i]);
+                    continue;
+                }
 
-				var dkim = message.Headers[index];
+                Console.Write ("{0} -> ", args[i]);
 
-				if (verifier.Verify (message, dkim)) {
-					// the DKIM-Signature header is valid!
-					Console.ForegroundColor = ConsoleColor.Green;
-					Console.WriteLine ("VALID");
-					Console.ResetColor ();
-				} else {
-					// the DKIM-Signature is invalid!
-					Console.ForegroundColor = ConsoleColor.Red;
-					Console.WriteLine ("INVALID");
-					Console.ResetColor ();
-				}
-			}
-		}
+                var message = MimeMessage.Load (args[i]);
+                // verify each of the DKIM-Signature headers (up to verifier.MaxSignatures)
+                var results = verifier.Verify (message);
 
-		static void Help ()
-		{
-			Console.WriteLine ("Usage is: DkimVerifier [options] [messages]");
-			Console.WriteLine ();
-			Console.WriteLine ("Options:");
-			Console.WriteLine ("  --help               This help menu.");
-		}
-	}
+                if (results.Length == 0) {
+                    Console.WriteLine ("NO SIGNATURE");
+                    continue;
+                }
+
+                Console.WriteLine ();
+
+                foreach (var result in results) {
+                    Console.Write ("  d={0}; s={1} -> ", result.Domain, result.Selector);
+
+                    if (result.Status == DkimSignatureStatus.Pass) {
+                        // the DKIM-Signature header is valid!
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine ("PASS");
+                    } else {
+                        // the DKIM-Signature header is invalid (Fail), uses a disallowed algorithm or key (Policy),
+                        // could not be verified due to a DNS error (TempError) or is malformed (PermError).
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine ("{0} ({1})", result.Status.ToString ().ToUpperInvariant (), result.Reason);
+                    }
+
+                    Console.ResetColor ();
+
+                    // Note: result.ToAuthenticationMethodResult () can be used to add the result to an
+                    // Authentication-Results header.
+                }
+            }
+        }
+
+        static void Help ()
+        {
+            Console.WriteLine ("Usage is: DkimVerifier [options] [messages]");
+            Console.WriteLine ();
+            Console.WriteLine ("Options:");
+            Console.WriteLine ("  --help               This help menu.");
+        }
+    }
 }
 ```
 
@@ -1022,7 +1268,7 @@ ARC, you must first validate that the existing message is authentictic and produ
 an ARC-Authentication-Results header containing the methods that you used to
 authenticate the message as well as their results.
 
-The abstract [ArcSigner](http://www.mimekit.net/docs/html/T_MimeKit_Cryptography_ArcSigner.htm)
+The abstract [ArcSigner](https://www.mimekit.net/docs/html/T_MimeKit_Cryptography_ArcSigner.htm)
 class provided by MimeKit will need to be subclassed before it can be used. An example subclass
 that provides 2 different implementations for generating the ARC-Authentication-Results header
 can be seen below:
@@ -1039,124 +1285,96 @@ using MimeKit.Cryptography;
 
 namespace ArcSignerExample
 {
-	class MyArcSigner : ArcSigner
-	{
-		public MyArcSigner (string fileName, string domain, string selector, DkimSigningAlgorithm algorithm = DkimSignatureAlgorithm.RsaSha256)
-		       : base (fileName, domain, selector, algorithm)
-		{
-		}
+    class MyArcSigner : ArcSigner
+    {
+        public MyArcSigner (string fileName, string domain, string selector, DkimSigningAlgorithm algorithm = DkimSignatureAlgorithm.RsaSha256)
+               : base (fileName, domain, selector, algorithm)
+        {
+        }
 
-		/// <summary>
-		/// Generate the ARC-Authentication-Results header.
-		/// </summary>
-		/// <remarks>
-		/// The ARC-Authentication-Results header contains information detailing the results of
-		/// authenticating/verifying the message via ARC, DKIM, SPF, etc.
-		///
-		/// In the following implementation, we assume that all of these authentication results
-		/// have already been determined by other mail software that has added some Authentication-Results
-		/// headers containing this information.
-		///
-		/// Note: This method is used when ArcSigner.Sign() is called instead of ArcSigner.SignAsync().
-		/// </remarks>
-		protected override AuthenticationResults GenerateArcAuthenticationResults (FormatOptions options, MimeMessage message, CancellationToken cancellationToken)
-		{
-			const string AuthenticationServiceIdentifier = "lists.example.com";
+        /// <summary>
+        /// Generate the ARC-Authentication-Results header.
+        /// </summary>
+        /// <remarks>
+        /// The ARC-Authentication-Results header contains information detailing the results of
+        /// authenticating/verifying the message via ARC, DKIM, SPF, etc.
+        ///
+        /// In the following implementation, we assume that all of these authentication results
+        /// have already been determined by other mail software that has added some Authentication-Results
+        /// headers containing this information.
+        ///
+        /// Note: This method is used when ArcSigner.Sign() is called instead of ArcSigner.SignAsync().
+        /// </remarks>
+        protected override AuthenticationResults GenerateArcAuthenticationResults (FormatOptions options, MimeMessage message, CancellationToken cancellationToken)
+        {
+            const string AuthenticationServiceIdentifier = "lists.example.com";
 
-			var results = new AuthenticationResults (AuthenticationServiceIdentifier);
+            var results = new AuthenticationResults (AuthenticationServiceIdentifier);
 
-			for (int i = 0; i < message.Headers.Count; i++) {
-				var header = message.Headers[i];
+            for (int i = 0; i < message.Headers.Count; i++) {
+                var header = message.Headers[i];
 
-				if (header.Id != HeaderId.AuthenticationResults)
-					continue;
+                if (header.Id != HeaderId.AuthenticationResults)
+                    continue;
 
-				if (!AuthenticationResults.TryParse (header.RawValue, out AuthenticationResults authres))
-					continue;
+                if (!AuthenticationResults.TryParse (header.RawValue, out AuthenticationResults authres))
+                    continue;
 
-				if (authres.AuthenticationServiceIdentifier != AuthenticationServiceIdentifier)
-					continue;
+                if (authres.AuthenticationServiceIdentifier != AuthenticationServiceIdentifier)
+                    continue;
 
-				// Merge any authentication results that aren't already known.
-				foreach (var result in authres.Results) {
-					if (!results.Results.Any (r => r.Method == result.Method))
-						results.Results.Add (result);
-				}
-			}
+                // Merge any authentication results that aren't already known.
+                foreach (var result in authres.Results) {
+                    if (!results.Results.Any (r => r.Method == result.Method))
+                        results.Results.Add (result);
+                }
+            }
 
-			return results;
-		}
+            return results;
+        }
 
-		/// <summary>
-		/// Generate the ARC-Authentication-Results asynchronously.
-		/// </summary>
-		/// <remarks>
-		/// The ARC-Authentication-Results header contains information detailing the results of
-		/// authenticating/verifying the message via ARC, DKIM, SPF, etc.
-		///
-		/// In the following implementation, we assume that we have to verify all of the various
-		/// authentication methods ourselves.
-		///
-		/// Note: This method is used when ArcSigner.SignAsync() is called instead of ArcSigner.Sign().
-		/// </remarks>
-		protected override async Task<AuthenticationResults> GenerateArcAuthenticationResultsAsync (FormatOptions options, MimeMessage message, CancellationToken cancellationToken)
-		{
-			const string AuthenticationServiceIdentifier = "lists.example.com";
+        /// <summary>
+        /// Generate the ARC-Authentication-Results asynchronously.
+        /// </summary>
+        /// <remarks>
+        /// The ARC-Authentication-Results header contains information detailing the results of
+        /// authenticating/verifying the message via ARC, DKIM, SPF, etc.
+        ///
+        /// In the following implementation, we assume that we have to verify all of the various
+        /// authentication methods ourselves.
+        ///
+        /// Note: This method is used when ArcSigner.SignAsync() is called instead of ArcSigner.Sign().
+        /// </remarks>
+        protected override async Task<AuthenticationResults> GenerateArcAuthenticationResultsAsync (FormatOptions options, MimeMessage message, CancellationToken cancellationToken)
+        {
+            const string AuthenticationServiceIdentifier = "lists.example.com";
 
-			var results = new AuthenticationResults (AuthenticationServiceIdentifier);
-			var locator = new DkimPublicKeyLocator (); // from the DKIM example above
-			var dkimVerifier = new DkimVerifier (locator);
-			var arcVerifier = new ArcVerifier (locator);
-			AuthenticationMethodResult method;
+            var results = new AuthenticationResults (AuthenticationServiceIdentifier);
+            var resolver = new DnsResolver (); // from the DKIM example above
+            var dkimVerifier = new DkimVerifier (resolver);
+            var arcVerifier = new ArcVerifier (resolver);
+            AuthenticationMethodResult method;
 
-			// Add the ARC authentication results
-			try {
-				var arc = await arcVerifier.VerifyAsync (message, cancellationToken);
-				var result = arc.Chain.ToString ().ToLowerInvariant ();
+            // Add the ARC authentication results
+            var arc = await arcVerifier.VerifyAsync (message, cancellationToken);
 
-				method = new AuthenticationMethodResult ("arc", result);
-				results.Results.Add (method);
-			} catch {
-				// Likely a DNS error
-				method = new AuthenticationMethodResult ("arc", "fail");
-				method.Reason = "DNS error";
-				results.Results.Add (method);
-			}
+            // Note: As required by RFC 8617, any failure to validate the ARC chain (including DNS failures)
+            // results in a "fail". If the failure was due to a temporary DNS failure, you may prefer to
+            // temporarily reject (defer) the message and try again later rather than sealing it with cv=fail.
+            if ((arc.ChainErrors & ArcValidationErrors.DnsTemporaryFailure) != 0)
+                throw new TimeoutException ("Temporary DNS failure while validating the ARC chain.");
 
-			// Add authentication results for each DKIM signature
-			foreach (var dkimHeader in message.Headers.Where (h => h.Id == HeaderId.DkimSignature)) {
-				string result;
+            method = new AuthenticationMethodResult ("arc", arc.Chain.ToString ().ToLowerInvariant ());
+            results.Results.Add (method);
 
-				try {
-					if (await dkimVerifier.VerifyAsync (message, cancellationToken)) {
-						result = "pass";
-					} else {
-						result = "fail";
-					}
-				} catch {
-					result = "fail";
-				}
+            // Add authentication results for each DKIM signature
+            // (the dkim method results include the header.d, header.i, header.s, header.a and header.b properties)
+            foreach (var dkim in await dkimVerifier.VerifyAsync (message, cancellationToken))
+                results.Results.Add (dkim.ToAuthenticationMethodResult ());
 
-				method = new AuthenticationMethodResult ("dkim", result);
-
-				// Parse the DKIM-Signature header so that we can add some
-				// properties to our method result.
-				var params = dkimHeader.Value.Replace (" ", "").Split (new char[] { ';' });
-				var i = params.FirstOrDefault (p => p.StartsWith ("i=", StringComparison.Ordinal));
-				var b = params.FirstOrDefault (p => p.StartsWith ("b=", StringComparison.Ordinal));
-
-				if (i != null)
-					method.Parameters.Add ("header.i", i.Substring (2));
-
-				if (b != null)
-					method.Parameters.Add ("header.b", b.Substring (2, 8));
-
-				results.Results.Add (method);
-			}
-
-			return results;
-		}
-	}
+            return results;
+        }
+    }
 }
 ```
 
@@ -1168,9 +1386,9 @@ file called **privatekey.pem**:
 ```csharp
 var headers = new HeaderId[] { HeaderId.From, HeaderId.Subject, HeaderId.Date };
 var signer = new MyArcSigner ("privatekey.pem", "example.com", "brisbane", DkimSignatureAlgorithm.RsaSha256) {
-	HeaderCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Relaxed,
-	BodyCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Relaxed,
-	AgentOrUserIdentifier = "@eng.example.com"
+    HeaderCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Relaxed,
+    BodyCanonicalizationAlgorithm = DkimCanonicalizationAlgorithm.Relaxed,
+    AgentOrUserIdentifier = "@eng.example.com"
 };
 
 // Prepare the message body to be sent over a 7bit transport (such as older versions of SMTP).
@@ -1183,7 +1401,7 @@ signer.Sign (message, headers); // or SignAsync
 
 ### Verifying ARC Signatures
 
-Just like with verifying DKIM signatures, you will need to implement the `IDkimPublicKeyLocator`
+Just like with verifying DKIM signatures, you will need to implement the `IDnsResolver`
 interface. To see an example of how to implement this interface, see the DKIM signature verification
 example above.
 
@@ -1191,19 +1409,81 @@ The `ArcVerifier` works exactly the same as the `DkimVerifier` except that it is
 to provide a `Header` argument to the `Verify` or `VerifyAsync` method.
 
 ```csharp
-var verifier = new ArcVerifier (new DkimPublicKeyLocator ());
+var verifier = new ArcVerifier (new DnsResolver ());
 var results = await verifier.VerifyAsync (message);
 
 // The Chain results are the only real important results.
 Console.WriteLine ("ARC results: {0}", results.Chain);
+
+// As required by RFC 8617, any validation error (including DNS failures) results in a Fail.
+// The ChainErrors and the Reason/Exception properties of each header result provide diagnostics.
+if ((results.ChainErrors & ArcValidationErrors.DnsTemporaryFailure) != 0)
+    Console.WriteLine ("The ARC chain could not be validated due to a temporary DNS failure; try again later.");
+
+if (results.MessageSignature?.Reason != null)
+    Console.WriteLine ("ARC-Message-Signature: {0}", results.MessageSignature.Reason);
+```
+
+### Verifying DMARC
+
+The `DmarcVerifier` determines whether a message's author domain (the domain in the `From` header)
+was authenticated by an aligned DKIM signature or SPF check, and which policy the domain owner has
+requested for messages that fail. It uses the same `IDnsResolver` interface as the `DkimVerifier`
+to discover the DMARC policy and determine Organizational Domains, so no Public Suffix List is needed.
+
+MimeKit does not implement SPF, so you will need to supply the result of your own SPF check of the
+`MAIL FROM` (or `HELO`) domain. If you have not already verified the DKIM signatures, the
+`DmarcVerifier` will do it for you using its `DkimVerifier` property.
+
+```csharp
+var resolver = new DnsResolver (); // from the DKIM example above
+var verifier = new DmarcVerifier (resolver);
+
+// The result of an SPF check performed by your SMTP server or a third-party SPF library.
+var spf = new SpfCheckResult (SpfStatus.Pass, "bounces.example.com");
+
+var result = await verifier.VerifyAsync (message, spf);
+
+Console.WriteLine ("DMARC result for {0}: {1}", result.AuthorDomain, result.Status);
+
+switch (result.Status) {
+case DmarcStatus.Pass:
+    // An aligned DKIM signature (result.AlignedDkimResult) or SPF result passed.
+    break;
+case DmarcStatus.Fail:
+    // result.Policy is the policy requested by the domain owner (already adjusted for the
+    // sp=, np= and t= tags): None, Quarantine or Reject. The final decision is up to you.
+    Console.WriteLine ("Requested policy: {0}", result.Policy);
+    break;
+case DmarcStatus.TempError:
+    // A DNS failure or a DKIM/SPF temporary error prevented a definitive result; try again later.
+    break;
+case DmarcStatus.PermError:
+    // The message has no From header, multiple From headers, or no usable author domain.
+    break;
+case DmarcStatus.None:
+    // The author domain does not publish a DMARC policy.
+    break;
+}
+
+// result.Errors provides additional diagnostics, and the result can be added to an
+// Authentication-Results header using result.ToAuthenticationMethodResult ().
+```
+
+If you have already verified the DKIM signatures, you can pass those results to the `DmarcVerifier`
+to avoid verifying them twice:
+
+```csharp
+var dkimResults = await verifier.DkimVerifier.VerifyAsync (message);
+var result = await verifier.VerifyAsync (message, dkimResults, spf);
 ```
 
 ## Contributing
 
 The first thing you'll need to do is fork MimeKit to your own GitHub repository. For instructions on how to
-do that, see the section titled **Getting the Source Code**.
+clone it, see the section titled **Getting the Source Code**.
 
-If you use [Visual Studio for Mac](https://visualstudio.microsoft.com/vs/mac/) or [MonoDevelop](http://monodevelop.com),
+If you use [Visual Studio for Mac](https://visualstudio.microsoft.com/vs/mac/) or [MonoDevelop](https://monodevelop.com),
 all of the solution files are configured with the coding style used by MimeKit. If you use Visual Studio on Windows or
 some other editor, please try to maintain the existing coding style as best as you can.
 
@@ -1230,7 +1510,7 @@ string. Please include the `Exception.StackTrace` as well. The `Message`, by its
 
 ## Documentation
 
-API documentation can be found at [http://www.mimekit.net/docs](http://www.mimekit.net/docs).
+API documentation can be found at [https://www.mimekit.net/docs](https://www.mimekit.net/docs).
 
 A copy of the XML-formatted API reference documentation is also included in the NuGet package.
 
@@ -1238,6 +1518,4 @@ A copy of the XML-formatted API reference documentation is also included in the 
 
 MimeKit is a [.NET Foundation](https://www.dotnetfoundation.org/projects) project.
 
-This project has adopted the code of conduct defined by the [Contributor Covenant](http://contributor-covenant.org/) to clarify expected behavior in our community. For more information, see the [.NET Foundation Code of Conduct](http://www.dotnetfoundation.org/code-of-conduct).
-
-General .NET OSS discussions: [.NET Foundation forums](https://forums.dotnetfoundation.org)
+This project has adopted the code of conduct defined by the [Contributor Covenant](https://contributor-covenant.org/) to clarify expected behavior in our community. For more information, see the [.NET Foundation Code of Conduct](https://www.dotnetfoundation.org/code-of-conduct).

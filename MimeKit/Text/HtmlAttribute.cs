@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,8 @@ namespace MimeKit.Text {
 	/// </example>
 	public class HtmlAttribute
 	{
+		HtmlAttributeId id = (HtmlAttributeId) (-1);
+
 		/// <summary>
 		/// Initialize a new instance of the <see cref="HtmlAttribute"/> class.
 		/// </summary>
@@ -49,14 +51,14 @@ namespace MimeKit.Text {
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="id"/> is not a valid value.
 		/// </exception>
-		public HtmlAttribute (HtmlAttributeId id, string value)
+		public HtmlAttribute (HtmlAttributeId id, string? value)
 		{
 			if (id == HtmlAttributeId.Unknown)
 				throw new ArgumentOutOfRangeException (nameof (id));
 
 			Name = id.ToAttributeName ();
 			Value = value;
-			Id = id;
+			this.id = id;
 		}
 
 		/// <summary>
@@ -68,33 +70,25 @@ namespace MimeKit.Text {
 		/// <param name="name">The attribute name.</param>
 		/// <param name="value">The attribute value.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="name"/> is <c>null</c>.
+		/// <paramref name="name"/> is <see langword="null"/>.
 		/// </exception>
-		public HtmlAttribute (string name, string value)
+		public HtmlAttribute (string name, string? value)
 		{
-			if (name == null)
+			if (name is null)
 				throw new ArgumentNullException (nameof (name));
 
 			if (name.Length == 0)
 				throw new ArgumentException ("The attribute name cannot be empty.", nameof (name));
 
-			if (!HtmlUtils.IsValidTokenName (name))
+			if (!HtmlUtils.IsValidAttributeName (name))
 				throw new ArgumentException ("Invalid attribute name.", nameof (name));
 
-			Id = name.ToHtmlAttributeId ();
 			Value = value;
 			Name = name;
 		}
 
 		internal HtmlAttribute (string name)
 		{
-			if (name == null)
-				throw new ArgumentNullException (nameof (name));
-
-			if (name.Length == 0)
-				throw new ArgumentException ("The attribute name cannot be empty.", nameof (name));
-
-			Id = name.ToHtmlAttributeId ();
 			Name = name;
 		}
 
@@ -109,7 +103,12 @@ namespace MimeKit.Text {
 		/// </example>
 		/// <value>The attribute identifier.</value>
 		public HtmlAttributeId Id {
-			get; private set;
+			get {
+				if (id == (HtmlAttributeId) (-1))
+					id = Name.ToHtmlAttributeId ();
+
+				return id;
+			}
 		}
 
 		/// <summary>
@@ -136,7 +135,7 @@ namespace MimeKit.Text {
 		/// <code language="c#" source="Examples\MimeVisitorExamples.cs" region="HtmlPreviewVisitor" />
 		/// </example>
 		/// <value>The value of the attribute.</value>
-		public string Value {
+		public string? Value {
 			get; internal set;
 		}
 	}

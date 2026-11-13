@@ -1,29 +1,25 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks Condition="'$(TestFrameworks)'==''">net47</TargetFrameworks>
+    <TargetFrameworks Condition="'$(TestFrameworks)'==''">net10.0</TargetFrameworks>
     <SignAssembly>true</SignAssembly>
     <DefineConstants Condition=" '$(MonoRuntime)' == 'true' ">$(DefineConstants);MONO</DefineConstants>
     <AssemblyOriginatorKeyFile>..\MimeKit\mimekit.snk</AssemblyOriginatorKeyFile>
-    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>12</LangVersion>
     <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <NoWarn>CA1822;IDE0017</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.13.0" />
-    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.114.3" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageReference Include="Microsoft.VisualStudio.DiagnosticsHub.BenchmarkDotNetDiagnosers" Version="18.7.37220.1" />
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\MimeKit\MimeKit.csproj" />
-    <ProjectReference Include="..\Mono.Data.Sqlite\Mono.Data.Sqlite.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="BenchmarkHelper.cs" />
-    <Compile Include="MimeParserBenchmarks.cs" />
-    <Compile Include="Program.cs" />
   </ItemGroup>
 
 </Project>

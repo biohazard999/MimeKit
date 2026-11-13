@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 // THE SOFTWARE.
 //
 
+using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,14 +39,14 @@ namespace MimeKit {
 	/// <example>
 	/// <code language="c#" source="Examples\AttachmentExamples.cs" region="SaveAttachments" />
 	/// </example>
-	public interface IMimeContent
+	public interface IMimeContent : IDisposable
 	{
 		/// <summary>
 		/// Get the content encoding.
 		/// </summary>
         /// <remarks>
         /// If the <see cref="Stream"/> is not encoded, this value will be
-        /// <see cref="ContentEncoding.Default"/>. Otherwise, it will be
+        /// <see cref="ContentEncoding.Unspecified"/>. Otherwise, it will be
         /// set to the raw content encoding of the stream.
         /// </remarks>
 		/// <value>The encoding.</value>
@@ -55,7 +56,7 @@ namespace MimeKit {
 		/// Get the new-line format, if known.
 		/// </summary>
 		/// <remarks>
-		/// <para>This property is typically only set by the <see cref="MimeParser"/> as it parses
+		/// <para>This property is typically only set by the <see cref="IMimeParser"/> as it parses
 		/// the content of a <see cref="MimePart"/> and is only used as a hint when verifying
 		/// digital signatures.</para>
 		/// </remarks>
@@ -69,7 +70,7 @@ namespace MimeKit {
 		/// Gets the content stream.
 		/// </remarks>
 		/// <value>The stream.</value>
-		Stream Stream { get; }
+		Stream? Stream { get; }
 
 		/// <summary>
 		/// Open the decoded content stream.
@@ -95,7 +96,7 @@ namespace MimeKit {
 		/// <param name="stream">The output stream.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="stream"/> is <c>null</c>.
+		/// <paramref name="stream"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was cancelled via the cancellation token.
@@ -103,7 +104,7 @@ namespace MimeKit {
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
-		void DecodeTo (Stream stream, CancellationToken cancellationToken = default (CancellationToken));
+		void DecodeTo (Stream stream, CancellationToken cancellationToken = default);
 
 		/// <summary>
 		/// Asynchronously decode the content stream into another stream.
@@ -120,7 +121,7 @@ namespace MimeKit {
 		/// <param name="stream">The output stream.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="stream"/> is <c>null</c>.
+		/// <paramref name="stream"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was cancelled via the cancellation token.
@@ -128,7 +129,7 @@ namespace MimeKit {
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
-		Task DecodeToAsync (Stream stream, CancellationToken cancellationToken = default (CancellationToken));
+		Task DecodeToAsync (Stream stream, CancellationToken cancellationToken = default);
 
 		/// <summary>
 		/// Copy the content stream to the specified output stream.
@@ -142,7 +143,7 @@ namespace MimeKit {
 		/// <param name="stream">The output stream.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="stream"/> is <c>null</c>.
+		/// <paramref name="stream"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was cancelled via the cancellation token.
@@ -150,7 +151,7 @@ namespace MimeKit {
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
-		void WriteTo (Stream stream, CancellationToken cancellationToken = default (CancellationToken));
+		void WriteTo (Stream stream, CancellationToken cancellationToken = default);
 
 		/// <summary>
 		/// Asynchronously copy the content stream to the specified output stream.
@@ -165,7 +166,7 @@ namespace MimeKit {
 		/// <param name="stream">The output stream.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="stream"/> is <c>null</c>.
+		/// <paramref name="stream"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was cancelled via the cancellation token.
@@ -173,6 +174,6 @@ namespace MimeKit {
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
-		Task WriteToAsync (Stream stream, CancellationToken cancellationToken = default (CancellationToken));
+		Task WriteToAsync (Stream stream, CancellationToken cancellationToken = default);
 	}
 }

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,17 +24,12 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
+using System.Collections;
 using System.Security.Cryptography.X509Certificates;
 
-using NUnit.Framework;
-
-using Org.BouncyCastle.X509;
+using MimeKit.Cryptography;
 
 using X509Certificate = Org.BouncyCastle.X509.X509Certificate;
-
-using MimeKit.Cryptography;
 
 namespace UnitTests.Cryptography {
 	[TestFixture]
@@ -48,25 +43,40 @@ namespace UnitTests.Cryptography {
 			Assert.Throws<ArgumentNullException> (() => new CmsRecipient ((Stream) null));
 			Assert.Throws<ArgumentNullException> (() => new CmsRecipient ((string) null));
 
+			using (var stream = new MemoryStream ())
+				Assert.Throws<FormatException> (() => new CmsRecipient (stream));
+
+			var path = Path.Combine (TestContext.CurrentContext.WorkDirectory, "empty-recipient.crt");
+
+			try {
+				File.WriteAllBytes (path, Array.Empty<byte> ());
+				Assert.Throws<FormatException> (() => new CmsRecipient (path));
+			} finally {
+				if (File.Exists (path))
+					File.Delete (path);
+			}
+
 			var recipients = new CmsRecipientCollection ();
 
-			Assert.AreEqual (0, recipients.Count);
-			Assert.IsFalse (recipients.IsReadOnly);
+			Assert.That (recipients.Count, Is.EqualTo (0));
+			Assert.That (recipients.IsReadOnly, Is.False);
 			Assert.Throws<ArgumentNullException> (() => recipients.Add (null));
 			Assert.Throws<ArgumentNullException> (() => recipients.Contains (null));
 			Assert.Throws<ArgumentNullException> (() => recipients.CopyTo (null, 0));
 			Assert.Throws<ArgumentOutOfRangeException> (() => recipients.CopyTo (new CmsRecipient[1], -1));
 			Assert.Throws<ArgumentOutOfRangeException> (() => recipients.CopyTo (new CmsRecipient[1], 2));
 			Assert.Throws<ArgumentNullException> (() => recipients.Remove (null));
+
+			Assert.Throws<ArgumentNullException> (() => new CmsRecipientException ("message", null, new Exception ("inner")));
 		}
 
 		static void AssertDefaultValues (CmsRecipient recipient, X509Certificate certificate)
 		{
-			Assert.AreEqual (certificate, recipient.Certificate, "Certificate");
-			Assert.AreEqual (1, recipient.EncryptionAlgorithms.Length, "EncryptionAlgorithms");
-			Assert.AreEqual (EncryptionAlgorithm.TripleDes, recipient.EncryptionAlgorithms[0], "EncryptionAlgorithm");
-			Assert.AreEqual (SubjectIdentifierType.IssuerAndSerialNumber, recipient.RecipientIdentifierType, "RecipientIdentifierType");
-			Assert.IsNull (recipient.RsaEncryptionPadding, "RsaEncryptionPadding");
+			Assert.That (recipient.Certificate, Is.EqualTo (certificate), "Certificate");
+			Assert.That (recipient.EncryptionAlgorithms.Length, Is.EqualTo (1), "EncryptionAlgorithms");
+			Assert.That (recipient.EncryptionAlgorithms[0], Is.EqualTo (EncryptionAlgorithm.TripleDes), "EncryptionAlgorithm");
+			Assert.That (recipient.RecipientIdentifierType, Is.EqualTo (SubjectIdentifierType.IssuerAndSerialNumber), "RecipientIdentifierType");
+			Assert.That (recipient.RsaEncryptionPadding, Is.Null, "RsaEncryptionPadding");
 		}
 
 		[Test]
@@ -87,9 +97,11 @@ namespace UnitTests.Cryptography {
 
 			AssertDefaultValues (recipient, certificate);
 
-			recipient = new CmsRecipient (new X509Certificate2 (path));
+			using (var certificate2 = new X509Certificate2 (path)) {
+				recipient = new CmsRecipient (certificate2);
 
-			AssertDefaultValues (recipient, certificate);
+				AssertDefaultValues (recipient, certificate);
+			}
 		}
 
 		[Test]
@@ -99,17 +111,19 @@ namespace UnitTests.Cryptography {
 			var recipient = new CmsRecipient (path, SubjectIdentifierType.SubjectKeyIdentifier);
 			var certificate = recipient.Certificate;
 
-			Assert.AreEqual (SubjectIdentifierType.SubjectKeyIdentifier, recipient.RecipientIdentifierType);
+			Assert.That (recipient.RecipientIdentifierType, Is.EqualTo (SubjectIdentifierType.SubjectKeyIdentifier));
 
 			using (var stream = File.OpenRead (path))
 				recipient = new CmsRecipient (stream, SubjectIdentifierType.SubjectKeyIdentifier);
-			Assert.AreEqual (SubjectIdentifierType.SubjectKeyIdentifier, recipient.RecipientIdentifierType);
+			Assert.That (recipient.RecipientIdentifierType, Is.EqualTo (SubjectIdentifierType.SubjectKeyIdentifier));
 
 			recipient = new CmsRecipient (certificate, SubjectIdentifierType.SubjectKeyIdentifier);
-			Assert.AreEqual (SubjectIdentifierType.SubjectKeyIdentifier, recipient.RecipientIdentifierType);
+			Assert.That (recipient.RecipientIdentifierType, Is.EqualTo (SubjectIdentifierType.SubjectKeyIdentifier));
 
-			recipient = new CmsRecipient (new X509Certificate2 (File.ReadAllBytes (path)), SubjectIdentifierType.SubjectKeyIdentifier);
-			Assert.AreEqual (SubjectIdentifierType.SubjectKeyIdentifier, recipient.RecipientIdentifierType);
+			using (var certificate2 = new X509Certificate2 (File.ReadAllBytes (path))) {
+				recipient = new CmsRecipient (certificate2, SubjectIdentifierType.SubjectKeyIdentifier);
+				Assert.That (recipient.RecipientIdentifierType, Is.EqualTo (SubjectIdentifierType.SubjectKeyIdentifier));
+			}
 		}
 
 		[Test]
@@ -120,22 +134,41 @@ namespace UnitTests.Cryptography {
 			var recipient = new CmsRecipient (path);
 			var array = new CmsRecipient[1];
 
-			Assert.IsFalse (recipients.Contains (recipient), "Contains: False");
-			Assert.IsFalse (recipients.Remove (recipient), "Remove: False");
+			Assert.That (recipients.Contains (recipient), Is.False, "Contains: False");
+			Assert.That (recipients.Remove (recipient), Is.False, "Remove: False");
 
 			recipients.Add (recipient);
 
-			Assert.AreEqual (1, recipients.Count, "Count");
-			Assert.IsTrue (recipients.Contains (recipient), "Contains: True");
+			Assert.That (recipients.Count, Is.EqualTo (1), "Count");
+			Assert.That (recipients.Contains (recipient), Is.True, "Contains: True");
+
+			IEnumerable enumerable = recipients;
+
+			foreach (CmsRecipient item in enumerable)
+				Assert.That (item, Is.EqualTo (recipient), "IEnumerable.GetEnumerator");
 
 			recipients.CopyTo (array, 0);
-			Assert.AreEqual (recipient, array[0], "CopyTo");
+			Assert.That (array[0], Is.EqualTo (recipient), "CopyTo");
 
-			Assert.IsTrue (recipients.Remove (recipient), "Remove: True");
+			Assert.That (recipients.Remove (recipient), Is.True, "Remove: True");
 
-			Assert.AreEqual (0, recipients.Count, "Count");
+			Assert.That (recipients.Count, Is.EqualTo (0), "Count");
 
 			recipients.Clear ();
+		}
+
+		[Test]
+		public void TestCmsRecipientException ()
+		{
+			var path = Path.Combine (TestHelper.ProjectDir, "TestData", "smime", "StartComCertificationAuthority.crt");
+			var recipient = new CmsRecipient (path);
+			var inner = new InvalidOperationException ("bad recipient");
+			var exception = new CmsRecipientException ("Cannot encrypt.", recipient, inner);
+
+			Assert.That (exception.Message, Is.EqualTo ("Cannot encrypt."));
+			Assert.That (exception.Recipient, Is.EqualTo (recipient));
+			Assert.That (exception.Mailbox, Is.Null);
+			Assert.That (exception.InnerException, Is.EqualTo (inner));
 		}
 	}
 }

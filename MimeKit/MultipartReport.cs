@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,9 @@
 //
 
 using System;
+using System.Diagnostics.CodeAnalysis;
+
+using MimeKit.Utils;
 
 namespace MimeKit {
 	/// <summary>
@@ -39,17 +42,17 @@ namespace MimeKit {
 	/// <example>
 	/// <code language="c#" source="Examples\MessageDeliveryStatusExamples.cs" region="ProcessDeliveryStatusNotification" />
 	/// </example>
-	public class MultipartReport : Multipart
+	public class MultipartReport : Multipart, IMultipartReport
 	{
 		/// <summary>
 		/// Initialize a new instance of the <see cref="MultipartReport"/> class.
 		/// </summary>
 		/// <remarks>
-		/// This constructor is used by <see cref="MimeParser"/>.
+		/// This constructor is used by <see cref="IMimeParser"/>.
 		/// </remarks>
 		/// <param name="args">Information used by the constructor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="args"/> is <c>null</c>.
+		/// <paramref name="args"/> is <see langword="null"/>.
 		/// </exception>
 		public MultipartReport (MimeEntityConstructorArgs args) : base (args)
 		{
@@ -64,16 +67,16 @@ namespace MimeKit {
 		/// <param name="reportType">The type of the report.</param>
 		/// <param name="args">An array of initialization parameters: headers and MIME entities.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="reportType"/> is <c>null</c>.</para>
+		/// <para><paramref name="reportType"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="args"/> is <c>null</c>.</para>
+		/// <para><paramref name="args"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <paramref name="args"/> contains one or more arguments of an unknown type.
 		/// </exception>
 		public MultipartReport (string reportType, params object[] args) : base ("report", args)
 		{
-			if (reportType == null)
+			if (reportType is null)
 				throw new ArgumentNullException (nameof (reportType));
 
 			ReportType = reportType;
@@ -87,18 +90,23 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="reportType">The type of the report.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="reportType"/> is <c>null</c>.
+		/// <paramref name="reportType"/> is <see langword="null"/>.
 		/// </exception>
 		public MultipartReport (string reportType) : base ("report")
 		{
-			if (reportType == null)
+			if (reportType is null)
 				throw new ArgumentNullException (nameof (reportType));
 
 			ReportType = reportType;
 		}
 
+		void CheckDisposed ()
+		{
+			CheckDisposed (nameof (MultipartReport));
+		}
+
 		/// <summary>
-		/// Gets or sets the type of the report.
+		/// Get or set the type of the report.
 		/// </summary>
 		/// <remarks>
 		/// <para>Gets or sets the type of the report.</para>
@@ -110,18 +118,28 @@ namespace MimeKit {
 		/// </example>
 		/// <value>The type of the report.</value>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
-		public string ReportType {
-			get { return ContentType.Parameters["report-type"]; }
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="MultipartReport"/> has been disposed.
+		/// </exception>
+		[DisallowNull]
+		public string? ReportType {
+			get {
+				CheckDisposed ();
+
+				return ContentType.Parameters["report-type"];
+			}
 			set {
-				if (value == null)
+				if (value is null)
 					throw new ArgumentNullException (nameof (value));
+
+				CheckDisposed ();
 
 				if (ReportType == value)
 					return;
 
-				ContentType.Parameters["report-type"] = value.Trim ();
+				ContentType.Parameters["report-type"] = ParseUtils.TrimWhiteSpace (value);
 			}
 		}
 
@@ -138,12 +156,17 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="visitor">The visitor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="visitor"/> is <c>null</c>.
+		/// <paramref name="visitor"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="MultipartReport"/> has been disposed.
 		/// </exception>
 		public override void Accept (MimeVisitor visitor)
 		{
-			if (visitor == null)
+			if (visitor is null)
 				throw new ArgumentNullException (nameof (visitor));
+
+			CheckDisposed ();
 
 			visitor.VisitMultipartReport (this);
 		}

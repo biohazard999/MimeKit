@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@ using System.Text;
 using System.Collections.Generic;
 using System.Net.NetworkInformation;
 using System.Security.Cryptography;
+using System.Diagnostics.CodeAnalysis;
 
 namespace MimeKit.Utils {
 	/// <summary>
@@ -40,9 +41,8 @@ namespace MimeKit.Utils {
 	public static class MimeUtils
 	{
 		const string base36 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-#if !NETSTANDARD1_3 && !NETSTANDARD1_6
-		static string DefaultHostName = null;
-#endif
+		static string? DefaultHostName = null;
+		static readonly char[] UnquoteChars = new[] { '\r', '\n', '\t', '\\', '"' };
 
 		/// <summary>
 		/// A string comparer that performs a case-insensitive ordinal string comparison.
@@ -50,41 +50,63 @@ namespace MimeKit.Utils {
 		/// <remarks>
 		/// A string comparer that performs a case-insensitive ordinal string comparison.
 		/// </remarks>
-		public static readonly IEqualityComparer<string> OrdinalIgnoreCase = new OptimizedOrdinalIgnoreCaseComparer ();
+		public static readonly IEqualityComparer<string> OrdinalIgnoreCase;
 
-		internal static void GetRandomBytes (byte[] buffer)
+		static MimeUtils ()
 		{
-			using (var random = RandomNumberGenerator.Create ())
-				random.GetBytes (buffer);
+#if NETFRAMEWORK || NETSTANDARD2_0
+			OrdinalIgnoreCase = new OptimizedOrdinalIgnoreCaseComparer ();
+#else
+			OrdinalIgnoreCase = StringComparer.OrdinalIgnoreCase;
+#endif
 		}
 
+#if !NET6_0_OR_GREATER
+		internal static void GetRandomBytes (byte[] buffer)
+		{
+#if NETSTANDARD2_1 || NET5_0_OR_GREATER
+			RandomNumberGenerator.Fill (buffer);
+#else
+			using (var random = RandomNumberGenerator.Create ())
+				random.GetBytes (buffer);
+#endif
+		}
+#endif
+
 		/// <summary>
-		/// Generates a Message-Id.
+		/// Generate a Message-Id or Content-Id.
 		/// </summary>
 		/// <remarks>
-		/// Generates a new Message-Id using the supplied domain.
+		/// Generates a new Message-Id (or Content-Id) using the supplied domain.
 		/// </remarks>
 		/// <returns>The message identifier.</returns>
 		/// <param name="domain">A domain to use.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="domain"/> is <c>null</c>.
+		/// <paramref name="domain"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <paramref name="domain"/> is invalid.
 		/// </exception>
 		public static string GenerateMessageId (string domain)
 		{
-			if (domain == null)
+			if (domain is null)
 				throw new ArgumentNullException (nameof (domain));
 
 			if (domain.Length == 0)
 				throw new ArgumentException ("The domain is invalid.", nameof (domain));
 
-			ulong value = (ulong) DateTime.Now.Ticks;
-			var id = new StringBuilder ();
+			ulong value = (ulong) DateTime.UtcNow.Ticks;
+			using var id = new ValueStringBuilder (64);
+
+#if NET6_0_OR_GREATER
+			Span<byte> block = stackalloc byte[8];
+
+			RandomNumberGenerator.Fill (block);
+#else
 			var block = new byte[8];
 
 			GetRandomBytes (block);
+#endif
 
 			do {
 				id.Append (base36[(int) (value % 36)]);
@@ -102,40 +124,37 @@ namespace MimeKit.Utils {
 				value /= 36;
 			} while (value != 0);
 
-			id.Append ('@').Append (ParseUtils.IdnEncode (domain));
+			id.Append ('@');
+			id.Append (MailboxAddress.IdnMapping.Encode (domain));
 
 			return id.ToString ();
 		}
 
 		/// <summary>
-		/// Generates a Message-Id.
+		/// Generate a Message-Id or Content-Id.
 		/// </summary>
 		/// <remarks>
-		/// Generates a new Message-Id using the local machine's domain.
+		/// Generates a new Message-Id (or Content-Id) using the local machine's domain.
 		/// </remarks>
 		/// <returns>The message identifier.</returns>
 		public static string GenerateMessageId ()
 		{
-#if NETSTANDARD1_3 || NETSTANDARD1_6
-			return GenerateMessageId ("localhost.localdomain");
-#else
-			if (DefaultHostName == null) {
+			if (DefaultHostName is null) {
 				try {
 					var properties = IPGlobalProperties.GetIPGlobalProperties ();
 
-					DefaultHostName = properties.HostName;
+					DefaultHostName = properties.HostName.ToLowerInvariant ();
 				} catch {
 					DefaultHostName = "localhost.localdomain";
 				}
 			}
 
 			return GenerateMessageId (DefaultHostName);
-#endif
 		}
 
 		/// <summary>
-		/// Enumerates the message-id references such as those that can be found in
-		/// the In-Reply-To or References header.
+		/// Enumerate the Message-Id references such as those that can be found in
+		/// the In-Reply-To or References headers.
 		/// </summary>
 		/// <remarks>
 		/// Incrementally parses Message-Ids (such as those from a References header
@@ -147,7 +166,7 @@ namespace MimeKit.Utils {
 		/// <param name="startIndex">The index into the buffer to start parsing.</param>
 		/// <param name="length">The length of the buffer to parse.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -155,7 +174,7 @@ namespace MimeKit.Utils {
 		/// </exception>
 		public static IEnumerable<string> EnumerateReferences (byte[] buffer, int startIndex, int length)
 		{
-			ParseUtils.ValidateArguments (buffer, startIndex, length);
+			ArgumentValidator.Validate (buffer, startIndex, length);
 
 			int endIndex = startIndex + length;
 			int index = startIndex;
@@ -168,7 +187,7 @@ namespace MimeKit.Utils {
 					break;
 
 				if (buffer[index] == '<') {
-					if (ParseUtils.TryParseMsgId (buffer, ref index, endIndex, true, false, out string msgid))
+					if (ParseUtils.TryParseMsgId (buffer, ref index, endIndex, true, false, out string? msgid))
 						yield return msgid;
 				} else if (!ParseUtils.SkipWord (buffer, ref index, endIndex, false)) {
 					index++;
@@ -179,8 +198,8 @@ namespace MimeKit.Utils {
 		}
 
 		/// <summary>
-		/// Enumerates the message-id references such as those that can be found in
-		/// the In-Reply-To or References header.
+		/// Enumerate the Message-Id references such as those that can be found in
+		/// the In-Reply-To or References headers.
 		/// </summary>
 		/// <remarks>
 		/// Incrementally parses Message-Ids (such as those from a References header
@@ -189,11 +208,11 @@ namespace MimeKit.Utils {
 		/// <returns>The references.</returns>
 		/// <param name="text">The text to parse.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
 		public static IEnumerable<string> EnumerateReferences (string text)
 		{
-			if (text == null)
+			if (text is null)
 				throw new ArgumentNullException (nameof (text));
 
 			var buffer = Encoding.UTF8.GetBytes (text);
@@ -202,49 +221,48 @@ namespace MimeKit.Utils {
 		}
 
 		/// <summary>
-		/// Parses a Message-Id header value.
+		/// Parse a Message-Id or Content-Id header value.
 		/// </summary>
 		/// <remarks>
-		/// Parses the Message-Id value, returning the addr-spec portion of the msg-id token.
+		/// Parses the Message-Id (or Content-Id) value, returning the addr-spec portion of the msg-id token.
 		/// </remarks>
 		/// <returns>The addr-spec portion of the msg-id token.</returns>
 		/// <param name="buffer">The raw byte buffer to parse.</param>
 		/// <param name="startIndex">The index into the buffer to start parsing.</param>
 		/// <param name="length">The length of the buffer to parse.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
 		/// a valid range in the byte array.
 		/// </exception>
-		public static string ParseMessageId (byte[] buffer, int startIndex, int length)
+		public static string? ParseMessageId (byte[] buffer, int startIndex, int length)
 		{
-			ParseUtils.ValidateArguments (buffer, startIndex, length);
+			ArgumentValidator.Validate (buffer, startIndex, length);
 
 			int endIndex = startIndex + length;
 			int index = startIndex;
-			string msgid;
 
-			ParseUtils.TryParseMsgId (buffer, ref index, endIndex, false, false, out msgid);
+			ParseUtils.TryParseMsgId (buffer, ref index, endIndex, false, false, out string? msgid);
 
 			return msgid;
 		}
 
 		/// <summary>
-		/// Parses a Message-Id header value.
+		/// Parse a Message-Id or Content-Id header value.
 		/// </summary>
 		/// <remarks>
-		/// Parses the Message-Id value, returning the addr-spec portion of the msg-id token.
+		/// Parses the Message-Id (or Content-Id) value, returning the addr-spec portion of the msg-id token.
 		/// </remarks>
 		/// <returns>The addr-spec portion of the msg-id token.</returns>
 		/// <param name="text">The text to parse.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
-		public static string ParseMessageId (string text)
+		public static string? ParseMessageId (string text)
 		{
-			if (text == null)
+			if (text is null)
 				throw new ArgumentNullException (nameof (text));
 
 			var buffer = Encoding.UTF8.GetBytes (text);
@@ -259,26 +277,21 @@ namespace MimeKit.Utils {
 		/// Parses a MIME version string from the supplied buffer starting at the given index
 		/// and spanning across the specified number of bytes.
 		/// </remarks>
-		/// <returns><c>true</c>, if the version was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the version was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The raw byte buffer to parse.</param>
 		/// <param name="startIndex">The index into the buffer to start parsing.</param>
 		/// <param name="length">The length of the buffer to parse.</param>
 		/// <param name="version">The parsed version.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, int length, out Version version)
+		public static bool TryParse (byte[]? buffer, int startIndex, int length, [NotNullWhen (true)] out Version? version)
 		{
-			ParseUtils.ValidateArguments (buffer, startIndex, length);
+			if (!ArgumentValidator.TryValidate (buffer, startIndex, length)) {
+				version = null;
+				return false;
+			}
 
 			var values = new List<int> ();
 			int endIndex = startIndex + length;
 			int index = startIndex;
-			int value;
 
 			version = null;
 
@@ -286,7 +299,7 @@ namespace MimeKit.Utils {
 				if (!ParseUtils.SkipCommentsAndWhiteSpace (buffer, ref index, endIndex, false) || index >= endIndex)
 					return false;
 
-				if (!ParseUtils.TryParseInt32 (buffer, ref index, endIndex, out value))
+				if (!ParseUtils.TryParseInt32 (buffer, ref index, endIndex, out int value))
 					return false;
 
 				values.Add (value);
@@ -317,20 +330,24 @@ namespace MimeKit.Utils {
 		/// <remarks>
 		/// Parses a MIME version string from the specified text.
 		/// </remarks>
-		/// <returns><c>true</c>, if the version was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the version was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="text">The text to parse.</param>
 		/// <param name="version">The parsed version.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (string text, out Version version)
+		public static bool TryParse (string? text, [NotNullWhen (true)] out Version? version)
 		{
-			if (text == null)
-				throw new ArgumentNullException (nameof (text));
+			if (text is null) {
+				version = null;
+				return false;
+			}
 
 			var buffer = Encoding.UTF8.GetBytes (text);
 
 			return TryParse (buffer, 0, buffer.Length, out version);
+		}
+
+		static bool IsEncoding (string value, string text, int startIndex, int length)
+		{
+			return length == value.Length && string.Compare (value, 0, text, startIndex, length, StringComparison.OrdinalIgnoreCase) == 0;
 		}
 
 		/// <summary>
@@ -339,50 +356,55 @@ namespace MimeKit.Utils {
 		/// <remarks>
 		/// Parses a Content-Transfer-Encoding header value.
 		/// </remarks>
-		/// <returns><c>true</c>, if the encoding was successfully parsed, <c>false</c> otherwise.</returns>
+		/// <returns><see langword="true" /> if the encoding was successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="text">The text to parse.</param>
 		/// <param name="encoding">The parsed encoding.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (string text, out ContentEncoding encoding)
+		public static bool TryParse (string? text, out ContentEncoding encoding)
 		{
-			if (text == null)
-				throw new ArgumentNullException (nameof (text));
-
-			var value = new char[text.Length];
-			int i = 0, n = 0;
-			string name;
-
-			// trim leading whitespace
-			while (i < text.Length && char.IsWhiteSpace (text[i]))
-				i++;
-
-			// copy the encoding name
-			// Note: Google Docs tacks a ';' on the end... *sigh*
-			// See https://github.com/jstedfast/MimeKit/issues/106 for an example.
-			while (i < text.Length && text[i] != ';' && !char.IsWhiteSpace (text[i]))
-				value[n++] = char.ToLowerInvariant (text[i++]);
-
-			name = new string (value, 0, n);
-
-			switch (name) {
-			case "7bit":             encoding = ContentEncoding.SevenBit; break;
-			case "8bit":             encoding = ContentEncoding.EightBit; break;
-			case "binary":           encoding = ContentEncoding.Binary; break;
-			case "base64":           encoding = ContentEncoding.Base64; break;
-			case "quoted-printable": encoding = ContentEncoding.QuotedPrintable; break;
-			case "x-uuencode":       encoding = ContentEncoding.UUEncode; break;
-			case "uuencode":         encoding = ContentEncoding.UUEncode; break;
-			case "x-uue":            encoding = ContentEncoding.UUEncode; break;
-			default:                 encoding = ContentEncoding.Default; break;
+			if (text is null) {
+				encoding = ContentEncoding.Unspecified;
+				return false;
 			}
 
-			return encoding != ContentEncoding.Default;
+			int i = 0;
+
+			// trim leading whitespace
+			while (i < text.Length && ParseUtils.IsWhiteSpace (text[i]))
+				i++;
+
+			int startIndex = i, n = 0;
+
+			// Note: Google Docs tacks a ';' on the end... *sigh*
+			// See https://github.com/jstedfast/MimeKit/issues/106 for an example.
+			while (i < text.Length && text[i] != ';' && !ParseUtils.IsWhiteSpace (text[i])) {
+				i++;
+				n++;
+			}
+
+			if (IsEncoding ("7bit", text, startIndex, n))
+				encoding = ContentEncoding.SevenBit;
+			else if (IsEncoding ("8bit", text, startIndex, n))
+				encoding = ContentEncoding.EightBit;
+			else if (IsEncoding ("binary", text, startIndex, n))
+				encoding = ContentEncoding.Binary;
+			else if (IsEncoding ("base64", text, startIndex, n))
+				encoding = ContentEncoding.Base64;
+			else if (IsEncoding ("quoted-printable", text, startIndex, n))
+				encoding = ContentEncoding.QuotedPrintable;
+			else if (IsEncoding ("x-uuencode", text, startIndex, n))
+				encoding = ContentEncoding.UUEncode;
+			else if (IsEncoding ("uuencode", text, startIndex, n))
+				encoding = ContentEncoding.UUEncode;
+			else if (IsEncoding ("x-uue", text, startIndex, n))
+				encoding = ContentEncoding.UUEncode;
+			else
+				encoding = ContentEncoding.Unspecified;
+
+			return encoding != ContentEncoding.Unspecified;
 		}
 
 		/// <summary>
-		/// Quotes the specified text and appends it into the string builder.
+		/// Quote the specified text and append it into the string builder.
 		/// </summary>
 		/// <remarks>
 		/// Quotes the specified text, enclosing it in double-quotes and escaping
@@ -392,31 +414,65 @@ namespace MimeKit.Utils {
 		/// <param name="builder">The string builder.</param>
 		/// <param name="text">The text to quote.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="builder"/> is <c>null</c>.</para>
+		/// <para><paramref name="builder"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
 		public static StringBuilder AppendQuoted (StringBuilder builder, string text)
 		{
-			if (builder == null)
+			if (builder is null)
 				throw new ArgumentNullException (nameof (builder));
 
-			if (text == null)
+			if (text is null)
 				throw new ArgumentNullException (nameof (text));
 
-			builder.Append ("\"");
+			builder.Append ('"');
 			for (int i = 0; i < text.Length; i++) {
 				if (text[i] == '\\' || text[i] == '"')
 					builder.Append ('\\');
 				builder.Append (text[i]);
 			}
-			builder.Append ("\"");
+			builder.Append ('"');
 
 			return builder;
 		}
 
 		/// <summary>
-		/// Quotes the specified text.
+		/// Quote the specified text and append it into the value string builder.
+		/// </summary>
+		/// <remarks>
+		/// Quotes the specified text, enclosing it in double-quotes and escaping
+		/// any backslashes and double-quotes within.
+		/// </remarks>
+		/// <param name="builder">The value string builder.</param>
+		/// <param name="text">The text to quote.</param>
+		internal static void AppendQuoted (ref ValueStringBuilder builder, ReadOnlySpan<char> text)
+		{
+			builder.Append ('"');
+			foreach (char c in text) {
+				if (c == '\\' || c == '"')
+					builder.Append ('\\');
+				builder.Append (c);
+			}
+			builder.Append ('"');
+		}
+
+		/// <summary>
+		/// Quote the specified text and append it into the value string builder.
+		/// </summary>
+		/// <remarks>
+		/// Quotes the specified text, enclosing it in double-quotes and escaping
+		/// any backslashes and double-quotes within.
+		/// </remarks>
+		/// <param name="builder">The value string builder.</param>
+		/// <param name="text">The text to quote.</param>
+		internal static void AppendQuoted (this ref ValueStringBuilder builder, string text)
+		{
+			AppendQuoted (ref builder, text.AsSpan ());
+		}
+
+		/// <summary>
+		/// Quote the specified text.
 		/// </summary>
 		/// <remarks>
 		/// Quotes the specified text, enclosing it in double-quotes and escaping
@@ -425,42 +481,39 @@ namespace MimeKit.Utils {
 		/// <returns>The quoted text.</returns>
 		/// <param name="text">The text to quote.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
-		public static string Quote (string text)
+		public static string Quote (ReadOnlySpan<char> text)
 		{
-			if (text == null)
-				throw new ArgumentNullException (nameof (text));
+			var quoted = new ValueStringBuilder ((text.Length * 2) + 2);
 
-			var quoted = new StringBuilder (text.Length + 2, (text.Length * 2) + 2);
-
-			AppendQuoted (quoted, text);
+			AppendQuoted (ref quoted, text);
 
 			return quoted.ToString ();
 		}
 
 		/// <summary>
-		/// Unquotes the specified text.
+		/// Quote the specified text.
 		/// </summary>
 		/// <remarks>
-		/// Unquotes the specified text, removing any escaped backslashes within.
+		/// Quotes the specified text, enclosing it in double-quotes and escaping
+		/// any backslashes and double-quotes within.
 		/// </remarks>
-		/// <returns>The unquoted text.</returns>
-		/// <param name="text">The text to unquote.</param>
+		/// <returns>The quoted text.</returns>
+		/// <param name="text">The text to quote.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="text"/> is <c>null</c>.
+		/// <paramref name="text"/> is <see langword="null"/>.
 		/// </exception>
-		public static string Unquote (string text)
+		public static string Quote (string text)
 		{
-			if (text == null)
+			if (text is null)
 				throw new ArgumentNullException (nameof (text));
 
-			int index = text.IndexOfAny (new [] { '\r', '\n', '\t', '\\', '"' });
+			return Quote (text.AsSpan ());
+		}
 
-			if (index == -1)
-				return text;
-
-			var builder = new StringBuilder (text.Length);
+		internal static void UnquoteTo (ReadOnlySpan<char> text, bool convertTabsToSpaces, ref ValueStringBuilder output)
+		{
 			bool escaped = false;
 			bool quoted = false;
 
@@ -471,30 +524,106 @@ namespace MimeKit.Utils {
 					escaped = false;
 					break;
 				case '\t':
-					builder.Append (' ');
+					output.Append (convertTabsToSpaces ? ' ' : '\t');
 					escaped = false;
 					break;
 				case '\\':
 					if (escaped)
-						builder.Append ('\\');
+						output.Append ('\\');
 					escaped = !escaped;
 					break;
 				case '"':
 					if (escaped) {
-						builder.Append ('"');
+						output.Append ('"');
 						escaped = false;
 					} else {
 						quoted = !quoted;
 					}
 					break;
 				default:
-					builder.Append (text[i]);
+					output.Append (text[i]);
 					escaped = false;
 					break;
 				}
 			}
+		}
+
+		/// <summary>
+		/// Unquote the specified text.
+		/// </summary>
+		/// <remarks>
+		/// Unquotes the specified text, removing any escaped backslashes within.
+		/// </remarks>
+		/// <returns>The unquoted text.</returns>
+		/// <param name="text">The text to unquote.</param>
+		/// <param name="convertTabsToSpaces"><see langword="true" /> if tab characters should be converted to a space; otherwise, <see langword="false" />.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="text"/> is <see langword="null"/>.
+		/// </exception>
+		public static string Unquote (string text, bool convertTabsToSpaces = false)
+		{
+			if (text is null)
+				throw new ArgumentNullException (nameof (text));
+
+			int index = text.IndexOfAny (UnquoteChars);
+
+			if (index == -1)
+				return text;
+
+			var builder = new ValueStringBuilder (text.Length);
+
+			UnquoteTo (text.AsSpan (), convertTabsToSpaces, ref builder);
 
 			return builder.ToString ();
+		}
+
+		internal static void UnquoteTo (ReadOnlySpan<byte> text, bool convertTabsToSpaces, ref ByteArrayBuilder output)
+		{
+			bool escaped = false;
+			bool quoted = false;
+
+			for (int i = 0; i < text.Length; i++) {
+				switch ((char) text[i]) {
+				case '\r':
+				case '\n':
+					escaped = false;
+					break;
+				case '\t':
+					output.Append ((byte) (convertTabsToSpaces ? ' ' : '\t'));
+					escaped = false;
+					break;
+				case '\\':
+					if (escaped)
+						output.Append ((byte) '\\');
+					escaped = !escaped;
+					break;
+				case '"':
+					if (escaped) {
+						output.Append ((byte) '"');
+						escaped = false;
+					} else {
+						quoted = !quoted;
+					}
+					break;
+				default:
+					output.Append (text[i]);
+					escaped = false;
+					break;
+				}
+			}
+		}
+
+		internal static byte[] Unquote (byte[] text, int startIndex, int length, bool convertTabsToSpaces = false)
+		{
+			var builder = new ByteArrayBuilder (length);
+
+			try {
+				UnquoteTo (text.AsSpan (startIndex, length), convertTabsToSpaces, ref builder);
+
+				return builder.ToArray ();
+			} finally {
+				builder.Dispose ();
+			}
 		}
 	}
 }

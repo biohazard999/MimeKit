@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,7 @@ namespace MimeKit.Utils
 	/// </remarks>
 	class BufferPool
 	{
-		readonly byte[][] buffers;
+		readonly byte[]?[] buffers;
 		SpinLock spinLock;
 		int index;
 
@@ -111,10 +111,10 @@ namespace MimeKit.Utils
 		/// in subsequent uses of <see cref="Rent(bool)"/>.
 		/// </remarks>
 		/// <returns>The rented buffer.</returns>
-		/// <param name="clear"><c>true if the buffer should be cleared; otherwise, <c>false</c></c>.</param>
+		/// <param name="clear"><see langword="true"/> if the buffer should be cleared; otherwise, <see langword="false"/>.</param>
 		public byte[] Rent (bool clear = false)
 		{
-			byte[] buffer = null;
+			byte[]? buffer = null;
 			bool locked = false;
 
 			try {
@@ -130,7 +130,7 @@ namespace MimeKit.Utils
 					spinLock.Exit (false);
 			}
 
-			if (buffer == null)
+			if (buffer is null)
 				buffer = new byte[BufferSize];
 			else if (clear)
 				Array.Clear (buffer, 0, BufferSize);
@@ -151,7 +151,7 @@ namespace MimeKit.Utils
 		/// </remarks>
 		/// <param name="buffer">The buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// The size of the <paramref name="buffer"/> does not match <see cref="BufferSize"/>.
@@ -160,7 +160,7 @@ namespace MimeKit.Utils
 		{
 			bool locked = false;
 
-			if (buffer == null)
+			if (buffer is null)
 				throw new ArgumentNullException (nameof (buffer));
 
 			if (buffer.Length != BufferSize)

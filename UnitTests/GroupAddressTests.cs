@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,7 @@
 // THE SOFTWARE.
 //
 
-using System;
 using System.Text;
-
-using NUnit.Framework;
 
 using MimeKit;
 
@@ -38,19 +35,18 @@ namespace UnitTests {
 		static void AssertParseFailure (string text, bool result, int tokenIndex, int errorIndex)
 		{
 			var buffer = text.Length > 0 ? Encoding.UTF8.GetBytes (text) : new byte[1];
-			GroupAddress group;
 
-			Assert.AreEqual (result, GroupAddress.TryParse (text, out group), "GroupAddress.TryParse(string)");
-			Assert.AreEqual (result, GroupAddress.TryParse (buffer, out group), "GroupAddress.TryParse(byte[])");
-			Assert.AreEqual (result, GroupAddress.TryParse (buffer, 0, out group), "GroupAddress.TryParse(byte[], int)");
-			Assert.AreEqual (result, GroupAddress.TryParse (buffer, 0, buffer.Length, out group), "GroupAddress.TryParse(byte[], int, int)");
+			Assert.That (GroupAddress.TryParse (text, out _), Is.EqualTo (result), "GroupAddress.TryParse(string)");
+			Assert.That (GroupAddress.TryParse (buffer, out _), Is.EqualTo (result), "GroupAddress.TryParse(byte[])");
+			Assert.That (GroupAddress.TryParse (buffer, 0, out _), Is.EqualTo (result), "GroupAddress.TryParse(byte[], int)");
+			Assert.That (GroupAddress.TryParse (buffer, 0, buffer.Length, out _), Is.EqualTo (result), "GroupAddress.TryParse(byte[], int, int)");
 
 			try {
 				GroupAddress.Parse (text);
 				Assert.Fail ("GroupAddress.Parse(string) should fail.");
 			} catch (ParseException ex) {
-				Assert.AreEqual (tokenIndex, ex.TokenIndex, "ParseException did not have the correct token index.");
-				Assert.AreEqual (errorIndex, ex.ErrorIndex, "ParseException did not have the correct error index.");
+				Assert.That (ex.TokenIndex, Is.EqualTo (tokenIndex), "ParseException did not have the correct token index.");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (errorIndex), "ParseException did not have the correct error index.");
 			} catch {
 				Assert.Fail ("GroupAddress.Parse(string) should throw ParseException.");
 			}
@@ -59,8 +55,8 @@ namespace UnitTests {
 				GroupAddress.Parse (buffer);
 				Assert.Fail ("GroupAddress.Parse(byte[]) should fail.");
 			} catch (ParseException ex) {
-				Assert.AreEqual (tokenIndex, ex.TokenIndex, "ParseException did not have the correct token index.");
-				Assert.AreEqual (errorIndex, ex.ErrorIndex, "ParseException did not have the correct error index.");
+				Assert.That (ex.TokenIndex, Is.EqualTo (tokenIndex), "ParseException did not have the correct token index.");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (errorIndex), "ParseException did not have the correct error index.");
 			} catch {
 				Assert.Fail ("GroupAddress.Parse(new byte[]) should throw ParseException.");
 			}
@@ -69,8 +65,8 @@ namespace UnitTests {
 				GroupAddress.Parse (buffer, 0);
 				Assert.Fail ("GroupAddress.Parse(byte[], int) should fail.");
 			} catch (ParseException ex) {
-				Assert.AreEqual (tokenIndex, ex.TokenIndex, "ParseException did not have the correct token index.");
-				Assert.AreEqual (errorIndex, ex.ErrorIndex, "ParseException did not have the correct error index.");
+				Assert.That (ex.TokenIndex, Is.EqualTo (tokenIndex), "ParseException did not have the correct token index.");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (errorIndex), "ParseException did not have the correct error index.");
 			} catch {
 				Assert.Fail ("GroupAddress.Parse(new byte[], int) should throw ParseException.");
 			}
@@ -79,8 +75,8 @@ namespace UnitTests {
 				GroupAddress.Parse (buffer, 0, buffer.Length);
 				Assert.Fail ("GroupAddress.Parse(byte[], int, int) should fail.");
 			} catch (ParseException ex) {
-				Assert.AreEqual (tokenIndex, ex.TokenIndex, "ParseException did not have the correct token index.");
-				Assert.AreEqual (errorIndex, ex.ErrorIndex, "ParseException did not have the correct error index.");
+				Assert.That (ex.TokenIndex, Is.EqualTo (tokenIndex), "ParseException did not have the correct token index.");
+				Assert.That (ex.ErrorIndex, Is.EqualTo (errorIndex), "ParseException did not have the correct error index.");
 			} catch {
 				Assert.Fail ("GroupAddress.Parse(new byte[], int, int) should throw ParseException.");
 			}
@@ -92,51 +88,51 @@ namespace UnitTests {
 			GroupAddress group;
 
 			try {
-				Assert.IsTrue (GroupAddress.TryParse (text, out group), "GroupAddress.TryParse(string) should succeed.");
+				Assert.That (GroupAddress.TryParse (text, out group), Is.True, "GroupAddress.TryParse(string) should succeed.");
 			} catch (Exception ex) {
-				Assert.Fail ("GroupAddress.TryParse(string) should not throw an exception: {0}", ex);
+				Assert.Fail ($"GroupAddress.TryParse(string) should not throw an exception: {ex}");
 			}
 
 			try {
-				Assert.IsTrue (GroupAddress.TryParse (buffer, out group), "GroupAddress.TryParse(byte[]) should succeed.");
+				Assert.That (GroupAddress.TryParse (buffer, out group), Is.True, "GroupAddress.TryParse(byte[]) should succeed.");
 			} catch (Exception ex) {
-				Assert.Fail ("GroupAddress.TryParse(byte[]) should not throw an exception: {0}", ex);
+				Assert.Fail ($"GroupAddress.TryParse(byte[]) should not throw an exception: {ex}");
 			}
 
 			try {
-				Assert.IsTrue (GroupAddress.TryParse (buffer, 0, out group), "GroupAddress.TryParse(byte[], int) should succeed.");
+				Assert.That (GroupAddress.TryParse (buffer, 0, out group), Is.True, "GroupAddress.TryParse(byte[], int) should succeed.");
 			} catch (Exception ex) {
-				Assert.Fail ("GroupAddress.TryParse(byte[], int) should not throw an exception: {0}", ex);
+				Assert.Fail ($"GroupAddress.TryParse(byte[], int) should not throw an exception: {ex}");
 			}
 
 			try {
-				Assert.IsTrue (GroupAddress.TryParse (buffer, 0, buffer.Length, out group), "GroupAddress.TryParse(byte[], int, int) should succeed.");
+				Assert.That (GroupAddress.TryParse (buffer, 0, buffer.Length, out group), Is.True, "GroupAddress.TryParse(byte[], int, int) should succeed.");
 			} catch (Exception ex) {
-				Assert.Fail ("GroupAddress.TryParse(byte[], int, int) should not throw an exception: {0}", ex);
+				Assert.Fail ($"GroupAddress.TryParse(byte[], int, int) should not throw an exception: {ex}");
 			}
 
 			try {
 				group = GroupAddress.Parse (text);
 			} catch (Exception ex) {
-				Assert.Fail ("GroupAddress.Parse(string) should not throw an exception: {0}", ex);
+				Assert.Fail ($"GroupAddress.Parse(string) should not throw an exception: {ex}");
 			}
 
 			try {
 				group = GroupAddress.Parse (buffer);
 			} catch (Exception ex) {
-				Assert.Fail ("GroupAddress.Parse(string) should not throw an exception: {0}", ex);
+				Assert.Fail ($"GroupAddress.Parse(string) should not throw an exception: {ex}");
 			}
 
 			try {
 				group = GroupAddress.Parse (buffer, 0);
 			} catch (Exception ex) {
-				Assert.Fail ("GroupAddress.Parse(string) should not throw an exception: {0}", ex);
+				Assert.Fail ($"GroupAddress.Parse(string) should not throw an exception: {ex}");
 			}
 
 			try {
 				group = GroupAddress.Parse (buffer, 0, buffer.Length);
 			} catch (Exception ex) {
-				Assert.Fail ("GroupAddress.Parse(string) should not throw an exception: {0}", ex);
+				Assert.Fail ($"GroupAddress.Parse(string) should not throw an exception: {ex}");
 			}
 		}
 
@@ -160,11 +156,70 @@ namespace UnitTests {
 
 			var clone = group.Clone ();
 
-			Assert.AreEqual (0, group.CompareTo (clone), "CompareTo");
+			Assert.That (group.CompareTo (clone), Is.EqualTo (0), "CompareTo");
 
 			var actual = clone.ToString (options, true);
 
-			Assert.AreEqual (encoded, actual, "Encode");
+			Assert.That (actual, Is.EqualTo (encoded), "Encode");
+		}
+
+		[Test]
+		public void TestEncodedGroupNameWithQuotesAndBackslashes ()
+		{
+			const string name = "Group \"with\" a \\ backslash and \u00e0 non-ASCII char";
+			var group = new GroupAddress (Encoding.UTF8, name, new [] { new MailboxAddress ("Jeffrey Stedfast", "jeff@example.com") });
+			var encoded = group.ToString (true);
+
+			Assert.That (GroupAddress.TryParse (encoded, out var parsed), Is.True, encoded);
+			Assert.That (parsed.Name, Is.EqualTo (name));
+			Assert.That (parsed.ToString (true), Is.EqualTo (encoded));
+		}
+
+		[Test]
+		public void TestEncodeEmptyGroupName ()
+		{
+			var group = new GroupAddress (string.Empty, new [] { new MailboxAddress (string.Empty, "jeff@example.com") });
+			var encoded = group.ToString (true);
+
+			Assert.That (encoded, Is.EqualTo ("\"\": jeff@example.com;"));
+			Assert.That (group.ToString (false), Is.EqualTo (": jeff@example.com;"));
+			Assert.That (GroupAddress.TryParse (encoded, out var parsed), Is.True, encoded);
+			Assert.That (parsed.Name, Is.EqualTo (string.Empty));
+			Assert.That (parsed.Members, Has.Count.EqualTo (1));
+			Assert.That (parsed.ToString (true), Is.EqualTo (encoded));
+		}
+
+		[Test]
+		public void TestEncodeWhiteSpaceGroupName ()
+		{
+			var inner = new GroupAddress ("  ", new [] { new MailboxAddress (string.Empty, "jeff@example.com") });
+			var outer = new GroupAddress (string.Empty, new InternetAddress[] { inner });
+			var encoded = outer.ToString (true);
+
+			Assert.That (encoded, Is.EqualTo ("\"\": \"\": jeff@example.com;;"));
+			Assert.That (inner.Name, Is.EqualTo (string.Empty));
+			Assert.That (GroupAddress.TryParse (encoded, out var parsed), Is.True, encoded);
+			Assert.That (parsed.Members, Has.Count.EqualTo (1));
+			Assert.That (parsed.Members[0], Is.InstanceOf<GroupAddress> ());
+			Assert.That (((GroupAddress) parsed.Members[0]).Members, Has.Count.EqualTo (1));
+			Assert.That (parsed.ToString (true), Is.EqualTo (encoded));
+		}
+
+		[Test]
+		public void TestEncodeNestedEmptyGroupName ()
+		{
+			var inner = new GroupAddress (string.Empty, new [] { new MailboxAddress (string.Empty, "jeff@example.com") });
+			var outer = new GroupAddress ("Outer", new InternetAddress[] { inner });
+			var encoded = outer.ToString (true);
+
+			Assert.That (encoded, Is.EqualTo ("Outer: \"\": jeff@example.com;;"));
+			Assert.That (GroupAddress.TryParse (encoded, out var parsed), Is.True, encoded);
+			Assert.That (parsed.Name, Is.EqualTo ("Outer"));
+			Assert.That (parsed.Members, Has.Count.EqualTo (1));
+			Assert.That (parsed.Members[0], Is.InstanceOf<GroupAddress> ());
+			Assert.That (parsed.Members[0].Name, Is.EqualTo (string.Empty));
+			Assert.That (((GroupAddress) parsed.Members[0]).Members, Has.Count.EqualTo (1));
+			Assert.That (parsed.ToString (true), Is.EqualTo (encoded));
 		}
 
 		[Test]
@@ -389,6 +444,38 @@ namespace UnitTests {
 			AssertParse (safe);
 
 			AssertParseFailure (overflow, false, 24, 30);
+		}
+
+		[Test]
+		public void TestLongGroupNameFolds ()
+		{
+			var options = FormatOptions.Default.Clone ();
+			options.NewLineFormat = NewLineFormat.Unix;
+			options.MaxLineLength = 60;
+
+			var group = new GroupAddress ("Very Long Group Name For Folding Across Multiple Header Lines In Unit Tests");
+			group.Members.Add (new MailboxAddress ("User", "user@example.com"));
+
+			var encoded = group.ToString (options, true);
+
+			Assert.That (encoded, Is.EqualTo ("Very Long Group Name For Folding Across Multiple Header\n Lines In Unit Tests: User <user@example.com>;"));
+		}
+
+		[Test]
+		public void TestToStringNullOptions ()
+		{
+			var group = new GroupAddress ("Group");
+
+			Assert.Throws<ArgumentNullException> (() => group.ToString (null, true));
+		}
+
+		[Test]
+		public void TestEqualsNonGroup ()
+		{
+			var group = new GroupAddress ("Group");
+			var mailbox = new MailboxAddress ("User", "user@example.com");
+
+			Assert.That (group.Equals (mailbox), Is.False);
 		}
 	}
 }

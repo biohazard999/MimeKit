@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@ using System;
 using System.Text;
 using System.Globalization;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 using MimeKit.Utils;
 
@@ -57,11 +58,11 @@ namespace MimeKit.Cryptography {
 		/// </remarks>
 		/// <param name="authservid">The authentication service identifier.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="authservid"/> is <c>null</c>.
+		/// <paramref name="authservid"/> is <see langword="null"/>.
 		/// </exception>
 		public AuthenticationResults (string authservid) : this ()
 		{
-			if (authservid == null)
+			if (authservid is null)
 				throw new ArgumentNullException (nameof (authservid));
 
 			AuthenticationServiceIdentifier = authservid;
@@ -76,7 +77,7 @@ namespace MimeKit.Cryptography {
 		/// as defined in <a href="https://tools.ietf.org/html/rfc7601">rfc7601</a>.</para>
 		/// </remarks>
 		/// <value>The authserv-id token.</value>
-		public string AuthenticationServiceIdentifier {
+		public string? AuthenticationServiceIdentifier {
 			get; private set;
 		}
 
@@ -129,7 +130,9 @@ namespace MimeKit.Cryptography {
 			}
 
 			if (AuthenticationServiceIdentifier != null) {
-				if (lineLength + space + AuthenticationServiceIdentifier.Length > options.MaxLineLength) {
+				var srvid = FormatValue (AuthenticationServiceIdentifier);
+
+				if (lineLength + space + srvid.Length > options.MaxLineLength) {
 					builder.Append (options.NewLine);
 					builder.Append ('\t');
 					lineLength = 1;
@@ -141,8 +144,8 @@ namespace MimeKit.Cryptography {
 					lineLength++;
 				}
 
-				builder.Append (AuthenticationServiceIdentifier);
-				lineLength += AuthenticationServiceIdentifier.Length;
+				builder.Append (srvid);
+				lineLength += srvid.Length;
 
 				if (Version.HasValue) {
 					var version = Version.Value.ToString (CultureInfo.InvariantCulture);
@@ -189,17 +192,27 @@ namespace MimeKit.Cryptography {
 		/// <returns>The serialized string.</returns>
 		public override string ToString ()
 		{
-			var builder = new StringBuilder ();
+			var builder = new ValueStringBuilder (256);
 
-			if (Instance.HasValue)
-				builder.AppendFormat ("i={0}; ", Instance.Value.ToString (CultureInfo.InvariantCulture));
+			WriteTo (ref builder);
+
+			return builder.ToString ();
+		}
+
+		internal void WriteTo (ref ValueStringBuilder builder)
+		{
+			if (Instance.HasValue) {
+				builder.Append ("i=");
+				builder.AppendInvariant (Instance.Value);
+				builder.Append ("; ");
+			}
 
 			if (AuthenticationServiceIdentifier != null) {
-				builder.Append (AuthenticationServiceIdentifier);
+				builder.Append (FormatValue (AuthenticationServiceIdentifier));
 
 				if (Version.HasValue) {
 					builder.Append (' ');
-					builder.Append (Version.Value.ToString (CultureInfo.InvariantCulture));
+					builder.AppendInvariant (Version.Value);
 				}
 
 				builder.Append ("; ");
@@ -209,13 +222,26 @@ namespace MimeKit.Cryptography {
 				for (int i = 0; i < Results.Count; i++) {
 					if (i > 0)
 						builder.Append ("; ");
-					builder.Append (Results[i]);
+
+					Results[i].WriteTo (ref builder);
 				}
 			} else {
 				builder.Append ("none");
 			}
+		}
 
-			return builder.ToString ();
+		static string FormatValue (string value)
+		{
+			// value := token / quoted-string (rfc2045)
+			if (value.Length == 0)
+				return "\"\"";
+
+			for (int i = 0; i < value.Length; i++) {
+				if (value[i] > 127 || !((byte) value[i]).IsToken ())
+					return MimeUtils.Quote (value);
+			}
+
+			return value;
 		}
 
 		static bool IsKeyword (byte c)
@@ -253,11 +279,11 @@ namespace MimeKit.Cryptography {
 			return true;
 		}
 
-		static bool SkipDomain (byte[] text, ref int index, int endIndex)
+		static bool SkipDotMethodOrOffice365AuthServId (byte[] text, ref int index, int endIndex)
 		{
 			int startIndex = index;
 
-			while (ParseUtils.SkipAtom (text, ref index, endIndex) && index < endIndex && text[index] == (byte) '.')
+			while (SkipKeyword (text, ref index, endIndex) && index < endIndex && text[index] == (byte) '.')
 				index++;
 
 			if (index > startIndex && text[index - 1] != (byte) '.')
@@ -272,7 +298,7 @@ namespace MimeKit.Cryptography {
 			// value  := token / quoted-string
 			// token  := 1*<any (US-ASCII) CHAR except SPACE, CTLs, or tspecials>
 			// tspecials :=  "(" / ")" / "<" / ">" / "@" / "," / ";" / ":" / "\" / <"> / "/" / "[" / "]" / "?" / "="
-			if (text[index] == (byte) '"') {
+			if (index < endIndex && text[index] == (byte) '"') {
 				// quoted-string
 				quoted = true;
 
@@ -287,10 +313,52 @@ namespace MimeKit.Cryptography {
 			// Note: we're forced to accept even tspecials in the property value because they are used in the real-world.
 			// See https://github.com/jstedfast/MimeKit/issues/518 ('/') and https://github.com/jstedfast/MimeKit/issues/590 ('=')
 			// for details.
-			while (index < endIndex && !text[index].IsWhitespace() && text[index] != (byte) ';' && text[index] != (byte) '(')
+			while (index < endIndex && !text[index].IsWhitespace () && text[index] != (byte) ';' && text[index] != (byte) '(')
 				index++;
 
 			return true;
+		}
+
+		static string UnfoldComment (string comment)
+		{
+			StringBuilder? builder = null;
+			int startIndex = 0;
+
+			// Unfold() removes CR and LF characters, so remove any backslash that quotes one of them as well. Otherwise, the
+			// backslash would end up escaping the following character instead (e.g. "(a(\<CR>))" would become "(a(\))").
+			for (int i = 0; i < comment.Length - 1; i++) {
+				if (comment[i] != '\\')
+					continue;
+
+				if (comment[i + 1] == '\r' || comment[i + 1] == '\n') {
+					builder ??= new StringBuilder (comment.Length);
+					builder.Append (comment, startIndex, i - startIndex);
+					startIndex = i + 1;
+				}
+
+				i++;
+			}
+
+			if (builder != null) {
+				builder.Append (comment, startIndex, comment.Length - startIndex);
+				comment = builder.ToString ();
+			}
+
+			var unfolded = Header.Unfold (comment);
+
+			// If the comment ended with a quoted-pair that escaped whitespace (e.g. "(comment\ )"), Unfold() will have
+			// trimmed the whitespace, leaving a dangling backslash that would escape the closing ')' when serialized.
+			while (true) {
+				int backslashes = 0;
+
+				while (backslashes < unfolded.Length && unfolded[unfolded.Length - 1 - backslashes] == '\\')
+					backslashes++;
+
+				if ((backslashes & 1) == 0)
+					return unfolded;
+
+				unfolded = ParseUtils.TrimWhiteSpace (unfolded.Substring (0, unfolded.Length - 1));
+			}
 		}
 
 		static bool TryParseMethods (byte[] text, ref int index, int endIndex, bool throwOnError, AuthenticationResults authres)
@@ -299,7 +367,7 @@ namespace MimeKit.Cryptography {
 			bool quoted;
 
 			while (index < endIndex) {
-				string srvid = null;
+				string? srvid = null;
 
 			method_token:
 				if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
@@ -318,21 +386,32 @@ namespace MimeKit.Cryptography {
 					return false;
 				}
 
-				// Note: Office365 seems to (sometimes) place a method-specific authserv-id token before each
-				// method. This block of code is here to handle that case.
+				// Note: We need to work around 2 different real-world deviations from the spec here:
 				//
-				// See https://github.com/jstedfast/MimeKit/issues/527 for details.
-				if (srvid == null && index < endIndex && text[index] == '.') {
-					index = methodIndex;
+				// 1. Office365 will often put an authserv-id token before (each?) method name, so we need to
+				//    be able to handle domains (e.g., domain.com; method=pass).
+				//    See https://github.com/jstedfast/MimeKit/issues/527 for details.
+				//
+				// 2. Gmail uses method names with dots (e.g., gateway.spf).
+				//    See https://github.com/jstedfast/MimeKit/pull/1208 for details.
+				//
+				// We distinguish between Office365 authserv-ids ("domain.com; method=pass") and Gmail method
+				// names ("gateway.spf=pass") by parsing the dotted token and checking if it's followed by
+				// ';' (Office365) or '=' (Gmail).
+				int methodEndIndex;
 
-					if (!SkipDomain (text, ref index, endIndex)) {
+				if (srvid is null && index < endIndex && text[index] == (byte) '.') {
+					// skip over '.'
+					index++;
+
+					if (!SkipDotMethodOrOffice365AuthServId (text, ref index, endIndex)) {
 						if (throwOnError)
 							throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Invalid Office365 authserv-id token at offset {0}", methodIndex), methodIndex, index);
 
 						return false;
 					}
 
-					srvid = Encoding.UTF8.GetString (text, methodIndex, index - methodIndex);
+					methodEndIndex = index;
 
 					if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
 						return false;
@@ -344,20 +423,26 @@ namespace MimeKit.Cryptography {
 						return false;
 					}
 
-					if (text[index] != (byte) ';') {
+					if (text[index] == (byte) ';') {
+						// Office365 style: authserv-id followed by semicolon.
+						srvid = Encoding.UTF8.GetString (text, methodIndex, methodEndIndex - methodIndex);
+
+						index++;
+
+						goto method_token;
+					} else if (text[index] == (byte) '=' || text[index] == (byte) '/') {
+						// This is a method name with dots (e.g., gateway.spf). Continue normal parsing...
+					} else {
 						if (throwOnError)
 							throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Unexpected token after Office365 authserv-id token at offset {0}", index), index, index);
 
 						return false;
 					}
-
-					// skip over ';'
-					index++;
-
-					goto method_token;
+				} else {
+					methodEndIndex = index;
 				}
 
-				var method = Encoding.ASCII.GetString (text, methodIndex, index - methodIndex);
+				var method = Encoding.ASCII.GetString (text, methodIndex, methodEndIndex - methodIndex);
 
 				if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
 					return false;
@@ -380,8 +465,9 @@ namespace MimeKit.Cryptography {
 					break;
 				}
 
-				var resinfo = new AuthenticationMethodResult (method);
-				resinfo.Office365AuthenticationServiceIdentifier = srvid;
+				var resinfo = new AuthenticationMethodResult (method) {
+					Office365AuthenticationServiceIdentifier = srvid
+				};
 				authres.Results.Add (resinfo);
 
 				int tokenIndex;
@@ -460,7 +546,7 @@ namespace MimeKit.Cryptography {
 
 					commentIndex++;
 
-					resinfo.ResultComment = Header.Unfold (Encoding.UTF8.GetString (text, commentIndex, (index - 1) - commentIndex));
+					resinfo.ResultComment = UnfoldComment (Encoding.UTF8.GetString (text, commentIndex, (index - 1) - commentIndex));
 
 					if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
 						return false;
@@ -521,7 +607,7 @@ namespace MimeKit.Cryptography {
 					var reason = Encoding.UTF8.GetString (text, reasonIndex, index - reasonIndex);
 
 					if (quoted)
-						reason = MimeUtils.Unquote (reason);
+						reason = MimeUtils.Unquote (reason, true);
 
 					if (value == "action")
 						resinfo.Action = reason;
@@ -620,7 +706,8 @@ namespace MimeKit.Cryptography {
 
 					int valueIndex = index;
 
-					if (index >= text.Length || !SkipPropertyValue (text, ref index, endIndex, out quoted)) {
+					// Note: Office 365 has been known to generate empty property values (e.g. "header.from=").
+					if (!SkipPropertyValue (text, ref index, endIndex, out quoted)) {
 						if (throwOnError)
 							throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Incomplete propspec token at offset {0}", tokenIndex), tokenIndex, index);
 
@@ -630,7 +717,7 @@ namespace MimeKit.Cryptography {
 					value = Encoding.UTF8.GetString (text, valueIndex, index - valueIndex);
 
 					if (quoted)
-						value = MimeUtils.Unquote (value);
+						value = MimeUtils.Unquote (value, true);
 
 					var propspec = new AuthenticationMethodProperty (ptype, property, value, quoted);
 					resinfo.Properties.Add (propspec);
@@ -660,12 +747,12 @@ namespace MimeKit.Cryptography {
 			return true;
 		}
 
-		static bool TryParse (byte[] text, ref int index, int endIndex, bool throwOnError, out AuthenticationResults authres)
+		static bool TryParse (byte[] text, ref int index, int endIndex, bool throwOnError, [NotNullWhen (true)] out AuthenticationResults? authres)
 		{
+			int startIndex = index;
 			int? instance = null;
-			string srvid = null;
+			string? srvid = null;
 			string value;
-			bool quoted;
 
 			authres = null;
 
@@ -675,7 +762,7 @@ namespace MimeKit.Cryptography {
 			do {
 				int start = index;
 
-				if (index >= endIndex || !SkipValue (text, ref index, endIndex, out quoted)) {
+				if (index >= endIndex || !SkipValue (text, ref index, endIndex, out bool quoted)) {
 					if (throwOnError)
 						throw new ParseException (string.Format (CultureInfo.InvariantCulture, "Incomplete authserv-id token at offset {0}", start), start, index);
 
@@ -686,7 +773,7 @@ namespace MimeKit.Cryptography {
 
 				if (quoted) {
 					// this can only be the authserv-id token
-					srvid = MimeUtils.Unquote (value);
+					srvid = MimeUtils.Unquote (value, true);
 				} else {
 					// this could either be the authserv-id or it could be "i=#" (ARC instance)
 					if (!ParseUtils.SkipCommentsAndWhiteSpace (text, ref index, endIndex, throwOnError))
@@ -709,7 +796,7 @@ namespace MimeKit.Cryptography {
 							// See https://github.com/jstedfast/MimeKit/issues/490 for details.
 
 							authres = new AuthenticationResults ();
-							index = 0;
+							index = startIndex;
 
 							return TryParseMethods (text, ref index, endIndex, throwOnError, authres);
 						}
@@ -757,7 +844,7 @@ namespace MimeKit.Cryptography {
 						srvid = value;
 					}
 				}
-			} while (srvid == null);
+			} while (srvid is null);
 
 			authres = new AuthenticationResults (srvid) { Instance = instance };
 
@@ -807,21 +894,17 @@ namespace MimeKit.Cryptography {
 		/// Parses an Authentication-Results header value from the supplied buffer starting at the given index
 		/// and spanning across the specified number of bytes.
 		/// </remarks>
-		/// <returns><c>true</c> if the authentication results were successfully parsed; otherwise, <c>false</c>.</returns>
+		/// <returns><see langword="true" /> if the authentication results were successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="startIndex">The starting index of the input buffer.</param>
 		/// <param name="length">The number of bytes in the input buffer to parse.</param>
 		/// <param name="authres">The parsed authentication results.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		/// <exception cref="System.ArgumentOutOfRangeException">
-		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
-		/// a valid range in the byte array.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, int startIndex, int length, out AuthenticationResults authres)
+		public static bool TryParse (byte[] buffer, int startIndex, int length, [NotNullWhen (true)] out AuthenticationResults? authres)
 		{
-			ParseUtils.ValidateArguments (buffer, startIndex, length);
+			if (!ArgumentValidator.TryValidate (buffer, startIndex, length)) {
+				authres = null;
+				return false;
+			}
 
 			int index = startIndex;
 
@@ -834,16 +917,15 @@ namespace MimeKit.Cryptography {
 		/// <remarks>
 		/// Parses an Authentication-Results header value from the supplied buffer.
 		/// </remarks>
-		/// <returns><c>true</c> if the authentication results were successfully parsed; otherwise, <c>false</c>.</returns>
+		/// <returns><see langword="true" /> if the authentication results were successfully parsed; otherwise, <see langword="false" />.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <param name="authres">The parsed authentication results.</param>
-		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
-		/// </exception>
-		public static bool TryParse (byte[] buffer, out AuthenticationResults authres)
+		public static bool TryParse (byte[] buffer, [NotNullWhen (true)] out AuthenticationResults? authres)
 		{
-			if (buffer == null)
-				throw new ArgumentNullException (nameof (buffer));
+			if (buffer is null) {
+				authres = null;
+				return false;
+			}
 
 			int index = 0;
 
@@ -862,7 +944,7 @@ namespace MimeKit.Cryptography {
 		/// <param name="startIndex">The start index of the buffer.</param>
 		/// <param name="length">The length of the buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -873,14 +955,13 @@ namespace MimeKit.Cryptography {
 		/// </exception>
 		public static AuthenticationResults Parse (byte[] buffer, int startIndex, int length)
 		{
-			ParseUtils.ValidateArguments (buffer, startIndex, length);
+			ArgumentValidator.Validate (buffer, startIndex, length);
 
-			AuthenticationResults authres;
 			int index = startIndex;
 
-			TryParse (buffer, ref index, startIndex + length, true, out authres);
+			TryParse (buffer, ref index, startIndex + length, true, out AuthenticationResults? authres);
 
-			return authres;
+			return authres!;
 		}
 
 		/// <summary>
@@ -892,30 +973,29 @@ namespace MimeKit.Cryptography {
 		/// <returns>The parsed <see cref="AuthenticationResults"/>.</returns>
 		/// <param name="buffer">The input buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="buffer"/> is <c>null</c>.
+		/// <paramref name="buffer"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="MimeKit.ParseException">
 		/// The <paramref name="buffer"/> could not be parsed.
 		/// </exception>
 		public static AuthenticationResults Parse (byte[] buffer)
 		{
-			if (buffer == null)
+			if (buffer is null)
 				throw new ArgumentNullException (nameof (buffer));
 
-			AuthenticationResults authres;
 			int index = 0;
 
-			TryParse (buffer, ref index, buffer.Length, true, out authres);
+			TryParse (buffer, ref index, buffer.Length, true, out AuthenticationResults? authres);
 
-			return authres;
+			return authres!;
 		}
 	}
 
 	/// <summary>
-	/// An authentication method results.
+	/// Represents an authentication method and its result.
 	/// </summary>
 	/// <remarks>
-	/// An authentication method results.
+	/// The results for an authentication method.
 	/// </remarks>
 	public class AuthenticationMethodResult
 	{
@@ -927,15 +1007,16 @@ namespace MimeKit.Cryptography {
 		/// </remarks>
 		/// <param name="method">The method used for authentication.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="method"/> is <c>null</c>.
+		/// <paramref name="method"/> is <see langword="null"/>.
 		/// </exception>
 		internal AuthenticationMethodResult (string method)
 		{
-			if (method == null)
+			if (method is null)
 				throw new ArgumentNullException (nameof (method));
 
 			Properties = new List<AuthenticationMethodProperty> ();
 			Method = method;
+			Result = string.Empty;
 		}
 
 		/// <summary>
@@ -947,13 +1028,13 @@ namespace MimeKit.Cryptography {
 		/// <param name="method">The method used for authentication.</param>
 		/// <param name="result">The result of the authentication method.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="method"/> is <c>null</c>.</para>
+		/// <para><paramref name="method"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="result"/> is <c>null</c>.</para>
+		/// <para><paramref name="result"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public AuthenticationMethodResult (string method, string result) : this (method)
 		{
-			if (result == null)
+			if (result is null)
 				throw new ArgumentNullException (nameof (result));
 
 			Result = result;
@@ -971,7 +1052,7 @@ namespace MimeKit.Cryptography {
 		/// authentication service identifier for each method.</para>
 		/// </remarks>
 		/// <value>The authserv-id token.</value>
-		public string Office365AuthenticationServiceIdentifier {
+		public string? Office365AuthenticationServiceIdentifier {
 			get; internal set;
 		}
 
@@ -1015,7 +1096,7 @@ namespace MimeKit.Cryptography {
 		/// Gets the comment regarding the authentication method result.
 		/// </remarks>
 		/// <value>The comment regarding the authentication method result.</value>
-		public string ResultComment {
+		public string? ResultComment {
 			get; set;
 		}
 
@@ -1026,7 +1107,7 @@ namespace MimeKit.Cryptography {
 		/// Gets the action taken for the authentication method result.
 		/// </remarks>
 		/// <value>The action taken for the authentication method result.</value>
-		public string Action {
+		public string? Action {
 			get; internal set;
 		}
 
@@ -1037,7 +1118,7 @@ namespace MimeKit.Cryptography {
 		/// Gets the reason for the authentication method result.
 		/// </remarks>
 		/// <value>The reason for the authentication method result.</value>
-		public string Reason {
+		public string? Reason {
 			get; set;
 		}
 
@@ -1075,8 +1156,9 @@ namespace MimeKit.Cryptography {
 
 			// Note: if we've made it this far, then we can't put everything on one line...
 
-			var tokens = new List<string> ();
-			tokens.Add (" ");
+			var tokens = new List<string> {
+				" "
+			};
 
 			if (Office365AuthenticationServiceIdentifier != null) {
 				tokens.Add (Office365AuthenticationServiceIdentifier);
@@ -1155,8 +1237,15 @@ namespace MimeKit.Cryptography {
 		/// <returns>The serialized string.</returns>
 		public override string ToString ()
 		{
-			var builder = new StringBuilder ();
+			var builder = new ValueStringBuilder (128);
 
+			WriteTo (ref builder);
+
+			return builder.ToString ();
+		}
+
+		internal void WriteTo (ref ValueStringBuilder builder)
+		{
 			if (Office365AuthenticationServiceIdentifier != null) {
 				builder.Append (Office365AuthenticationServiceIdentifier);
 				builder.Append ("; ");
@@ -1166,7 +1255,7 @@ namespace MimeKit.Cryptography {
 
 			if (Version.HasValue) {
 				builder.Append ('/');
-				builder.Append (Version.Value.ToString (CultureInfo.InvariantCulture));
+				builder.AppendInvariant (Version.Value);
 			}
 
 			builder.Append ('=');
@@ -1180,18 +1269,16 @@ namespace MimeKit.Cryptography {
 
 			if (!string.IsNullOrEmpty (Reason)) {
 				builder.Append (" reason=");
-				MimeUtils.AppendQuoted (builder, Reason);
+				builder.AppendQuoted (Reason);
 			} else if (!string.IsNullOrEmpty (Action)) {
 				builder.Append (" action=");
-				MimeUtils.AppendQuoted (builder, Action);
+				builder.AppendQuoted (Action);
 			}
 
 			for (int i = 0; i < Properties.Count; i++) {
 				builder.Append (' ');
-				builder.Append (Properties[i]);
+				Properties[i].WriteTo (ref builder);
 			}
-
-			return builder.ToString ();
 		}
 	}
 
@@ -1203,8 +1290,24 @@ namespace MimeKit.Cryptography {
 	/// </remarks>
 	public class AuthenticationMethodProperty
 	{
-		static readonly char[] TokenSpecials = ByteExtensions.TokenSpecials.ToCharArray ();
-		bool? quoted;
+		static readonly char[] QuoteSpecials = CreateQuoteSpecials ();
+		readonly bool? quoted;
+
+		static char[] CreateQuoteSpecials ()
+		{
+			var specials = new char[ByteExtensions.TokenSpecials.Length + 34];
+			int index = 0;
+
+			for (int i = 0; i < ByteExtensions.TokenSpecials.Length; i++)
+				specials[index++] = ByteExtensions.TokenSpecials[i];
+
+			for (int i = 0; i <= 32; i++)
+				specials[index++] = (char) i;
+
+			specials[index] = (char) 0x7F;
+
+			return specials;
+		}
 
 		/// <summary>
 		/// Initialize a new instance of the <see cref="AuthenticationMethodProperty"/> class.
@@ -1215,23 +1318,23 @@ namespace MimeKit.Cryptography {
 		/// <param name="ptype">The property type.</param>
 		/// <param name="property">The name of the property.</param>
 		/// <param name="value">The value of the property.</param>
-		/// <param name="quoted"><c>true</c> if the property value was originally quoted; otherwise, <c>false</c>.</param>
+		/// <param name="quoted"><see langword="true" /> if the property value was originally quoted; otherwise, <see langword="false" />.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="ptype"/> is <c>null</c>.</para>
+		/// <para><paramref name="ptype"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="property"/> is <c>null</c>.</para>
+		/// <para><paramref name="property"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		internal AuthenticationMethodProperty (string ptype, string property, string value, bool? quoted)
 		{
-			if (ptype == null)
+			if (ptype is null)
 				throw new ArgumentNullException (nameof (ptype));
 
-			if (property == null)
+			if (property is null)
 				throw new ArgumentNullException (nameof (property));
 
-			if (value == null)
+			if (value is null)
 				throw new ArgumentNullException (nameof (value));
 
 			this.quoted = quoted;
@@ -1250,11 +1353,11 @@ namespace MimeKit.Cryptography {
 		/// <param name="property">The name of the property.</param>
 		/// <param name="value">The value of the property.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="ptype"/> is <c>null</c>.</para>
+		/// <para><paramref name="ptype"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="property"/> is <c>null</c>.</para>
+		/// <para><paramref name="property"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="value"/> is <c>null</c>.</para>
+		/// <para><paramref name="value"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public AuthenticationMethodProperty (string ptype, string property, string value) : this (ptype, property, value, null)
 		{
@@ -1266,7 +1369,7 @@ namespace MimeKit.Cryptography {
 		/// <remarks>
 		/// Gets the type of the property.
 		/// </remarks>
-		/// <remarks>The type of the property.</remarks>
+		/// <value>The type of the property.</value>
 		public string PropertyType {
 			get; private set;
 		}
@@ -1293,9 +1396,21 @@ namespace MimeKit.Cryptography {
 			get; private set;
 		}
 
+		bool NeedsQuoting ()
+		{
+			// Note: an empty value must always be quoted. Otherwise, the next property would be parsed as its value.
+			if (Value.Length == 0)
+				return true;
+
+			if (quoted.HasValue)
+				return quoted.Value;
+
+			return Value.IndexOfAny (QuoteSpecials) != -1;
+		}
+
 		internal void AppendTokens (FormatOptions options, List<string> tokens)
 		{
-			var quote = quoted.HasValue ? quoted.Value : Value.IndexOfAny (TokenSpecials) != -1;
+			var quote = NeedsQuoting ();
 			var value = quote ? MimeUtils.Quote (Value) : Value;
 
 			tokens.Add (" ");
@@ -1323,10 +1438,27 @@ namespace MimeKit.Cryptography {
 		/// <returns>The serialized string.</returns>
 		public override string ToString ()
 		{
-			var quote = quoted.HasValue ? quoted.Value : Value.IndexOfAny (TokenSpecials) != -1;
-			var value = quote ? MimeUtils.Quote (Value) : Value;
+			var builder = new ValueStringBuilder (128);
 
-			return $"{PropertyType}.{Property}={value}";
+			WriteTo (ref builder);
+
+			return builder.ToString ();
+		}
+
+		internal void WriteTo (ref ValueStringBuilder builder)
+		{
+			bool quote = NeedsQuoting ();
+
+			builder.Append (PropertyType);
+			builder.Append ('.');
+			builder.Append (Property);
+			builder.Append ('=');
+
+			if (quote) {
+				builder.AppendQuoted(Value);
+			} else {
+				builder.Append (Value);
+			}
 		}
 	}
 }

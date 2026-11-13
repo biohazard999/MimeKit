@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 //
 
 using System;
+using System.Buffers.Binary;
 
 namespace MimeKit.IO.Filters {
 	/// <summary>
@@ -34,6 +35,9 @@ namespace MimeKit.IO.Filters {
 	/// Keeps track of the content that gets passed through the filter in order to
 	/// determine the most efficient <see cref="ContentEncoding"/> to use.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\FilterExamples.cs" region="BestEncoding"/>
+	/// </example>
 	public class BestEncodingFilter : IMimeFilter
 	{
 		readonly byte[] marker = new byte[6];
@@ -55,11 +59,14 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Gets the best encoding given the specified constraints.
+		/// Get the best encoding given the specified constraints.
 		/// </summary>
 		/// <remarks>
 		/// Gets the best encoding given the specified constraints.
 		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\FilterExamples.cs" region="BestEncoding"/>
+		/// </example>
 		/// <returns>The best encoding.</returns>
 		/// <param name="constraint">The encoding constraint.</param>
 		/// <param name="maxLineLength">The maximum allowable line length (not counting the CRLF). Must be between <c>60</c> and <c>998</c> (inclusive).</param>
@@ -73,6 +80,9 @@ namespace MimeKit.IO.Filters {
 			if (maxLineLength < FormatOptions.MinimumLineLength || maxLineLength > FormatOptions.MaximumLineLength)
 				throw new ArgumentOutOfRangeException (nameof (maxLineLength));
 
+			// the final line may not be terminated by a newline
+			int longest = Math.Max (maxline, linelen);
+
 			switch (constraint) {
 			case EncodingConstraint.SevenBit:
 				if (count0 > 0)
@@ -85,7 +95,7 @@ namespace MimeKit.IO.Filters {
 					return ContentEncoding.QuotedPrintable;
 				}
 
-				if (hasMarker || maxline > maxLineLength)
+				if (hasMarker || longest > maxLineLength)
 					return ContentEncoding.QuotedPrintable;
 
 				break;
@@ -93,7 +103,7 @@ namespace MimeKit.IO.Filters {
 				if (count0 > 0)
 					return ContentEncoding.Base64;
 
-				if (hasMarker || maxline > maxLineLength)
+				if (hasMarker || longest > maxLineLength)
 					return ContentEncoding.QuotedPrintable;
 
 				if (count8 > 0)
@@ -101,8 +111,8 @@ namespace MimeKit.IO.Filters {
 
 				break;
 			case EncodingConstraint.None:
-				if (hasMarker || maxline > maxLineLength) {
-					if (count8 > (int) (total * (17.0 / 100.0)))
+				if (hasMarker || longest > maxLineLength) {
+					if (count0 > 0 || count8 > (int) (total * (17.0 / 100.0)))
 						return ContentEncoding.Base64;
 
 					return ContentEncoding.QuotedPrintable;
@@ -124,19 +134,16 @@ namespace MimeKit.IO.Filters {
 
 		#region IMimeFilter implementation
 
-		static unsafe bool IsMboxMarker (byte[] marker)
+		static bool IsMboxMarker (byte[] marker)
 		{
-			const uint FromMask = 0xFFFFFFFF;
-			const uint From     = 0x6D6F7246;
+			const uint From = 0x6D6F7246;
 
-			fixed (byte* buf = marker) {
-				uint* word = (uint*) buf;
+			uint word = BinaryPrimitives.ReadUInt32LittleEndian (marker.AsSpan ());
 
-				if ((*word & FromMask) != From)
-					return false;
+			if (word != From)
+				return false;
 
-				return *(buf + 4) == (byte) ' ';
-			}
+			return marker[4] == (byte) ' ';
 		}
 
 		unsafe void Scan (byte* inptr, byte* inend)
@@ -147,7 +154,7 @@ namespace MimeKit.IO.Filters {
 				while (inptr < inend && (c = *inptr++) != (byte) '\n') {
 					if (c == 0)
 						count0++;
-					else if ((c & 0x80) != 0)
+					else if (c > 127)
 						count8++;
 
 					if (!hasMarker && markerLength < 5)
@@ -157,16 +164,17 @@ namespace MimeKit.IO.Filters {
 					pc = c;
 				}
 
+				// check our from-save buffer even if this line is unterminated
+				if (!hasMarker && markerLength == 5 && IsMboxMarker (marker))
+					hasMarker = true;
+
 				if (c == (byte) '\n') {
 					if (pc == (byte) '\r')
 						linelen--;
 
 					maxline = Math.Max (maxline, linelen);
 					linelen = 0;
-
-					// check our from-save buffer for "From "
-					if (!hasMarker && markerLength == 5 && IsMboxMarker (marker))
-						hasMarker = true;
+					pc = c;
 
 					markerLength = 0;
 				}
@@ -175,7 +183,7 @@ namespace MimeKit.IO.Filters {
 
 		static void ValidateArguments (byte[] input, int startIndex, int length)
 		{
-			if (input == null)
+			if (input is null)
 				throw new ArgumentNullException (nameof (input));
 
 			if (startIndex < 0 || startIndex > input.Length)
@@ -186,7 +194,7 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Filters the specified input.
+		/// Filter the specified input.
 		/// </summary>
 		/// <remarks>
 		/// Filters the specified input buffer starting at the given index,
@@ -199,7 +207,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="outputIndex">The starting index of the output in the returned buffer.</param>
 		/// <param name="outputLength">The length of the output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="input"/> is <c>null</c>.
+		/// <paramref name="input"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -215,7 +223,6 @@ namespace MimeKit.IO.Filters {
 				}
 			}
 
-			maxline = Math.Max (maxline, linelen);
 			total += length;
 
 			outputIndex = startIndex;
@@ -225,7 +232,7 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Filters the specified input, flushing all internally buffered data to the output.
+		/// Filter the specified input, flushing all internally buffered data to the output.
 		/// </summary>
 		/// <remarks>
 		/// Filters the specified input buffer starting at the given index,
@@ -238,7 +245,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="outputIndex">The starting index of the output in the returned buffer.</param>
 		/// <param name="outputLength">The length of the output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="input"/> is <c>null</c>.
+		/// <paramref name="input"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -250,7 +257,7 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Resets the filter.
+		/// Reset the filter.
 		/// </summary>
 		/// <remarks>
 		/// Resets the filter.

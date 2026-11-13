@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 // THE SOFTWARE.
 //
 
+using System;
+
 namespace MimeKit.IO.Filters {
 	/// <summary>
 	/// A filter that will convert from Windows/DOS line endings to Unix line endings.
@@ -31,6 +33,9 @@ namespace MimeKit.IO.Filters {
 	/// <remarks>
 	/// Converts from Windows/DOS line endings to Unix line endings.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\FilterExamples.cs" region="ConvertCharset"/>
+	/// </example>
 	public class Dos2UnixFilter : MimeFilterBase
 	{
 		readonly bool ensureNewLine;
@@ -48,30 +53,37 @@ namespace MimeKit.IO.Filters {
 			this.ensureNewLine = ensureNewLine;
 		}
 
-		unsafe int Filter (byte* inbuf, int length, byte* outbuf, bool flush)
+		int Filter (ReadOnlySpan<byte> input, byte[] output, bool flush)
 		{
-			byte* inend = inbuf + length;
-			byte* outptr = outbuf;
-			byte* inptr = inbuf;
+			int outputIndex = 0;
 
-			while (inptr < inend) {
-				if (*inptr == (byte) '\n') {
-					*outptr++ = *inptr;
+			foreach (var c in input) {
+				if (c == (byte) '\n') {
+					output[outputIndex++] = c;
 				} else {
 					if (pc == (byte) '\r')
-						*outptr++ = pc;
+						output[outputIndex++] = pc;
 
-					if (*inptr != (byte) '\r')
-						*outptr++ = *inptr;
+					if (c != (byte) '\r')
+						output[outputIndex++] = c;
 				}
 
-				pc = *inptr++;
+				pc = c;
 			}
 
-			if (flush && ensureNewLine && pc != (byte) '\n')
-				*outptr++ = (byte) '\n';
+			if (flush && pc == (byte) '\r') {
+				// Note: a trailing CR is held back until we know whether or not it is followed by a LF. If we are
+				// ensuring a new line, then the CR + the LF that we would append make a CRLF, which becomes a LF.
+				output[outputIndex++] = ensureNewLine ? (byte) '\n' : (byte) '\r';
+				pc = ensureNewLine ? (byte) '\n' : (byte) 0;
+			}
 
-			return (int) (outptr - outbuf);
+			if (flush && ensureNewLine && pc != (byte) '\n') {
+				output[outputIndex++] = (byte) '\n';
+				pc = (byte) '\n';
+			}
+
+			return outputIndex;
 		}
 
 		/// <summary>
@@ -87,7 +99,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="length">The length of the input buffer, starting at <paramref name="startIndex"/>.</param>
 		/// <param name="outputIndex">The output index.</param>
 		/// <param name="outputLength">The output length.</param>
-		/// <param name="flush">If set to <c>true</c>, all internally buffered data should be flushed to the output buffer.</param>
+		/// <param name="flush">If set to <see langword="true" />, all internally buffered data should be flushed to the output buffer.</param>
 		protected override byte[] Filter (byte[] input, int startIndex, int length, out int outputIndex, out int outputLength, bool flush)
 		{
 			if (pc == (byte) '\r')
@@ -95,19 +107,14 @@ namespace MimeKit.IO.Filters {
 			else
 				EnsureOutputSize (length + (flush && ensureNewLine ? 1 : 0), false);
 
+			outputLength = Filter (input.AsSpan (startIndex, length), OutputBuffer, flush);
 			outputIndex = 0;
-
-			unsafe {
-				fixed (byte* inptr = input, outptr = OutputBuffer) {
-					outputLength = Filter (inptr + startIndex, length, outptr, flush);
-				}
-			}
 
 			return OutputBuffer;
 		}
 
 		/// <summary>
-		/// Resets the filter.
+		/// Reset the filter.
 		/// </summary>
 		/// <remarks>
 		/// Resets the filter.

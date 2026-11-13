@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,16 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 //
-
-using System;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Net.Mail;
-using System.Reflection;
-using System.Threading.Tasks;
-
-using NUnit.Framework;
 
 using MimeKit;
 
@@ -56,27 +46,37 @@ namespace UnitTests {
 
 				var encoding = part.GetBestEncoding (EncodingConstraint.SevenBit);
 
-				Assert.AreEqual (ContentEncoding.Base64, encoding, "GetBestEncoding");
+				Assert.That (encoding, Is.EqualTo (ContentEncoding.Base64), "GetBestEncoding");
 
 				rfc822.Prepare (EncodingConstraint.SevenBit);
 
-				Assert.AreEqual (ContentEncoding.Base64, part.ContentTransferEncoding, "Prepare #1");
+				Assert.That (part.ContentTransferEncoding, Is.EqualTo (ContentEncoding.Base64), "Prepare #1");
 
 				// now make sure that calling Prepare() again doesn't change anything
 
 				rfc822.Prepare (EncodingConstraint.SevenBit);
 
-				Assert.AreEqual (ContentEncoding.Base64, part.ContentTransferEncoding, "Prepare #2");
+				Assert.That (part.ContentTransferEncoding, Is.EqualTo (ContentEncoding.Base64), "Prepare #2");
 
 				part.ContentTransferEncoding = ContentEncoding.Binary;
 				rfc822.Prepare (EncodingConstraint.None);
 
-				Assert.AreEqual (ContentEncoding.Binary, part.ContentTransferEncoding, "Prepare #3");
+				Assert.That (part.ContentTransferEncoding, Is.EqualTo (ContentEncoding.Binary), "Prepare #3");
 
 				rfc822.Prepare (EncodingConstraint.SevenBit);
 
-				Assert.AreEqual (ContentEncoding.Base64, part.ContentTransferEncoding, "Prepare #4");
+				Assert.That (part.ContentTransferEncoding, Is.EqualTo (ContentEncoding.Base64), "Prepare #4");
 			}
+		}
+
+		[Test]
+		public void TestPrepareValidatesMaxLineLengthBeforeDisposed ()
+		{
+			var rfc822 = new MessagePart ();
+
+			rfc822.Dispose ();
+
+			Assert.Throws<ArgumentOutOfRangeException> (() => rfc822.Prepare (EncodingConstraint.SevenBit, 1));
 		}
 	}
 }

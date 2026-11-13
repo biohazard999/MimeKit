@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,8 @@
 // THE SOFTWARE.
 //
 
-using System;
 using System.Text;
-
-using NUnit.Framework;
+using System.Collections;
 
 using MimeKit;
 
@@ -70,7 +68,7 @@ namespace UnitTests {
 			Assert.Throws<ArgumentNullException> (() => list.Contains ((string) null));
 
 			// CopyTo
-			Assert.Throws<ArgumentOutOfRangeException> (() => list.CopyTo (new Parameter[0], -1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => list.CopyTo (Array.Empty<Parameter> (), -1));
 			Assert.Throws<ArgumentNullException> (() => list.CopyTo (null, 0));
 
 			// IndexOf
@@ -117,84 +115,301 @@ namespace UnitTests {
 		[Test]
 		public void TestBasicFunctionality ()
 		{
+			var xyz = new Parameter ("xyz", "3");
 			var list = new ParameterList ();
 			Parameter parameter;
 			string value;
 			int index;
 
-			Assert.IsFalse (list.IsReadOnly, "IsReadOnly");
-			Assert.AreEqual (0, list.Count);
+			Assert.That (list.IsReadOnly, Is.False, "IsReadOnly");
+			Assert.That (list.Count, Is.EqualTo (0));
 
 			list.Add (new Parameter ("abc", "0"));
 			list.Add (Encoding.UTF8, "def", "1");
 			list.Add ("ghi", "2");
 
-			Assert.AreEqual (3, list.Count, "Count");
-			Assert.IsTrue (list.Contains (list[0]));
-			Assert.IsTrue (list.Contains ("aBc"));
-			Assert.IsTrue (list.Contains ("DEf"));
-			Assert.IsTrue (list.Contains ("gHI"));
-			Assert.AreEqual (0, list.IndexOf ("aBc"));
-			Assert.AreEqual (1, list.IndexOf ("dEF"));
-			Assert.AreEqual (2, list.IndexOf ("Ghi"));
-			Assert.AreEqual ("abc", list[0].Name);
-			Assert.AreEqual ("def", list[1].Name);
-			Assert.AreEqual ("ghi", list[2].Name);
-			Assert.AreEqual ("0", list["AbC"]);
-			Assert.AreEqual ("1", list["dEf"]);
-			Assert.AreEqual ("2", list["GHi"]);
+			Assert.That (list.Count, Is.EqualTo (3), "Count");
+			Assert.That (list.Contains ("xyz"), Is.False);
+			Assert.That (list.Contains (list[0]), Is.True);
+			Assert.That (list.Contains ("aBc"), Is.True);
+			Assert.That (list.Contains ("DEf"), Is.True);
+			Assert.That (list.Contains ("gHI"), Is.True);
+			Assert.That (list.IndexOf ("xyz"), Is.EqualTo (-1));
+			Assert.That (list.IndexOf ("aBc"), Is.EqualTo (0));
+			Assert.That (list.IndexOf ("dEF"), Is.EqualTo (1));
+			Assert.That (list.IndexOf ("Ghi"), Is.EqualTo (2));
+			Assert.That (list.IndexOf (xyz), Is.EqualTo (-1));
+			Assert.That (list.IndexOf (list[0]), Is.EqualTo (0));
+			Assert.That (list.IndexOf (list[1]), Is.EqualTo (1));
+			Assert.That (list.IndexOf (list[2]), Is.EqualTo (2));
+			Assert.That (list[0].Name, Is.EqualTo ("abc"));
+			Assert.That (list[1].Name, Is.EqualTo ("def"));
+			Assert.That (list[2].Name, Is.EqualTo ("ghi"));
+			Assert.That (list["AbC"], Is.EqualTo ("0"));
+			Assert.That (list["dEf"], Is.EqualTo ("1"));
+			Assert.That (list["GHi"], Is.EqualTo ("2"));
 
-			Assert.IsTrue (list.TryGetValue ("Abc", out parameter));
-			Assert.AreEqual ("abc", parameter.Name);
-			Assert.IsTrue (list.TryGetValue ("Abc", out value));
-			Assert.AreEqual ("0", value);
+			Assert.That (list.TryGetValue ("Abc", out parameter), Is.True);
+			Assert.That (parameter.Name, Is.EqualTo ("abc"));
+			Assert.That (list.TryGetValue ("Abc", out value), Is.True);
+			Assert.That (value, Is.EqualTo ("0"));
 
-			Assert.IsFalse (list.Remove ("xyz"), "Remove");
-			list.Insert (0, new Parameter ("xyz", "3"));
-			Assert.IsTrue (list.Remove ("xyz"), "Remove");
+			Assert.That (list.Remove (xyz), Is.False, "Remove");
+			list.Insert (0, xyz);
+			Assert.That (list.Remove (xyz), Is.True, "Remove");
+
+			Assert.That (list.Remove ("xyz"), Is.False, "Remove");
+			list.Insert (0, xyz);
+			Assert.That (list.Remove ("xyz"), Is.True, "Remove");
 
 			var array = new Parameter[list.Count];
 			list.CopyTo (array, 0);
-			Assert.AreEqual ("abc", array[0].Name);
-			Assert.AreEqual ("def", array[1].Name);
-			Assert.AreEqual ("ghi", array[2].Name);
+			Assert.That (array[0].Name, Is.EqualTo ("abc"));
+			Assert.That (array[1].Name, Is.EqualTo ("def"));
+			Assert.That (array[2].Name, Is.EqualTo ("ghi"));
 
 			index = 0;
 			foreach (var param in list) {
-				Assert.AreEqual (array[index], param);
+				Assert.That (param, Is.EqualTo (array[index]));
+				index++;
+			}
+
+			index = 0;
+			foreach (Parameter param in (IEnumerable) list) {
+				Assert.That (param, Is.EqualTo (array[index]));
 				index++;
 			}
 
 			list.Clear ();
-			Assert.AreEqual (0, list.Count, "Clear");
+			Assert.That (list.Count, Is.EqualTo (0), "Clear");
 
 			list.Add ("xyz", "3");
 			list.Insert (0, array[2]);
 			list.Insert (0, array[1].Name, array[1].Value);
 			list.Insert (0, array[0]);
 
-			Assert.AreEqual (4, list.Count);
-			Assert.AreEqual ("abc", list[0].Name);
-			Assert.AreEqual ("def", list[1].Name);
-			Assert.AreEqual ("ghi", list[2].Name);
-			Assert.AreEqual ("xyz", list[3].Name);
-			Assert.AreEqual ("0", list["AbC"]);
-			Assert.AreEqual ("1", list["dEf"]);
-			Assert.AreEqual ("2", list["GHi"]);
-			Assert.AreEqual ("3", list["XYZ"]);
+			Assert.That (list.Count, Is.EqualTo (4));
+			Assert.That (list[0].Name, Is.EqualTo ("abc"));
+			Assert.That (list[1].Name, Is.EqualTo ("def"));
+			Assert.That (list[2].Name, Is.EqualTo ("ghi"));
+			Assert.That (list[3].Name, Is.EqualTo ("xyz"));
+			Assert.That (list["AbC"], Is.EqualTo ("0"));
+			Assert.That (list["dEf"], Is.EqualTo ("1"));
+			Assert.That (list["GHi"], Is.EqualTo ("2"));
+			Assert.That (list["XYZ"], Is.EqualTo ("3"));
 
 			list.RemoveAt (3);
-			Assert.AreEqual (3, list.Count);
+			Assert.That (list.Count, Is.EqualTo (3));
 
-			Assert.AreEqual ("; abc=\"0\"; def=\"1\"; ghi=\"2\"", list.ToString ());
+			Assert.That (list.ToString (), Is.EqualTo ("; abc=\"0\"; def=\"1\"; ghi=\"2\""));
 
 			list[0] = new Parameter ("abc", "replaced");
 
-			Assert.AreEqual ("; abc=\"replaced\"; def=\"1\"; ghi=\"2\"", list.ToString ());
+			Assert.That (list.ToString (), Is.EqualTo ("; abc=\"replaced\"; def=\"1\"; ghi=\"2\""));
 
 			list[0] = new Parameter ("xxx", "0");
 
-			Assert.AreEqual ("; xxx=\"0\"; def=\"1\"; ghi=\"2\"", list.ToString ());
+			Assert.That (list.ToString (), Is.EqualTo ("; xxx=\"0\"; def=\"1\"; ghi=\"2\""));
+		}
+
+		[Test]
+		public void TestBoundaryChangedEvents ()
+		{
+			var list = new ParameterList ();
+			int changed = 0;
+
+			list.BoundaryChanged += (sender, args) => changed++;
+
+			list.Add ("boundary", "boundary-1");
+			Assert.That (changed, Is.EqualTo (1), "Add boundary");
+
+			list.Clear ();
+			Assert.That (changed, Is.EqualTo (2), "Clear boundary");
+
+			list.Insert (0, new Parameter ("boundary", "boundary-2"));
+			Assert.That (changed, Is.EqualTo (3), "Insert boundary");
+
+			list.RemoveAt (0);
+			Assert.That (changed, Is.EqualTo (4), "RemoveAt boundary");
+
+			list.Add ("name", "value");
+			list[0] = new Parameter ("boundary", "boundary-3");
+			Assert.That (changed, Is.EqualTo (5), "Replace with boundary");
+
+			list[0] = list[0];
+			Assert.That (changed, Is.EqualTo (5), "Replace with same instance");
+		}
+
+		[Test]
+		public void TestNameValuePairComparisons ()
+		{
+			var type = typeof (ParameterList).GetNestedType ("NameValuePair", System.Reflection.BindingFlags.NonPublic);
+			var ctor = type.GetConstructor (new [] { typeof (int), typeof (int), typeof (bool), typeof (byte[]), typeof (string), typeof (int?) });
+			var unnumbered = ctor.Invoke (new object[] { 0, 0, false, Array.Empty<byte> (), "name", null });
+			var numbered = ctor.Invoke (new object[] { 0, 0, false, Array.Empty<byte> (), "name", 1 });
+			var compareTo = type.GetMethod ("CompareTo");
+
+			Assert.That (compareTo.Invoke (numbered, new object[] { null }), Is.EqualTo (1), "null");
+			Assert.That (compareTo.Invoke (unnumbered, new [] { numbered }), Is.EqualTo (-1), "unnumbered vs numbered");
+			Assert.That (compareTo.Invoke (unnumbered, new [] { unnumbered }), Is.EqualTo (0), "unnumbered vs unnumbered");
+			Assert.That (compareTo.Invoke (numbered, new [] { unnumbered }), Is.EqualTo (1), "numbered vs unnumbered");
+		}
+
+		[Test]
+		public void TestIncompleteComments ([Values (RfcComplianceMode.Loose, RfcComplianceMode.Strict)] RfcComplianceMode mode)
+		{
+			var options = ParserOptions.Default.Clone ();
+			options.ParameterComplianceMode = mode;
+
+			foreach (var text in new [] { "(comment", "name(comment", "name*(comment", "name*0(comment", "name*0*(comment", "name=(comment", "name=value(comment", "name=value\r\n\t(comment" }) {
+				var input = Encoding.ASCII.GetBytes (text);
+				var index = 0;
+
+				Assert.That (ParameterList.TryParse (options, input, ref index, input.Length, false, out var paramList), Is.False, text);
+				Assert.That (paramList, Is.Null, text);
+
+				index = 0;
+				Assert.Throws<ParseException> (() => ParameterList.TryParse (options, input, ref index, input.Length, true, out _), text);
+			}
+		}
+
+		static void AssertParameterValue (string text, string expected, RfcComplianceMode mode)
+		{
+			var options = ParserOptions.Default.Clone ();
+			options.ParameterComplianceMode = mode;
+
+			foreach (string suffix in new[] { "", "; next=ok" }) {
+				foreach (bool throwOnError in new[] { false, true }) {
+					var input = Encoding.ASCII.GetBytes ("prefix" + text + suffix);
+					int index = 6;
+
+					Assert.That (ParameterList.TryParse (options, input, ref index, input.Length, throwOnError, out var parameters), Is.True, text);
+					Assert.That (parameters["name"], Is.EqualTo (expected), text);
+					Assert.That (parameters.Count, Is.EqualTo (suffix.Length == 0 ? 1 : 2), text);
+					Assert.That (index, Is.EqualTo (input.Length), text);
+					if (suffix.Length > 0)
+						Assert.That (parameters["next"], Is.EqualTo ("ok"), text);
+				}
+			}
+		}
+
+		// Regression cases inspired by https://github.com/noxxi/mime-is-broken.
+		[TestCase ("name*=''file.zip", "file.zip")]
+		[TestCase ("name*='en'file%2Ezip", "file.zip")]
+		[TestCase ("name*=''caf%E9%27s%20file.zip", "caf\u00e9's file.zip")]
+		[TestCase ("name*=''", "")]
+		[TestCase ("name*='en'", "")]
+		[TestCase ("name*0*=''file; name*1*=%2Ezip", "file.zip")]
+		[TestCase ("name*0*='en'file; name*1=.zip", "file.zip")]
+		[TestCase ("name*0*=''; name*1*=file%2Ezip", "file.zip")]
+		[TestCase ("name*0*='en'caf%E9; name*1*=%27s%20file.zip", "caf\u00e9's file.zip")]
+		[TestCase ("name*=\"''file%2Ezip\"", "file.zip")]
+		[TestCase ("name*='file%2Ezip", "'file.zip")]
+		public void TestRfc2231EmptyCharset (string text, string expected)
+		{
+			AssertParameterValue (text, expected, RfcComplianceMode.Loose);
+			AssertParameterValue (text, expected, RfcComplianceMode.Strict);
+		}
+
+		[TestCase ("name*=utf-8''file%", "file%")]
+		[TestCase ("name*=utf-8''file%2", "file%2")]
+		[TestCase ("name*0*=utf-8''file%; name*1*=2Ezip", "file.zip")]
+		[TestCase ("name*0*=utf-8''file%2; name*1*=Ezip", "file.zip")]
+		[TestCase ("name*0*=utf-8''file%2; name*1=Ezip", "file%2Ezip")]
+		[TestCase ("name*0*=utf-8''file; name*1*=%2", "file%2")]
+		public void TestRfc2231Flush (string text, string expected)
+		{
+			AssertParameterValue (text, expected, RfcComplianceMode.Loose);
+			AssertParameterValue (text, expected, RfcComplianceMode.Strict);
+		}
+
+		// Regression cases inspired by https://github.com/noxxi/mime-is-broken.
+		[TestCase ("name=value(comment)", "value")]
+		[TestCase ("name=value (comment) (another)", "value")]
+		[TestCase ("name=value(nested (comment); ignored=yes)", "value")]
+		[TestCase ("name=value(escaped \\) comment)", "value")]
+		[TestCase ("name=value(comment\r\n\tcontinued)", "value")]
+		[TestCase ("name=value\r\n\t(comment)", "value")]
+		[TestCase ("name=\"value(literal)\"(comment)", "value(literal)")]
+		[TestCase ("name*=us-ascii''value%28literal%29(comment)", "value(literal)")]
+		[TestCase ("name*0=value(comment); name*1=.zip(other)", "value.zip")]
+		[TestCase ("name*0*=''value(comment); name*1*=%2Ezip(other)", "value.zip")]
+		public void TestParameterComments (string text, string expected)
+		{
+			AssertParameterValue (text, expected, RfcComplianceMode.Loose);
+			AssertParameterValue (text, expected, RfcComplianceMode.Strict);
+		}
+
+		// Cover the https://github.com/noxxi/mime-is-broken comment issue with loose parsing extensions.
+		[TestCase ("name=Test Name.pdf (comment)", "Test Name.pdf")]
+		[TestCase ("name=Test\r\n\tName.pdf(comment)", "Test\tName.pdf")]
+		[TestCase ("name=Test Name.pdf\r\n\t(comment)", "Test Name.pdf")]
+		[TestCase ("name=Test\r\n\tName.pdf\r\n\t(comment)", "Test\tName.pdf")]
+		public void TestLooseParameterComments (string text, string expected)
+		{
+			AssertParameterValue (text, expected, RfcComplianceMode.Loose);
+		}
+
+		[Test]
+		public void TestStrictInvalidParameterListToken ()
+		{
+			var options = ParserOptions.Default.Clone ();
+			var input = Encoding.ASCII.GetBytes ("name=value x=y");
+			var index = 0;
+
+			options.ParameterComplianceMode = RfcComplianceMode.Strict;
+
+			Assert.Throws<ParseException> (() => ParameterList.TryParse (options, input, ref index, input.Length, true, out _));
+		}
+
+		[Test]
+		public void TestEmptyUnquotedParameterValue ()
+		{
+			var options = ParserOptions.Default.Clone ();
+			var input = Encoding.ASCII.GetBytes ("name=;");
+			var index = 0;
+
+			Assert.That (ParameterList.TryParse (options, input, ref index, input.Length, false, out var paramList), Is.True);
+			Assert.That (paramList["name"], Is.EqualTo (string.Empty));
+		}
+
+		[Test]
+		public void TestParseRfc2231ParemeterValueWithoutCharsetDeclaration ()
+		{
+			const string text = "name*0*=This%20is%20some%20encoded%20ascii%20text";
+			const string expected = "This is some encoded ascii text";
+			var options = ParserOptions.Default.Clone ();
+			var input = Encoding.ASCII.GetBytes (text);
+			var index = 0;
+
+			Assert.That (ParameterList.TryParse (options, input, ref index, input.Length, false, out var paramList), Is.True);
+			Assert.That (paramList["name"], Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestParseRfc2231ParemeterValueWithIncompleteCharsetDeclaration ()
+		{
+			const string text = "name*0*=us-ascii'This%20is%20some%20encoded%20ascii%20text";
+			const string expected = "us-ascii'This is some encoded ascii text";
+			var options = ParserOptions.Default.Clone ();
+			var input = Encoding.ASCII.GetBytes (text);
+			var index = 0;
+
+			Assert.That (ParameterList.TryParse (options, input, ref index, input.Length, false, out var paramList), Is.True);
+			Assert.That (paramList["name"], Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestParseRfc2231ParemeterValueWithUnsupportedCharset ()
+		{
+			const string text = "name*0*=x-unsupported-charset''This%20is%20some%20encoded%20ascii%20text";
+			const string expected = "This is some encoded ascii text";
+			var options = ParserOptions.Default.Clone ();
+			var input = Encoding.ASCII.GetBytes (text);
+			var index = 0;
+
+			Assert.That (ParameterList.TryParse (options, input, ref index, input.Length, false, out var paramList), Is.True);
+			Assert.That (paramList["name"], Is.EqualTo (expected));
 		}
 	}
 }

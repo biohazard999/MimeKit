@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,9 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
 using System.Text;
 
 using MimeKit.Text;
-
-using NUnit.Framework;
 
 namespace UnitTests.Text {
 	[TestFixture]
@@ -39,15 +35,19 @@ namespace UnitTests.Text {
 		[Test]
 		public void TestArgumentExceptions ()
 		{
+			using var reader = new StringReader ("");
+			using var writer = new StringWriter ();
 			var converter = new HtmlToHtml ();
-			var reader = new StringReader ("");
-			var writer = new StringWriter ();
 
 			Assert.Throws<ArgumentNullException> (() => converter.InputEncoding = null);
 			Assert.Throws<ArgumentNullException> (() => converter.OutputEncoding = null);
 
 			Assert.Throws<ArgumentOutOfRangeException> (() => converter.InputStreamBufferSize = -1);
 			Assert.Throws<ArgumentOutOfRangeException> (() => converter.OutputStreamBufferSize = -1);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.MaxElementDepth = 0);
+			Assert.Throws<ArgumentNullException> (() => converter.ComplianceOptions = null);
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.NoScriptHandling = (HtmlNoScriptHandling) (-1));
+			Assert.Throws<ArgumentOutOfRangeException> (() => converter.NoScriptHandling = (HtmlNoScriptHandling) 3);
 
 			Assert.Throws<ArgumentNullException> (() => converter.Convert (null));
 			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, Stream.Null));
@@ -56,9 +56,9 @@ namespace UnitTests.Text {
 			Assert.Throws<ArgumentNullException> (() => converter.Convert (Stream.Null, (TextWriter) null));
 			Assert.Throws<ArgumentNullException> (() => converter.Convert ((TextReader) null, writer));
 			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (TextWriter) null));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert (new StreamReader (Stream.Null), (Stream) null));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, new StreamWriter (Stream.Null)));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert (new StreamReader (Stream.Null), (TextWriter) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (Stream) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, writer));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (TextWriter) null));
 		}
 
 		[Test]
@@ -66,20 +66,21 @@ namespace UnitTests.Text {
 		{
 			var converter = new HtmlToHtml ();
 
-			Assert.IsFalse (converter.DetectEncodingFromByteOrderMark, "DetectEncodingFromByteOrderMark");
-			Assert.IsFalse (converter.FilterComments, "FilterComments");
-			Assert.IsFalse (converter.FilterHtml, "FilterHtml");
-			Assert.IsNull (converter.Footer, "Footer");
-			Assert.AreEqual (HeaderFooterFormat.Text, converter.FooterFormat, "FooterFormat");
-			Assert.IsNull (converter.Header, "Header");
-			Assert.AreEqual (HeaderFooterFormat.Text, converter.HeaderFormat, "HeaderFormat");
-			Assert.IsNull (converter.HtmlTagCallback, "HtmlTagCallback");
-			Assert.AreEqual (Encoding.UTF8, converter.InputEncoding, "InputEncoding");
-			Assert.AreEqual (TextFormat.Html, converter.InputFormat, "InputFormat");
-			Assert.AreEqual (4096, converter.InputStreamBufferSize, "InputStreamBufferSize");
-			Assert.AreEqual (Encoding.UTF8, converter.OutputEncoding, "OutputEncoding");
-			Assert.AreEqual (TextFormat.Html, converter.OutputFormat, "OutputFormat");
-			Assert.AreEqual (4096, converter.OutputStreamBufferSize, "OutputStreamBufferSize");
+			Assert.That (converter.DetectEncodingFromByteOrderMark, Is.False, "DetectEncodingFromByteOrderMark");
+			Assert.That (converter.FilterComments, Is.False, "FilterComments");
+			Assert.That (converter.Footer, Is.Null, "Footer");
+			Assert.That (converter.FooterFormat, Is.EqualTo (HeaderFooterFormat.Text), "FooterFormat");
+			Assert.That (converter.Header, Is.Null, "Header");
+			Assert.That (converter.HeaderFormat, Is.EqualTo (HeaderFooterFormat.Text), "HeaderFormat");
+			Assert.That (converter.HtmlTagCallback, Is.Null, "HtmlTagCallback");
+			Assert.That (converter.InputEncoding, Is.EqualTo (Encoding.UTF8), "InputEncoding");
+			Assert.That (converter.InputFormat, Is.EqualTo (TextFormat.Html), "InputFormat");
+			Assert.That (converter.InputStreamBufferSize, Is.EqualTo (4096), "InputStreamBufferSize");
+			Assert.That (converter.MaxElementDepth, Is.EqualTo (4096), "MaxElementDepth");
+			Assert.That (converter.NoScriptHandling, Is.EqualTo (HtmlNoScriptHandling.Unwrap), "NoScriptHandling");
+			Assert.That (converter.OutputEncoding, Is.EqualTo (Encoding.UTF8), "OutputEncoding");
+			Assert.That (converter.OutputFormat, Is.EqualTo (TextFormat.Html), "OutputFormat");
+			Assert.That (converter.OutputStreamBufferSize, Is.EqualTo (4096), "OutputStreamBufferSize");
 		}
 
 		void ReplaceUrlsWithFileNames (HtmlTagContext ctx, HtmlWriter htmlWriter)
@@ -112,9 +113,119 @@ namespace UnitTests.Text {
 			var converter = new HtmlToHtml { Header = null, Footer = null, HtmlTagCallback = ReplaceUrlsWithFileNames };
 			var result = converter.Convert (text);
 
-			Assert.AreEqual (TextFormat.Html, converter.InputFormat, "InputFormat");
-			Assert.AreEqual (TextFormat.Html, converter.OutputFormat, "OutputFormat");
-			Assert.AreEqual (expected, result);
+			Assert.That (converter.InputFormat, Is.EqualTo (TextFormat.Html), "InputFormat");
+			Assert.That (converter.OutputFormat, Is.EqualTo (TextFormat.Html), "OutputFormat");
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[TestCase ("foo<img src=x onerror=alert(1)", "foo")]
+		[TestCase ("foo <a href=\"javascript:alert(1)", "foo ")]
+		[TestCase ("foo<div class=x ", "foo")]
+		[TestCase ("foo</div", "foo")]
+		[TestCase ("foo</div x", "foo")]
+		[TestCase ("foo<", "foo&lt;")]
+		[TestCase ("foo</", "foo&lt;/")]
+		public void TestTruncatedTagsAreDropped (string html, string expected)
+		{
+			// A tag that is cut off by the end of the input never reaches the HtmlTagCallback, so it must not be
+			// written as-is or it could be completed by whatever markup the output is later combined with.
+			var converter = new HtmlToHtml { Header = null, Footer = null };
+			var result = converter.Convert (html);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[TestCase ("<!DOCTYPE html><html><head><title>t</title><style>p{}</style></head><body><p>x<br/></p></body></html>", "<p>x<br/></p>")]
+		[TestCase ("<html><body/><body>x</body></html>", "x")]
+		[TestCase ("<head><meta charset=utf-8></head>x</body></html><p>y</p>", "x<p>y</p>")]
+		[TestCase ("<p>no structure</p>", "<p>no structure</p>")]
+		public void TestOutputHtmlFragment (string html, string expected)
+		{
+			var tags = new List<string> ();
+			var converter = new HtmlToHtml {
+				Header = null, Footer = null, OutputHtmlFragment = true,
+				HtmlTagCallback = (ctx, writer) => {
+					tags.Add (ctx.TagName);
+					ctx.WriteTag (writer, true);
+				}
+			};
+			var result = converter.Convert (html);
+
+			// The document structure tags are dropped without being passed to the HtmlTagCallback.
+			Assert.That (result, Is.EqualTo (expected));
+			Assert.That (tags, Has.None.AnyOf ("html", "head", "body", "title", "meta", "style"));
+		}
+
+		[TestCase ("<head><math></head><script><t>", "<math><script><t>")]
+		[TestCase ("<head><title>T</title><div>D</div></head><body>B</body>", "<div>D</div>B")]
+		[TestCase ("<head><title>T</title>junk<style>s</style></head>B", "junk<style>s</style>B")]
+		[TestCase ("<head><title>T</title><math><mi>x</mi></head><script><t>", "<math><mi>x</mi><script><t>")]
+		[TestCase ("<head> \r\n<title>T</title> </head>B", "B")]
+		[TestCase ("<head><o:p>x</o:p></head>", "<o:p>x</o:p>")]
+		[TestCase ("<head><body>B</body>", "B")]
+		[TestCase ("<head><meta charset=utf-8></body>B", "B")]
+		[TestCase ("<head/><title>T</title>B", "B")]
+		[TestCase ("<head>A</head><head>B</head>", "AB")]
+		[TestCase ("<head><head><title>T</title></head>B</head>", "B")]
+		[TestCase ("<p>A</p><head><style>s</style></head>", "<p>A</p><style>s</style>")]
+		[TestCase ("A<head><title>T</title></head>", "A<title>T</title>")]
+		[TestCase ("<title>T</title><head><title>U</title></head>B", "<title>T</title>B")]
+		[TestCase ("<head><template><div>D</div></head></template>X</head>B", "XB")]
+		[TestCase ("<head><template><math></template></head>B", "B")]
+		[TestCase ("<head><noscript><b>x</b></noscript></head>B", "<b>x</b>B")]
+		public void TestOutputHtmlFragmentImplicitlyClosesHead (string html, string expected)
+		{
+			var converter = new HtmlToHtml {
+				Header = null, Footer = null, OutputHtmlFragment = true,
+				HtmlTagCallback = (ctx, writer) => ctx.WriteTag (writer, true)
+			};
+			var result = converter.Convert (html);
+
+			// Browsers implicitly close the <head> element at the first start tag or non-whitespace text that does not
+			// belong in the <head>, so only the content that precedes it gets removed.
+			Assert.That (result, Is.EqualTo (expected));
+
+			// Converting the output again must not change it.
+			Assert.That (converter.Convert (result), Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestOutputHtmlFragmentFalse ()
+		{
+			const string html = "<!DOCTYPE html><html><head><title>t</title></head><body>x</body></html>";
+			var converter = new HtmlToHtml { Header = null, Footer = null };
+
+			Assert.That (converter.OutputHtmlFragment, Is.False);
+			Assert.That (converter.Convert (html), Is.EqualTo (html));
+		}
+
+		[TestCase ("<div><span><b><i>x<img src=x onerror=alert(1)>&amp;</i></b>",  "<div><span><b><i>x&lt;img src=x onerror=alert(1)&gt;&amp;amp;&lt;/i&gt;&lt;/b&gt;")]
+		[TestCase ("<div><span><svg><style><img src=x onerror=alert(1)></style>", "<div><span><svg><style>&lt;img src=x onerror=alert(1)&gt;&lt;/style&gt;")]
+		[TestCase ("<div><div><div><div><span><b>x</b><img src=x>", "<div><div><div><div><span><b>x</b><img src=\"x\"/>")]
+		public void TestMaxElementDepthExceeded (string html, string expected)
+		{
+			// Once the depth limit is exceeded, the remainder of the input must be written as encoded text so that
+			// no tags can be hidden from the HtmlTagCallback.
+			var converter = new HtmlToHtml { Header = null, Footer = null, MaxElementDepth = 3 };
+			var result = converter.Convert (html);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestMaxElementDepthNestedTables ()
+		{
+			var builder = new StringBuilder ();
+
+			for (int i = 0; i < 100000; i++)
+				builder.Append ("<table><tr><td>");
+			builder.Append ("<img src=x onerror=alert(1)>");
+
+			var converter = new HtmlToHtml { Header = null, Footer = null };
+			var result = converter.Convert (builder.ToString ());
+
+			Assert.That (result, Does.EndWith ("&lt;img src=x onerror=alert(1)&gt;"));
+			Assert.That (result, Does.Not.Contain ("<img"));
 		}
 
 		void SupressInnerContentCallback (HtmlTagContext ctx, HtmlWriter htmlWriter)
@@ -158,7 +269,205 @@ namespace UnitTests.Text {
 
 			var result = converter.Convert (input);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		static void RemoveImagesCallback (HtmlTagContext ctx, HtmlWriter htmlWriter)
+		{
+			if (ctx.TagId == HtmlTagId.Image) {
+				ctx.DeleteTag = true;
+				ctx.DeleteEndTag = true;
+			} else {
+				ctx.WriteTag (htmlWriter, true);
+			}
+		}
+
+		static void RemoveImagesAndNoScriptTagsCallback (HtmlTagContext ctx, HtmlWriter htmlWriter)
+		{
+			if (ctx.TagId == HtmlTagId.Image || ctx.TagId == HtmlTagId.NoScript) {
+				ctx.DeleteTag = true;
+				ctx.DeleteEndTag = true;
+			} else {
+				ctx.WriteTag (htmlWriter, true);
+			}
+		}
+
+		[Test]
+		public void TestNoScriptUnwrap ()
+		{
+			const string input = "<p>text</p><noscript><img src=\"http://example.com/tracker.png\"><p>fallback</p></noscript>";
+			const string expected = "<p>text</p><p>fallback</p>";
+			var converter = new HtmlToHtml { HtmlTagCallback = RemoveImagesCallback };
+
+			// Note: the content of the <noscript> element is passed to the callback and the <noscript> tags are removed
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestNoScriptUnwrapNoCallback ()
+		{
+			const string input = "<head><noscript><link rel=\"stylesheet\" href=\"x.css\"></noscript></head><body><noscript/>a<NOSCRIPT>b</NoScript>c</body>";
+			const string expected = "<head><link rel=\"stylesheet\" href=\"x.css\"/></head><body>abc</body>";
+			var converter = new HtmlToHtml ();
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		static void RecordTagsCallback (HtmlTagContext ctx, HtmlWriter htmlWriter, List<string> tags)
+		{
+			tags.Add (ctx.IsEndTag ? "/" + ctx.TagName : ctx.TagName);
+			ctx.WriteTag (htmlWriter, true);
+		}
+
+		[Test]
+		public void TestNoScriptUnwrapCallbackNeverSeesNoScriptTags ()
+		{
+			const string input = "<div><noscript><b>x</b></noscript></div>";
+			var tags = new List<string> ();
+			var converter = new HtmlToHtml { HtmlTagCallback = (ctx, writer) => {
+				ctx.InvokeCallbackForEndTag = true;
+				RecordTagsCallback (ctx, writer, tags);
+			} };
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo ("<div><b>x</b></div>"));
+			Assert.That (tags, Is.EqualTo (new[] { "div", "b", "/b", "/div" }));
+		}
+
+		[TestCase ("<noscript><style></noscript><img src=x onerror=alert(1)></style></noscript>", "<style></noscript><img src=x onerror=alert(1)></style>")]
+		[TestCase ("<noscript><!--</noscript><img src=x onerror=alert(1)>--></noscript>", "<!--</noscript><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<noscript><p title=\"</noscript><img src=x onerror=alert(1)>\"></p></noscript>", "<p title=\"&lt;/noscript&gt;&lt;img src=x onerror=alert(1)&gt;\"></p>")]
+		public void TestNoScriptUnwrapXss (string input, string expected)
+		{
+			var converter = new HtmlToHtml { HtmlTagCallback = RemoveImagesCallback };
+
+			// Note: without the <noscript> tags, the output is interpreted the same regardless of whether
+			// scripting is enabled in the renderer, so the embedded "</noscript>" is harmless.
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[TestCase ("<span><noscript><svg></span>x", "<span><svg>x")]
+		[TestCase ("<span><noscript><svg></span>x</noscript></span>y", "<span><svg>x</svg></span>y")]
+		[TestCase ("<span><noscript><math><mi></span>x", "<span><math><mi>x")]
+		public void TestNoScriptUnwrapIgnoredEndTag (string input, string expected)
+		{
+			var converter = new HtmlToHtml ();
+
+			// Note: The </span> end tag is ignored because the <noscript> element is in the "special" category. If it was
+			// written to the output (without the <noscript> tags), it would no longer be ignored and would implicitly
+			// close the SVG or MathML elements when the output is parsed again.
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+			Assert.That (converter.Convert (result), Is.EqualTo (result), "converted again");
+		}
+
+		static void RemoveFramesetTagsCallback (HtmlTagContext ctx, HtmlWriter htmlWriter)
+		{
+			if (ctx.TagId == HtmlTagId.FrameSet) {
+				ctx.DeleteTag = true;
+				ctx.DeleteEndTag = true;
+			} else {
+				ctx.WriteTag (htmlWriter, true);
+			}
+		}
+
+		[TestCase ("<frameset><textarea><!--</textarea><img src=x onerror=alert(1)>--></frameset>", false, "<frameset><!--</textarea><img src=x onerror=alert(1)>--></frameset>")]
+		[TestCase ("<frameset><textarea><!--</textarea><img src=x onerror=alert(1)>--></frameset>", true, "<!--</textarea><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<frameset><frame src=\"a\"><noframes><b>x</b></noframes><style><frame src=\"b\"></frameset><svg><title>", false, "<frameset><frame src=\"a\"><noframes><b>x</b></noframes><frame src=\"b\"></frameset>")]
+		[TestCase ("<frameset><frame src=\"a\"><noframes><b>x</b></noframes><style><frame src=\"b\"></frameset><svg><title>", true, "<frame src=\"a\"><noframes><b>x</b></noframes><frame src=\"b\">")]
+		[TestCase ("x<frameset><textarea><!--</textarea><img src=x>-->", true, "x<textarea><!--</textarea>-->")]
+		public void TestFramesetIgnoredTags (string input, bool removeFrameset, string expected)
+		{
+			var converter = new HtmlToHtml {
+				HtmlTagCallback = (ctx, writer) => {
+					if (ctx.TagId == HtmlTagId.Image) {
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+					} else if (removeFrameset) {
+						RemoveFramesetTagsCallback (ctx, writer);
+					} else {
+						ctx.WriteTag (writer, true);
+					}
+				}
+			};
+
+			// Note: Once a <frameset> has replaced the <body>, browsers ignore tags such as <textarea>, <style> or <svg>, so they
+			// did not switch the tokenizer state. If they were written to the output, they would no longer be ignored when the
+			// <frameset> tag is removed by the callback (allowing the <img> tag hidden in the comment to escape it), so they get
+			// dropped. The last input has non-whitespace text before the <frameset>, so browsers ignore the <frameset> instead.
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+			Assert.That (converter.Convert (result), Is.EqualTo (result), "converted again");
+		}
+
+		[TestCase ("<body><frameset><d>x</d>", false, "<body><d>x</d>")]
+		[TestCase ("<body><frameset><d>x</d>", true, "<d>x</d>")]
+		[TestCase ("<div><template></template></div><frameset><d>x</d>", false, "<div><template></template></div><d>x</d>")]
+		[TestCase ("<div><template></template></div><frameset><d>x</d>", true, "<div><template></template></div><d>x</d>")]
+		[TestCase ("x<frameset><d>y</d></frameset>", false, "x<d>y</d></frameset>")]
+		[TestCase ("<frameset></frameset><<frameset>>", false, "<frameset></frameset>&lt;>")]
+		[TestCase ("<frameset></frameset><<frameset>>", true, "<frameset></frameset>&lt;>")]
+		[TestCase ("<frameset></frameset></html><frameset>", false, "<frameset></frameset>")]
+		[TestCase ("<frameset><frame><frameset><frame></frameset></frameset>", true, "<frameset><frame><frameset><frame></frameset></frameset>")]
+		public void TestIgnoredFramesetStartTag (string input, bool fragment, string expected)
+		{
+			var converter = new HtmlToHtml { OutputHtmlFragment = fragment };
+
+			// Note: Browsers ignore a <frameset> start tag once the <body> has been inserted and the frameset-ok flag is "not ok"
+			// (e.g. after a <body> start tag, a <template> in the body or non-whitespace text), so it gets dropped. Otherwise, it
+			// would replace the <body> when the output is interpreted without the tokens that cleared the flag (e.g. a fragment
+			// omits the <body> tag and the <head>).
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+			Assert.That (converter.Convert (result), Is.EqualTo (result), "converted again");
+		}
+
+		[Test]
+		public void TestNoScriptScriptingEnabled ()
+		{
+			const string input = "<p>text</p><noscript><img src=\"http://example.com/tracker.png\"></noscript>";
+			var converter = new HtmlToHtml { HtmlTagCallback = RemoveImagesCallback, NoScriptHandling = HtmlNoScriptHandling.ScriptingEnabled };
+
+			// Note: the content of the <noscript> element is raw text and is not passed to the callback
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (input));
+		}
+
+		[Test]
+		public void TestNoScriptScriptingDisabled ()
+		{
+			const string input = "<p>text</p><noscript><img src=\"http://example.com/tracker.png\"></noscript>";
+			const string expected = "<p>text</p><noscript></noscript>";
+			var converter = new HtmlToHtml { HtmlTagCallback = RemoveImagesCallback, NoScriptHandling = HtmlNoScriptHandling.ScriptingDisabled };
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[TestCase ("<noscript><style></noscript><img src=x onerror=alert(1)></style></noscript>", "<style></noscript><img src=x onerror=alert(1)></style>")]
+		[TestCase ("<noscript><!--</noscript><img src=x onerror=alert(1)>--></noscript>", "<!--</noscript><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<noscript><p title=\"</noscript><img src=x onerror=alert(1)>\"></p></noscript>", "<p title=\"&lt;/noscript&gt;&lt;img src=x onerror=alert(1)&gt;\"></p>")]
+		public void TestNoScriptScriptingDisabledRemoveNoScriptTags (string input, string expected)
+		{
+			var converter = new HtmlToHtml { HtmlTagCallback = RemoveImagesAndNoScriptTagsCallback, NoScriptHandling = HtmlNoScriptHandling.ScriptingDisabled };
+
+			// Note: without the <noscript> tags, the output is interpreted the same regardless of whether
+			// scripting is enabled in the renderer, so the embedded "</noscript>" is harmless.
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -170,19 +479,7 @@ namespace UnitTests.Text {
 
 			var result = converter.Convert (input);
 
-			Assert.AreEqual (expected, result);
-		}
-
-		[Test]
-		public void TestFilterHtml ()
-		{
-			const string input = "<html><head><script>/* this is a script */</script></head><body>Here is the body content which seems fine so far</body></html>";
-			const string expected = "<html><head></head><body>Here is the body content which seems fine so far</body></html>";
-			var converter = new HtmlToHtml { FilterHtml = true };
-
-			var result = converter.Convert (input);
-
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -199,7 +496,7 @@ namespace UnitTests.Text {
 
 			var result = converter.Convert (input);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -216,7 +513,416 @@ namespace UnitTests.Text {
 
 			var result = converter.Convert (input);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestIssue808 ()
+		{
+			const string input = "<html><body>I'm on holiday until&nbsp; June 17, 2022.&#13;</body></html>";
+			const string expected = "<html><body>I'm on holiday until&nbsp; June 17, 2022.&#13;</body></html>";
+			var converter = new HtmlToHtml ();
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		static void SuppressXCallback (HtmlTagContext ctx, HtmlWriter htmlWriter)
+		{
+			if (ctx.TagName.Equals ("x", StringComparison.OrdinalIgnoreCase))
+				ctx.SuppressInnerContent = true;
+
+			ctx.WriteTag (htmlWriter, true);
+		}
+
+		[TestCase ("<a><b>1</a>2</b>3", "<a><b>1</a>2</b>3")]
+		[TestCase ("<x>1<y>2</x>3</y>4", "<x></x>3</y>4")]
+		[TestCase ("<x>1<X>2</x>3</X>4", "<x></X>4")]
+		[TestCase ("<y><x>1</y>2</x>3<x>4</X>5", "<y><x></x>3<x></X>5")]
+		[TestCase ("<x>1<x>2<x>3</x>4</x>5</x>6", "<x></x>6")]
+		[TestCase ("</x>1<x>2</y>3</x>4</x>5", "</x>1<x></x>4</x>5")]
+		public void TestOutOfOrderEndTags (string input, string expected)
+		{
+			var converter = new HtmlToHtml { HtmlTagCallback = SuppressXCallback };
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		// The tokenizer used to leak the first few characters following a short bogus DOCTYPE keyword into the
+		// name of the next tag, which then caused HtmlWriter to throw an ArgumentException for the invalid tag name.
+		[TestCase ("<!DOCTYPE html </DIV><DIV class=x>y</DIV>", "<!DOCTYPE html><DIV class=\"x\">y</DIV>")]
+		[TestCase ("<!DOCTYPE html bog><p>y</p>", "<!DOCTYPE html><p>y</p>")]
+		public void TestShortBogusDocTypeKeyword (string input, string expected)
+		{
+			var converter = new HtmlToHtml ();
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		// HtmlDocTypeToken.WriteTo used to always quote identifiers with double quotes, so a single-quoted identifier
+		// that contained a double quote did not survive a round-trip.
+		[TestCase ("<!DOCTYPE x SYSTEM 'a\"b'><p>y</p>", null, "a\"b")]
+		[TestCase ("<!DOCTYPE x PUBLIC 'a\"b' 'c\"d'><p>y</p>", "a\"b", "c\"d")]
+		[TestCase ("<!DOCTYPE x PUBLIC \"a'b\" 'c'><p>y</p>", "a'b", "c")]
+		[TestCase ("<!DOCTYPE x SYSTEM 'a'><p>y</p>", null, "a")]
+		public void TestDocTypeIdentifierQuotes (string input, string publicIdentifier, string systemIdentifier)
+		{
+			var converter = new HtmlToHtml ();
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (input));
+
+			var tokenizer = new HtmlTokenizer (new StringReader (result));
+
+			Assert.That (tokenizer.ReadNextToken (out var token), Is.True);
+
+			var doctype = (HtmlDocTypeToken) token;
+
+			Assert.That (doctype.PublicIdentifier, Is.EqualTo (publicIdentifier));
+			Assert.That (doctype.SystemIdentifier, Is.EqualTo (systemIdentifier));
+			Assert.That (tokenizer.ReadNextToken (out token), Is.True);
+			Assert.That (token.Kind, Is.EqualTo (HtmlTokenKind.Tag));
+		}
+
+		[Test]
+		public void TestDocTypeIdentifierQuoteAfterSettingIdentifier ()
+		{
+			var tokenizer = new HtmlTokenizer (new StringReader ("<!DOCTYPE x SYSTEM 'a'>"));
+
+			Assert.That (tokenizer.ReadNextToken (out var token), Is.True);
+
+			var doctype = (HtmlDocTypeToken) token;
+
+			doctype.SystemIdentifier = "it's";
+
+			Assert.That (doctype.ToString (), Is.EqualTo ("<!DOCTYPE x SYSTEM \"it's\">"));
+		}
+
+		// Tags such as <body>, <img> and </div> implicitly close the open SVG and MathML elements. If such a tag was removed
+		// (by OutputHtmlFragment or by the callback), the output used to remain in foreign content, where browsers parse the
+		// content of <style> as markup, which allowed markup that the callback never saw to become live.
+		[TestCase ("<svg><body><style><img src=x onerror=alert(1)></style>", true, "<svg></svg><style><img src=x onerror=alert(1)></style>")]
+		[TestCase ("<svg><body><style><img src=x onerror=alert(1)></style>", false, "<svg></svg><body><style><img src=x onerror=alert(1)></style>")]
+		[TestCase ("<svg><img src=y><style><img src=x onerror=alert(1)></style>", false, "<svg></svg><style><img src=x onerror=alert(1)></style>")]
+		[TestCase ("<div><svg><g></div><style><img src=x onerror=alert(1)></style>", false, "<svg><g></g></svg><style><img src=x onerror=alert(1)></style>")]
+		[TestCase ("<math><mtext><svg><p></math><b>x</b>", false, "<math><mtext><svg></svg><p></math><b>x</b>")]
+		[TestCase ("<svg><g><g><g></p>x", false, "<svg><g><g><g></g></g></g></svg></p>x")]
+		[TestCase ("<svg><g></svg>x", false, "<svg><g></g></svg>x")]
+		[TestCase ("<mi/r><table><math><mi><e><tr>", false, "<mi r><table><math><mi><e></e></mi></math><tr>")]
+		[TestCase ("<mi><table><math><mi><ne></mi></math><tr><b>x</b>", false, "<mi><table><math><mi><ne></mi></math></ne></mi></math><tr><b>x</b>")]
+		[TestCase ("<table><math><mi><e/>x<table>", false, "<table><math><mi><e/>x</e></mi></math><table>")]
+		[TestCase ("<table><math><mi><e/>x</mi></math><table>", false, "<table><math><mi><e/>x</mi></math></e></mi></math><table>")]
+		[TestCase ("<svg><noscript><g><p>x", false, "<svg><g></g></svg><p>x")]
+		public void TestImplicitlyClosedForeignElements (string input, bool fragment, string expected)
+		{
+			var converter = new HtmlToHtml {
+				OutputHtmlFragment = fragment,
+				HtmlTagCallback = (ctx, htmlWriter) => {
+					if (ctx.TagId == HtmlTagId.Image || ctx.TagId == HtmlTagId.Div) {
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+						return;
+					}
+
+					ctx.WriteTag (htmlWriter, true);
+				}
+			};
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+			Assert.That (converter.Convert (result), Is.EqualTo (expected), "Convert again");
+		}
+
+		[Test]
+		public void TestAdoptionAgencyClosesForeignContent ([Values (false, true)] bool deleteFormatting)
+		{
+			const string input = "<a><p><svg></a><script><!--</script><script></script>";
+			string expected = deleteFormatting ? "<p><svg></svg>" : "<a><p><svg></svg></a>";
+			int scripts = 0;
+			var converter = new HtmlToHtml {
+				HtmlTagCallback = (ctx, writer) => {
+					if (ctx.TagId == HtmlTagId.Script) {
+						if (!ctx.IsEndTag)
+							scripts++;
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+						ctx.SuppressInnerContent = true;
+					} else if (deleteFormatting && ctx.TagId == HtmlTagId.A) {
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+					} else {
+						ctx.WriteTag (writer, true);
+					}
+				}
+			};
+
+			Assert.That (converter.Convert (input), Is.EqualTo (expected));
+			Assert.That (scripts, Is.EqualTo (2));
+			Assert.That (converter.Convert (expected), Is.EqualTo (expected), "Convert again");
+		}
+
+		[Test]
+		public void TestImplicitlyClosedForeignElementsWithDeletedEndTags ()
+		{
+			const string input = "<svg><g><a><body><style><img src=x onerror=alert(1)></style>";
+			const string expected = "<svg><g><a></a></svg><style><img src=x onerror=alert(1)></style>";
+			var converter = new HtmlToHtml {
+				OutputHtmlFragment = true,
+				HtmlTagCallback = (ctx, htmlWriter) => {
+					if (ctx.TagName == "g") {
+						ctx.DeleteEndTag = true;
+						ctx.WriteTag (htmlWriter, false);
+						return;
+					}
+
+					ctx.WriteTag (htmlWriter, true);
+				}
+			};
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestImplicitlyClosedForeignElementWithSuppressedContent ()
+		{
+			// The content that follows the tag that implicitly closed the suppressed <svg> element is no longer inside of it.
+			const string input = "<svg><circle><body><b>x</b></svg>y";
+			const string expected = "<b>x</b>y";
+			var converter = new HtmlToHtml {
+				OutputHtmlFragment = true,
+				HtmlTagCallback = (ctx, htmlWriter) => {
+					if (ctx.TagId == HtmlTagId.Unknown && ctx.TagName == "svg") {
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+						ctx.SuppressInnerContent = true;
+						return;
+					}
+
+					ctx.WriteTag (htmlWriter, true);
+				}
+			};
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestIgnoredEndTagForForeignElement ()
+		{
+			// The </mi> and </math> end tags are ignored because the MathML <mi> element is special, so the <tr> closes <ne>, <mi> and
+			// <math>, and the <script> is an HTML element. If the ignored end tags popped the wrong contexts, then the explicit end tags
+			// written for the implicitly closed elements would leave <math> open, so the <script> would become a MathML element whose
+			// content is a comment (which gets filtered out) when the output is converted again.
+			const string input = "<mi><table><math><mi><ne></mi></math><tr><script><!--x--></script>";
+			const string expected = "<mi><table><math><mi><ne></mi></math></ne></mi></math><tr><script><!--x--></script>";
+			var converter = new HtmlToHtml { FilterComments = true };
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+			Assert.That (converter.Convert (result), Is.EqualTo (expected), "Convert again");
+		}
+
+		[Test]
+		public void TestIgnoredEndTagForSuppressedElement ()
+		{
+			// The </div> end tag is ignored because the <td> is a scope boundary, so the content that follows it is still inside the <div>.
+			const string input = "<div><table><tr><td>x</div>y</td></tr></table></div>z";
+			const string expected = "z";
+			var converter = new HtmlToHtml {
+				OutputHtmlFragment = true,
+				HtmlTagCallback = (ctx, htmlWriter) => {
+					if (ctx.TagId == HtmlTagId.Div) {
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+						ctx.SuppressInnerContent = true;
+						return;
+					}
+
+					ctx.WriteTag (htmlWriter, true);
+				}
+			};
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		static string Repeat (string value, int count)
+		{
+			var builder = new StringBuilder (value.Length * count);
+
+			for (int i = 0; i < count; i++)
+				builder.Append (value);
+
+			return builder.ToString ();
+		}
+
+		// Prior to using HtmlTagContextStack, each of these took time quadratic in the number of unclosed tags
+		// (100,000 unmatched end tags took over 2 minutes).
+		[Test]
+		public void TestManyUnclosedTagsFollowedByUnmatchedEndTags ()
+		{
+			const int count = 100000;
+			var input = Repeat ("<b>", count) + "x" + Repeat ("</i>", count);
+			var converter = new HtmlToHtml ();
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (input));
+		}
+
+		[Test]
+		public void TestManyUnclosedTagsFollowedByReopenedOuterElement ()
+		{
+			const int count = 100000;
+			var input = "<a>" + Repeat ("<b>", count) + Repeat ("</a><a>", count);
+			var converter = new HtmlToHtml ();
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (input));
+		}
+
+		[Test]
+		public void TestManyUnclosedTagsInsideSuppressedElement ()
+		{
+			const int count = 100000;
+			var input = "<x>" + Repeat ("<b>y", count) + Repeat ("</i>", count) + "</x>z";
+			var converter = new HtmlToHtml { HtmlTagCallback = SuppressXCallback };
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo ("<x></x>z"));
+		}
+
+		// Each of these used to hide the <img> tag from the HtmlTagCallback due to tokenizer reconsume bugs.
+		[TestCase ("<<img src=x onerror=alert(1)>")]
+		[TestCase ("<script>x</scrip</script><img src=x onerror=alert(1)>")]
+		[TestCase ("<style>x</styl</style><img src=x onerror=alert(1)>")]
+		[TestCase ("<textarea>x</textare</textarea><img src=x onerror=alert(1)>")]
+		[TestCase ("<!DOC><img src=x onerror=alert(1)>")]
+		[TestCase ("<![CDAT><img src=x onerror=alert(1)>")]
+		[TestCase ("<script><!--<script</script><img src=x onerror=alert(1)>")]
+		[TestCase ("<script><!--</a <script></script><!--</script><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<script><!--<script></a></script></script><img src=x onerror=alert(1)>")]
+		[TestCase ("<style/><!--</style><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<script/><!--</script><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<textarea/><!--</textarea><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<![CDATA[ x ><img src=x onerror=alert(1)>]]>")]
+		[TestCase ("<svg><style><img src=x onerror=alert(1)></style></svg>")]
+		[TestCase ("<math><style><img src=x onerror=alert(1)></style></math>")]
+		[TestCase ("<svg><script><img src=x onerror=alert(1)></script></svg>")]
+		[TestCase ("<div><svg></div><style><!--</style><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<foo><svg></foo><style><!--</style><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<svg><p><style><!--</style><img src=x onerror=alert(1)>-->")]
+		[TestCase ("<form><svg></form><style><img src=x onerror=alert(1)></style>")]
+		[TestCase ("<div><form></div><form><svg></form><style><img src=x onerror=alert(1)></style>")]
+		[TestCase ("<svg><![CDATA[]]><img src=x onerror=alert(1)>")]
+		public void TestTagCallbackSeesAllTags (string input)
+		{
+			var converter = new HtmlToHtml {
+				HtmlTagCallback = (ctx, writer) => {
+					if (ctx.TagId != HtmlTagId.Image)
+						ctx.WriteTag (writer, true);
+					else
+						ctx.DeleteTag = true;
+				}
+			};
+
+			var result = converter.Convert (input);
+
+			Assert.That (result, Does.Not.Contain ("onerror"));
+		}
+
+		// Browsers ignore the self-closing flag on <style/> and <script/>, so the content that follows is raw text
+		// and must be suppressed along with the element.
+		[TestCase ("<style/>body { color: red; }</style><p>x</p>", "<p>x</p>")]
+		[TestCase ("<script/>alert(1)</script><p>x</p>", "<p>x</p>")]
+		public void TestSuppressSelfClosingRawTextElement (string input, string expected)
+		{
+			var converter = new HtmlToHtml {
+				HtmlTagCallback = (ctx, writer) => {
+					if (ctx.TagId == HtmlTagId.Style || ctx.TagId == HtmlTagId.Script) {
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+						ctx.SuppressInnerContent = true;
+					} else {
+						ctx.WriteTag (writer, true);
+					}
+				}
+			};
+
+			Assert.That (converter.Convert (input), Is.EqualTo (expected));
+		}
+
+		// A literal '<' at the end of a data token must not combine with the data that follows dropped markup to form a new tag.
+		[TestCase ("<</>c>", false, "&lt;c>")]
+		[TestCase ("<<!-- x -->img src=x onerror=alert(1)>", true, "&lt;img src=x onerror=alert(1)>")]
+		[TestCase ("<<!-- x -->img>", false, "&lt;<!-- x -->img>")]
+		[TestCase ("a <<b>img onerror=alert(1)>", false, "a &lt;img onerror=alert(1)>")]
+		public void TestDroppedMarkupDoesNotFormNewTag (string input, bool filterComments, string expected)
+		{
+			var converter = new HtmlToHtml {
+				FilterComments = filterComments,
+				HtmlTagCallback = (ctx, writer) => {
+					if (ctx.TagId == HtmlTagId.B) {
+						ctx.DeleteTag = true;
+						ctx.DeleteEndTag = true;
+					} else {
+						ctx.WriteTag (writer, true);
+					}
+				}
+			};
+
+			Assert.That (converter.Convert (input), Is.EqualTo (expected));
+		}
+
+		// "<a href/=javascript:x>" has a valueless "href" attribute followed by an attribute named "=javascript:x". Make sure
+		// that the output does not get reparsed as an href attribute with a value of "javascript:x".
+		[Test]
+		public void TestAttributeNameStartingWithEquals ()
+		{
+			const string input = "<a href/=javascript:x>y</a>";
+
+			var converter = new HtmlToHtml ();
+			Assert.That (converter.Convert (input), Is.EqualTo ("<a href=\"\" =javascript:x>y</a>"));
+
+			converter.HtmlTagCallback = (ctx, writer) => ctx.WriteTag (writer, true);
+			Assert.That (converter.Convert (input), Is.EqualTo ("<a href=\"\" =javascript:x>y</a>"));
+		}
+
+		// Bogus comments must be written such that they tokenize as the same bogus comment again. In particular,
+		// "</" followed by a non-letter used to be written without the '/' which could turn the comment into a tag.
+		[TestCase ("</<script x>", "</<script x>")]
+		[TestCase ("</ <img src=x>", "</ <img src=x>")]
+		[TestCase ("</<s", "</<s>")]
+		[TestCase ("<?xml version=\"1.0\"?>", "<?xml version=\"1.0\"?>")]
+		[TestCase ("</?x>", "<?x>")]
+		[TestCase ("<!DOC>", "<!DOC>")]
+		[TestCase ("<!-x>", "<!-x>")]
+		public void TestBogusCommentRoundTrip (string input, string expected)
+		{
+			var converter = new HtmlToHtml ();
+			var result = converter.Convert (input);
+
+			Assert.That (result, Is.EqualTo (expected));
+
+			var tokenizer = new HtmlTokenizer (new StringReader (result));
+			Assert.That (tokenizer.ReadNextToken (out var token), Is.True);
+			Assert.That (token, Is.InstanceOf<HtmlCommentToken> ());
+			Assert.That (((HtmlCommentToken) token).IsBogusComment, Is.True);
+			Assert.That (tokenizer.ReadNextToken (out _), Is.False);
 		}
 	}
 }

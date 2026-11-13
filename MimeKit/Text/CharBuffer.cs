@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,10 +25,11 @@
 //
 
 using System;
+using System.IO;
 using System.Runtime.CompilerServices;
 
 namespace MimeKit.Text {
-	class CharBuffer
+	sealed class CharBuffer
 	{
 		char[] buffer;
 
@@ -72,6 +73,14 @@ namespace MimeKit.Text {
 		}
 
 		[MethodImpl (MethodImplOptions.AggressiveInlining)]
+		public void Append (char[] chars, int startIndex, int count)
+		{
+			EnsureCapacity (Length + count);
+			Array.Copy (chars, startIndex, buffer, Length, count);
+			Length += count;
+		}
+
+		[MethodImpl (MethodImplOptions.AggressiveInlining)]
 		public void Append (string str)
 		{
 			EnsureCapacity (Length + str.Length);
@@ -85,9 +94,66 @@ namespace MimeKit.Text {
 			return new string (buffer, 0, Length);
 		}
 
-		public static implicit operator string (CharBuffer buffer)
+		public void CopyFrom (CharBuffer source)
 		{
-			return buffer.ToString ();
+			EnsureCapacity (source.Length);
+			Array.Copy (source.buffer, 0, buffer, 0, source.Length);
+			Length = source.Length;
 		}
+
+		public ReadOnlySpan<char> AsSpan ()
+		{
+			return new ReadOnlySpan<char> (buffer, 0, Length);
+		}
+
+		public void WriteTo (TextWriter output, int count)
+		{
+			output.Write (buffer, 0, count);
+		}
+
+		// A small, direct-mapped cache of recently used short strings (e.g. HTML tag and attribute names) shared by all
+		// instances. Since string references are read and written atomically and a cached string is only returned if its
+		// content is identical to the content of the buffer, concurrent access can at worst cause a cache miss.
+		const int StringCacheSize = 512;
+		const int MaxCachedStringLength = 32;
+		static readonly string?[] StringCache = new string?[StringCacheSize];
+
+		/// <summary>
+		/// Get a string with the content of the buffer, reusing a previously created string with the same content if possible.
+		/// </summary>
+		/// <returns>The string.</returns>
+		public string ToCachedString ()
+		{
+			if (Length > MaxCachedStringLength || Length == 0)
+				return ToString ();
+
+			uint hash = 2166136261;
+
+			for (int i = 0; i < Length; i++)
+				hash = (hash ^ buffer[i]) * 16777619;
+
+			int index = (int) (hash & (StringCacheSize - 1));
+			var cached = StringCache[index];
+
+			if (cached != null && cached.Length == Length) {
+				int i = 0;
+
+				while (i < Length && cached[i] == buffer[i])
+					i++;
+
+				if (i == Length)
+					return cached;
+			}
+
+			var value = ToString ();
+			StringCache[index] = value;
+
+			return value;
+		}
+
+		//public static implicit operator string (CharBuffer buffer)
+		//{
+		//	return buffer.ToString ();
+		//}
 	}
 }

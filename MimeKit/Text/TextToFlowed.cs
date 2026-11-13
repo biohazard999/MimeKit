@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,8 @@ using System;
 using System.IO;
 using System.Text;
 
+using MimeKit.Utils;
+
 namespace MimeKit.Text {
 	/// <summary>
 	/// A text to flowed text converter.
@@ -37,8 +39,12 @@ namespace MimeKit.Text {
 	/// <para>The Content-Type header for the wrapped output text should be set to
 	/// <c>text/plain; format=flowed; delsp=yes</c>.</para>
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\TextConverterExamples.cs" region="TextToFlowed"/>
+	/// </example>
 	public class TextToFlowed : TextConverter
 	{
+		const int MaxHardLineLength = 998;
 		const int MaxLineLength = 78;
 
 		/// <summary>
@@ -73,7 +79,7 @@ namespace MimeKit.Text {
 			get { return TextFormat.Flowed; }
 		}
 
-		static string Unquote (string line, out int quoteDepth)
+		static ReadOnlySpan<char> Unquote (ReadOnlySpan<char> line, out int quoteDepth)
 		{
 			int index = 0;
 
@@ -90,66 +96,75 @@ namespace MimeKit.Text {
 					index++;
 			} while (index < line.Length && line[index] == '>');
 
-			return line.Substring (index);
+			return line.Slice (index);
 		}
 
-		static bool StartsWith (string text, int startIndex, string value)
-		{
-			if (startIndex + value.Length > text.Length)
-				return false;
-
-			for (int i = 0; i < value.Length; i++) {
-				if (text[startIndex + i] != value[i])
-					return false;
-			}
-
-			return true;
-		}
-
-		static string GetFlowedLine (StringBuilder flowed, string line, ref int index, int quoteDepth)
+		static string GetFlowedLine (StringBuilder flowed, ReadOnlySpan<char> line, ref int index, int quoteDepth)
 		{
 			flowed.Length = 0;
 
 			if (quoteDepth > 0)
 				flowed.Append ('>', quoteDepth);
 
-			// Space-stuffed lines which start with a space, "From ", or ">".
-			if (quoteDepth > 0 || (line.Length > index && line[index] == ' ') || StartsWith (line, index, "From "))
+			// Space-stuff lines which start with a space, "From ", or ">" (rfc3676, section 4.4). Note: Since the
+			// quote markers are removed from the line, a '>' can only appear at the start of a soft-broken line.
+			if (quoteDepth > 0 || (line.Length > index && (line[index] == ' ' || line[index] == '>')) || line.Slice (index).StartsWith ("From ".AsSpan (), StringComparison.Ordinal))
 				flowed.Append (' ');
 
-			if (flowed.Length + (line.Length - index) <= MaxLineLength) {
-				flowed.Append (line.Substring (index));
+			int prefixLength = flowed.Length;
+
+			// Note: When the quote depth is very deep, the quote markers alone may leave little or no room for text within
+			// MaxLineLength (or even MaxHardLineLength) characters. Always leave at least as much room for text as the
+			// quote markers take up, otherwise every line would contain a single word and the size of the output would
+			// grow with the quote depth multiplied by the number of words.
+			int softLineLength = Math.Max (MaxLineLength, prefixLength * 2);
+			int hardLineLength = Math.Max (MaxHardLineLength, prefixLength * 2);
+
+			if (flowed.Length + (line.Length - index) <= softLineLength) {
+				flowed.Append (line.Slice (index));
 				index = line.Length;
 
 				return flowed.ToString ();
 			}
 
 			do {
-				int nextSpace = line.IndexOf (' ', index);
-				int wordEnd = nextSpace == -1 ? line.Length : nextSpace;
+				int nextSpace = line.Slice (index).IndexOf (' ');
+				int wordEnd = nextSpace == -1 ? line.Length : nextSpace + index;
 				int softBreak = nextSpace == -1 ? 0 : 2; // 2 = space + soft-break space
 				int wordLength = wordEnd - index;
 
-				if (flowed.Length + wordLength + softBreak <= MaxLineLength) {
+				if (flowed.Length + wordLength + softBreak <= softLineLength) {
 					// The entire word will fit on the remainder of the line.
-					flowed.Append (line, index, wordLength);
+					flowed.Append (line.Slice (index, wordLength));
 					index = wordEnd;
-				} else if (wordLength > MaxLineLength - (quoteDepth + 1)) {
-					// Even if we insert a soft-break here, the word is longer than what will fit on its own line.
-					// No matter what we do, we will need to break the word apart.
-					wordLength = MaxLineLength - (flowed.Length + 1);
-					flowed.Append (line, index, wordLength);
-					index += wordLength;
-					break;
-				} else {
+				} else if (flowed.Length > prefixLength && prefixLength + wordLength + softBreak <= softLineLength) {
 					// Only part of the word will fit on the remainder of this line, but it will easily fit
 					// on its own line. Insert a soft-break so that we don't break apart this word.
 					break;
+				} else if (flowed.Length + wordLength + softBreak <= hardLineLength) {
+					// The word will not fit within softLineLength characters even on a line of its own, so send the word as is and exceed MaxLineLength
+					// rather than inserting a soft-break into the middle of the word (rfc3676, section 4.2).
+					flowed.Append (line.Slice (index, wordLength));
+					index = wordEnd;
+				} else if (flowed.Length > prefixLength && prefixLength + wordLength + softBreak <= hardLineLength) {
+					// The word will fit within hardLineLength characters on its own line.
+					break;
+				} else {
+					// The word is too long to fit within hardLineLength characters even on a line of its own,
+					// so there is no choice but to break the word apart. Note: flowed.Length is always less than
+					// softLineLength - 1 here and hardLineLength is at least twice prefixLength, so wordLength > 0.
+					wordLength = hardLineLength - (flowed.Length + 1);
+
+					flowed.Append (line.Slice (index, wordLength));
+					index += wordLength;
+					break;
 				}
 
-				while (flowed.Length + 1 < MaxLineLength && index < line.Length && line[index] == ' ')
+				int maxLineLength = flowed.Length < softLineLength ? softLineLength : hardLineLength;
+
+				while (flowed.Length + 1 < maxLineLength && index < line.Length && line[index] == ' ')
 					flowed.Append (line[index++]);
-			} while (index < line.Length && flowed.Length + 1 < MaxLineLength);
+			} while (index < line.Length && flowed.Length + 1 < softLineLength);
 
 			if (index < line.Length)
 				flowed.Append (' ');
@@ -168,19 +183,19 @@ namespace MimeKit.Text {
 		/// <param name="reader">The text reader.</param>
 		/// <param name="writer">The text writer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="reader"/> is <c>null</c>.</para>
+		/// <para><paramref name="reader"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="writer"/> is <c>null</c>.</para>
+		/// <para><paramref name="writer"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public override void Convert (TextReader reader, TextWriter writer)
 		{
 			StringBuilder flowed;
-			string line;
+			string? line;
 
-			if (reader == null)
+			if (reader is null)
 				throw new ArgumentNullException (nameof (reader));
 
-			if (writer == null)
+			if (writer is null)
 				throw new ArgumentNullException (nameof (writer));
 
 			if (!string.IsNullOrEmpty (Header))
@@ -190,9 +205,7 @@ namespace MimeKit.Text {
 
 			while ((line = reader.ReadLine ()) != null) {
 				// Trim spaces before user-inserted hard line breaks.
-				line = line.TrimEnd (' ');
-
-				line = Unquote (line, out var quoteDepth);
+				var unquoted = Unquote (line.AsSpan ().TrimEnd (' '), out var quoteDepth);
 
 				// Ensure all lines (fixed and flowed) are 78 characters or fewer in
 				// length, counting any trailing space as well as a space added as
@@ -201,9 +214,9 @@ namespace MimeKit.Text {
 				int index = 0;
 
 				do {
-					var flowedLine = GetFlowedLine (flowed, line, ref index, quoteDepth);
+					var flowedLine = GetFlowedLine (flowed, unquoted, ref index, quoteDepth);
 					writer.WriteLine (flowedLine);
-				} while (index < line.Length);
+				} while (index < unquoted.Length);
 			}
 
 			if (!string.IsNullOrEmpty (Footer))

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,10 +28,10 @@ using System;
 
 namespace MimeKit {
 	/// <summary>
-	/// Event args emitted by the <see cref="MimeParser"/> when it begins parsing a <see cref="MimeEntity"/>.
+	/// Event args emitted by the <see cref="LegacyMimeParser"/> when it begins parsing a <see cref="MimeEntity"/>.
 	/// </summary>
 	/// <remarks>
-	/// Event args emitted by the <see cref="MimeParser"/> when it begins parsing a <see cref="MimeEntity"/>.
+	/// Event args emitted by the <see cref="LegacyMimeParser"/> when it begins parsing a <see cref="MimeEntity"/>.
 	/// </remarks>
 	public class MimeEntityBeginEventArgs : EventArgs
 	{
@@ -43,11 +43,11 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="entity">The entity that is being parsed.</param>
 		/// <exception cref="ArgumentNullException">
-		/// <paramref name="entity"/> is <c>null</c>.
+		/// <paramref name="entity"/> is <see langword="null"/>.
 		/// </exception>
 		public MimeEntityBeginEventArgs (MimeEntity entity)
 		{
-			if (entity == null)
+			if (entity is null)
 				throw new ArgumentNullException (nameof (entity));
 
 			Entity = entity;
@@ -62,16 +62,16 @@ namespace MimeKit {
 		/// <param name="entity">The entity that is being parsed.</param>
 		/// <param name="parent">The parent multipart.</param>
 		/// <exception cref="ArgumentNullException">
-		/// <para><paramref name="entity"/> is <c>null</c>.</para>
+		/// <para><paramref name="entity"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="parent"/> is <c>null</c>.</para>
+		/// <para><paramref name="parent"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public MimeEntityBeginEventArgs (MimeEntity entity, Multipart parent)
 		{
-			if (entity == null)
+			if (entity is null)
 				throw new ArgumentNullException (nameof (entity));
 
-			if (parent == null)
+			if (parent is null)
 				throw new ArgumentNullException (nameof (parent));
 
 			Entity = entity;
@@ -94,7 +94,7 @@ namespace MimeKit {
 		/// Gets the parent <see cref="Multipart"/> if this entity is a child.
 		/// </remarks>
 		/// <value>The parent <see cref="Multipart"/>.</value>
-		public Multipart Parent { get; }
+		public Multipart? Parent { get; }
 
 		/// <summary>
 		/// Get or set the stream offset that marks the beginning of the entity.
@@ -112,6 +112,6 @@ namespace MimeKit {
 		/// Gets or sets the line number of the beginning of the entity.
 		/// </remarks>
 		/// <value>The line number.</value>
-		internal int LineNumber { get; set; }
+		public int LineNumber { get; set; }
 	}
 }

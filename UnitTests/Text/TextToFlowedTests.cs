@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,9 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
 using System.Text;
 
 using MimeKit.Text;
-
-using NUnit.Framework;
 
 namespace UnitTests.Text {
 	[TestFixture]
@@ -39,9 +35,9 @@ namespace UnitTests.Text {
 		[Test]
 		public void TestArgumentExceptions ()
 		{
+			using var reader = new StringReader ("");
+			using var writer = new StringWriter ();
 			var converter = new TextToFlowed ();
-			var reader = new StringReader ("");
-			var writer = new StringWriter ();
 
 			Assert.Throws<ArgumentNullException> (() => converter.InputEncoding = null);
 			Assert.Throws<ArgumentNullException> (() => converter.OutputEncoding = null);
@@ -56,9 +52,9 @@ namespace UnitTests.Text {
 			Assert.Throws<ArgumentNullException> (() => converter.Convert (Stream.Null, (TextWriter) null));
 			Assert.Throws<ArgumentNullException> (() => converter.Convert ((TextReader) null, writer));
 			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (TextWriter) null));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert (new StreamReader (Stream.Null), (Stream) null));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, new StreamWriter (Stream.Null)));
-			Assert.Throws<ArgumentNullException> (() => converter.Convert (new StreamReader (Stream.Null), (TextWriter) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (Stream) null));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert ((Stream) null, writer));
+			Assert.Throws<ArgumentNullException> (() => converter.Convert (reader, (TextWriter) null));
 		}
 
 		[Test]
@@ -66,15 +62,15 @@ namespace UnitTests.Text {
 		{
 			var converter = new TextToFlowed ();
 
-			Assert.IsFalse (converter.DetectEncodingFromByteOrderMark, "DetectEncodingFromByteOrderMark");
-			Assert.IsNull (converter.Footer, "Footer");
-			Assert.IsNull (converter.Header, "Header");
-			Assert.AreEqual (Encoding.UTF8, converter.InputEncoding, "InputEncoding");
-			Assert.AreEqual (TextFormat.Text, converter.InputFormat, "InputFormat");
-			Assert.AreEqual (4096, converter.InputStreamBufferSize, "InputStreamBufferSize");
-			Assert.AreEqual (Encoding.UTF8, converter.OutputEncoding, "OutputEncoding");
-			Assert.AreEqual (TextFormat.Flowed, converter.OutputFormat, "OutputFormat");
-			Assert.AreEqual (4096, converter.OutputStreamBufferSize, "OutputStreamBufferSize");
+			Assert.That (converter.DetectEncodingFromByteOrderMark, Is.False, "DetectEncodingFromByteOrderMark");
+			Assert.That (converter.Footer, Is.Null, "Footer");
+			Assert.That (converter.Header, Is.Null, "Header");
+			Assert.That (converter.InputEncoding, Is.EqualTo (Encoding.UTF8), "InputEncoding");
+			Assert.That (converter.InputFormat, Is.EqualTo (TextFormat.Text), "InputFormat");
+			Assert.That (converter.InputStreamBufferSize, Is.EqualTo (4096), "InputStreamBufferSize");
+			Assert.That (converter.OutputEncoding, Is.EqualTo (Encoding.UTF8), "OutputEncoding");
+			Assert.That (converter.OutputFormat, Is.EqualTo (TextFormat.Flowed), "OutputFormat");
+			Assert.That (converter.OutputStreamBufferSize, Is.EqualTo (4096), "OutputStreamBufferSize");
 		}
 
 		[Test]
@@ -97,12 +93,12 @@ namespace UnitTests.Text {
 			TextConverter converter = new TextToFlowed { Header = null, Footer = null };
 			string result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 
 			converter = new FlowedToText { DeleteSpace = true };
 			result = converter.Convert (expected);
 
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 		}
 
 		[Test]
@@ -115,12 +111,12 @@ namespace UnitTests.Text {
 			TextConverter converter = new TextToFlowed ();
 			string result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 
 			converter = new FlowedToText ();
 			result = converter.Convert (expected);
 
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 		}
 
 		[Test]
@@ -133,12 +129,134 @@ namespace UnitTests.Text {
 			TextConverter converter = new TextToFlowed ();
 			string result = converter.Convert (text);
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 
 			converter = new FlowedToText ();
 			result = converter.Convert (expected);
 
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[Test]
+		public void TestSpaceStuffingSoftBrokenLineStartingWithGreaterThan ()
+		{
+			string text = new string ('a', 75) + " >this is not a quote" + Environment.NewLine;
+			string expected = new string ('a', 75) + "  " + Environment.NewLine +
+				" >this is not a quote" + Environment.NewLine;
+			TextConverter converter = new TextToFlowed ();
+			string result = converter.Convert (text);
+
+			Assert.That (result, Is.EqualTo (expected));
+
+			converter = new FlowedToText () { DeleteSpace = true };
+			result = converter.Convert (expected);
+
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[Test]
+		public void TestLongWordIsNotBroken ()
+		{
+			string word = new string ('x', 100);
+			string text = "Hello " + word + " world" + Environment.NewLine;
+			string expected = "Hello " + word + "  " + Environment.NewLine +
+				"world" + Environment.NewLine;
+			TextConverter converter = new TextToFlowed ();
+			string result = converter.Convert (text);
+
+			Assert.That (result, Is.EqualTo (expected));
+
+			converter = new FlowedToText () { DeleteSpace = true };
+			result = converter.Convert (expected);
+
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[Test]
+		public void TestWordLongerThan998CharactersIsBroken ()
+		{
+			string text = new string ('x', 2000) + Environment.NewLine;
+			string expected = new string ('x', 997) + " " + Environment.NewLine +
+				new string ('x', 997) + " " + Environment.NewLine +
+				new string ('x', 6) + Environment.NewLine;
+			TextConverter converter = new TextToFlowed ();
+			string result = converter.Convert (text);
+
+			Assert.That (result, Is.EqualTo (expected));
+
+			converter = new FlowedToText () { DeleteSpace = true };
+			result = converter.Convert (expected);
+
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[TestCase (70)]
+		[TestCase (75)]
+		[TestCase (76)]
+		[TestCase (77)]
+		[TestCase (90)]
+		[TestCase (996)]
+		[TestCase (997)]
+		[TestCase (2000)]
+		public void TestFlowingDeeplyQuotedLines (int quoteDepth)
+		{
+			var builder = new StringBuilder ();
+
+			builder.Append ('>', quoteDepth).Append (' ');
+			for (int i = 0; i < 300; i++)
+				builder.Append ("word ").Append (new string ('x', i % 10)).Append (' ');
+			builder.Append (new string ('y', 1500));
+			builder.Append (Environment.NewLine);
+
+			var text = builder.ToString ();
+			TextConverter converter = new TextToFlowed ();
+			string flowed = converter.Convert (text);
+
+			foreach (var line in flowed.Split (new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)) {
+				Assert.That (line, Does.StartWith (new string ('>', quoteDepth) + " "));
+				// lines may only exceed 998 characters when the quote markers take up at least half of that
+				Assert.That (line, Has.Length.LessThanOrEqualTo (Math.Max (998, (quoteDepth + 1) * 2)));
+			}
+
+			converter = new FlowedToText () { DeleteSpace = true };
+			string result = converter.Convert (flowed);
+
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[TestCase (2)]
+		[TestCase (38)]
+		[TestCase (39)]
+		[TestCase (77)]
+		[TestCase (200)]
+		[TestCase (900)]
+		[TestCase (5000)]
+		public void TestDeeplyQuotedLinesDoNotAmplifyOutput (int quoteDepth)
+		{
+			var builder = new StringBuilder ();
+
+			builder.Append ('>', quoteDepth);
+			for (int i = 0; i < 5000; i++)
+				builder.Append (" a");
+			builder.Append (Environment.NewLine);
+
+			var text = builder.ToString ();
+			var prefix = new string ('>', quoteDepth) + " ";
+			int maxLineLength = Math.Max (78, prefix.Length * 2);
+			TextConverter converter = new TextToFlowed ();
+			string flowed = converter.Convert (text);
+
+			Assert.That (flowed, Has.Length.LessThanOrEqualTo (text.Length * 3));
+
+			foreach (var line in flowed.Split (new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)) {
+				Assert.That (line, Does.StartWith (prefix));
+				Assert.That (line, Has.Length.LessThanOrEqualTo (maxLineLength));
+			}
+
+			converter = new FlowedToText () { DeleteSpace = true };
+			string result = converter.Convert (flowed);
+
+			Assert.That (result, Is.EqualTo (text));
 		}
 
 		[Test]
@@ -186,12 +304,12 @@ glove upon that hand, That I might touch that cheek!
 			TextConverter converter = new TextToFlowed ();
 			string result = converter.Convert (text).Replace ("\r\n", "\n");
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 
 			converter = new FlowedToText () { DeleteSpace = true };
 			result = converter.Convert (expected).Replace ("\r\n", "\n");
 
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 		}
 
 		[Test]
@@ -249,12 +367,12 @@ Did that flow correctly?
 			TextConverter converter = new TextToFlowed ();
 			string result = converter.Convert (text).Replace ("\r\n", "\n");
 
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 
 			converter = new FlowedToText () { DeleteSpace = true };
 			result = converter.Convert (expected).Replace ("\r\n", "\n");
 
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 		}
 	}
 }

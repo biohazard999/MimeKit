@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,8 +24,10 @@
 // THE SOFTWARE.
 //
 
+using System;
 using System.Text;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace MimeKit.Utils {
 	static class StringBuilderExtensions
@@ -35,7 +37,7 @@ namespace MimeKit.Utils {
 			if (text.Length == 0)
 				return text;
 
-			if (char.IsWhiteSpace (text[text.Length - 1])) {
+			if (text[text.Length - 1] is ' ' or '\t') {
 				text.Insert (text.Length - 1, options.NewLine);
 			} else {
 				text.Append (options.NewLine);
@@ -45,12 +47,24 @@ namespace MimeKit.Utils {
 			return text;
 		}
 
+		static bool IsLinearWhiteSpace (string token)
+		{
+			for (int i = 0; i < token.Length; i++) {
+				if (token[i] != ' ' && token[i] != '\t')
+					return false;
+			}
+
+			return true;
+		}
+
 		public static void AppendTokens (this StringBuilder text, FormatOptions options, ref int lineLength, List<string> tokens)
 		{
 			var spaces = string.Empty;
 
 			foreach (var token in tokens) {
-				if (string.IsNullOrWhiteSpace (token)) {
+				// Note: Don't use string.IsNullOrWhiteSpace() here. It treats characters such as form feeds as
+				// whitespace, which would cause an unquoted value consisting of them to be dropped.
+				if (IsLinearWhiteSpace (token)) {
 					spaces = token;
 					continue;
 				}
@@ -99,7 +113,7 @@ namespace MimeKit.Utils {
 						lwspIndex++;
 				} else {
 					// normal word
-					while (lwspIndex < value.Length && !char.IsWhiteSpace (value[lwspIndex]))
+					while (lwspIndex < value.Length && !ParseUtils.IsWhiteSpace (value[lwspIndex]))
 						lwspIndex++;
 				}
 
@@ -114,7 +128,7 @@ namespace MimeKit.Utils {
 				firstToken = false;
 
 				wordIndex = lwspIndex;
-				while (wordIndex < value.Length && char.IsWhiteSpace (value[wordIndex]))
+				while (wordIndex < value.Length && ParseUtils.IsWhiteSpace (value[wordIndex]))
 					wordIndex++;
 
 				if (wordIndex < value.Length && wordIndex > lwspIndex) {
@@ -126,8 +140,28 @@ namespace MimeKit.Utils {
 			return text;
 		}
 
+#if NETSTANDARD2_0 || NETFRAMEWORK
+		public static void Append (this StringBuilder text, ReadOnlySpan<char> value)
+		{
+			char[] buffer = System.Buffers.ArrayPool<char>.Shared.Rent (value.Length);
+
+			try {
+				value.CopyTo (new Span<char> (buffer));
+				text.Append (buffer, 0, value.Length);
+			} finally {
+				System.Buffers.ArrayPool<char>.Shared.Return (buffer);
+			}
+		}
+
+		public static void Append (this StringBuilder sb, StringBuilder value)
+		{
+			sb.Append (value);
+		}
+#endif
+
 #if DEBUG
-		public static void AppendCStringByte (this StringBuilder text, byte c)
+		[MethodImpl (MethodImplOptions.AggressiveInlining)]
+		static void AppendCStringByte (this StringBuilder text, byte c)
 		{
 			switch (c) {
 			case 0x00: text.Append ("\\0"); break;
@@ -155,4 +189,3 @@ namespace MimeKit.Utils {
 #endif
 	}
 }
-

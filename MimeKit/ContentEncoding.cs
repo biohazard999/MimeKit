@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,15 +30,21 @@ namespace MimeKit {
 	/// </summary>
 	/// <remarks>
 	/// Some older mail software is unable to properly deal with
-	/// data outside of the ASCII range, so it is sometimes
+	/// data outside the ASCII range, so it is sometimes
 	/// necessary to encode the content of MIME entities.
 	/// </remarks>
 	/// <seealso cref="MimeKit.MimePart.ContentTransferEncoding"/>
 	public enum ContentEncoding {
 		/// <summary>
-		/// The default encoding (aka no encoding at all).
+		/// No content transfer encoding is specified.
 		/// </summary>
-		Default,
+		/// <remarks>
+		/// Setting <see cref="MimePart.ContentTransferEncoding"/> to this value removes the
+		/// Content-Transfer-Encoding header. For <see cref="MimeContent.Encoding"/>, this value
+		/// indicates that the stream has not been transfer-encoded. Encoder and decoder filters
+		/// pass the data through unchanged.
+		/// </remarks>
+		Unspecified = 0,
 
 		/// <summary>
 		/// The 7bit content transfer encoding. This encoding should be restricted to textual content
@@ -48,7 +54,7 @@ namespace MimeKit {
 
 		/// <summary>
 		/// The 8bit content transfer encoding. This encoding should be restricted to textual content
-		/// outside of the US-ASCII range but may not be supported by all transport services such as
+		/// outside the US-ASCII range but may not be supported by all transport services such as
 		/// older SMTP servers that do not support the 8BITMIME extension.
 		/// </summary>
 		EightBit,
@@ -68,7 +74,7 @@ namespace MimeKit {
 
 		/// <summary>
 		/// The quoted-printable content transfer encoding. This encoding is used for textual content that
-		/// is in a charset that has a minority of characters outside of the US-ASCII range (such as
+		/// is in a charset that has a minority of characters outside the US-ASCII range (such as
 		/// ISO-8859-1 and other single-byte charset encodings) and is supported by all message transport
 		/// services.
 		/// </summary>
@@ -76,7 +82,7 @@ namespace MimeKit {
 
 		/// <summary>
 		/// The uuencode content transfer encoding. This is an obsolete encoding meant for encoding binary
-		/// data and has largely been superceeded by <see cref="Base64"/>.
+		/// data and has largely been superseded by <see cref="Base64"/>.
 		/// </summary>
 		UUEncode,
 	}

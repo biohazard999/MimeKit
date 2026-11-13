@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,11 +34,13 @@ namespace MimeKit.Encodings {
 	/// </summary>
 	/// <remarks>
 	/// Quoted-Printable is an encoding often used in MIME to textual content outside
-	/// of the ASCII range in order to ensure that the text remains intact when sent
+	/// the ASCII range in order to ensure that the text remains intact when sent
 	/// via 7bit transports such as SMTP.
 	/// </remarks>
 	public class QuotedPrintableDecoder : IMimeDecoder
 	{
+		const int ScalarScanLength = 16;
+
 		enum QpDecoderState : byte {
 			PassThrough,
 			EqualSign,
@@ -56,9 +58,7 @@ namespace MimeKit.Encodings {
 		/// <remarks>
 		/// Creates a new quoted-printable decoder.
 		/// </remarks>
-		/// <param name="rfc2047">
-		/// <c>true</c> if this decoder will be used to decode rfc2047 encoded-word payloads; <c>false</c> otherwise.
-		/// </param>
+		/// <param name="rfc2047"><see langword="true" /> if this decoder will be used to decode rfc2047 encoded-word tokens; otherwise, <see langword="false" />.</param>
 		public QuotedPrintableDecoder (bool rfc2047)
 		{
 			this.rfc2047 = rfc2047;
@@ -83,16 +83,14 @@ namespace MimeKit.Encodings {
 		/// <returns>A new <see cref="QuotedPrintableDecoder"/> with identical state.</returns>
 		public IMimeDecoder Clone ()
 		{
-			var decoder = new QuotedPrintableDecoder (rfc2047);
-
-			decoder.state = state;
-			decoder.saved = saved;
-
-			return decoder;
+			return new QuotedPrintableDecoder (rfc2047) {
+				state = state,
+				saved = saved
+			};
 		}
 
 		/// <summary>
-		/// Gets the encoding.
+		/// Get the encoding.
 		/// </summary>
 		/// <remarks>
 		/// Gets the encoding that the decoder supports.
@@ -103,25 +101,28 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Estimates the length of the output.
+		/// Estimate the length of the output.
 		/// </summary>
 		/// <remarks>
 		/// Estimates the number of bytes needed to decode the specified number of input bytes.
 		/// </remarks>
 		/// <returns>The estimated output length.</returns>
 		/// <param name="inputLength">The input length.</param>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// The estimated output length is too large to be represented as an <see cref="System.Int32"/>.
+		/// </exception>
 		public int EstimateOutputLength (int inputLength)
 		{
 			switch (state) {
 			case QpDecoderState.PassThrough: return inputLength;
-			case QpDecoderState.EqualSign: return inputLength + 1; // add an extra byte in case the '=' character is not the start of a valid hex sequence
-			default: return inputLength + 2; // add an extra 2 bytes in case the =X sequence is not the start of a valid hex sequence
+			case QpDecoderState.EqualSign: return ArgumentValidator.ValidateOutputLength ((long) inputLength + 1); // add an extra byte in case the '=' character is not the start of a valid hex sequence
+			default: return ArgumentValidator.ValidateOutputLength ((long) inputLength + 2); // add an extra 2 bytes in case the =X sequence is not the start of a valid hex sequence
 			}
 		}
 
 		void ValidateArguments (byte[] input, int startIndex, int length, byte[] output)
 		{
-			if (input == null)
+			if (input is null)
 				throw new ArgumentNullException (nameof (input));
 
 			if (startIndex < 0 || startIndex > input.Length)
@@ -130,7 +131,7 @@ namespace MimeKit.Encodings {
 			if (length < 0 || length > (input.Length - startIndex))
 				throw new ArgumentOutOfRangeException (nameof (length));
 
-			if (output == null)
+			if (output is null)
 				throw new ArgumentNullException (nameof (output));
 
 			if (output.Length < EstimateOutputLength (length))
@@ -138,11 +139,11 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Decodes the specified input into the output buffer.
+		/// Decode the specified input into the output buffer.
 		/// </summary>
 		/// <remarks>
 		/// <para>Decodes the specified input into the output buffer.</para>
-		/// <para>The output buffer should be large enough to hold all of the
+		/// <para>The output buffer should be large enough to hold all the
 		/// decoded input. For estimating the size needed for the output buffer,
 		/// see <see cref="EstimateOutputLength"/>.</para>
 		/// </remarks>
@@ -150,7 +151,7 @@ namespace MimeKit.Encodings {
 		/// <param name="input">A pointer to the beginning of the input buffer.</param>
 		/// <param name="length">The length of the input buffer.</param>
 		/// <param name="output">A pointer to the beginning of the output buffer.</param>
-		public unsafe int Decode (byte* input, int length, byte* output)
+		internal unsafe int Decode (byte* input, int length, byte* output)
 		{
 			byte* inend = input + length;
 			byte* outptr = output;
@@ -160,17 +161,54 @@ namespace MimeKit.Encodings {
 			while (inptr < inend) {
 				switch (state) {
 				case QpDecoderState.PassThrough:
-					while (inptr < inend) {
+					if (rfc2047) {
+						while (inptr < inend) {
+							c = *inptr++;
+
+							if (c == '=') {
+								state = QpDecoderState.EqualSign;
+								break;
+							} else if (c == '_') {
+								*outptr++ = (byte) ' ';
+							} else {
+								*outptr++ = c;
+							}
+						}
+						break;
+					}
+
+					// Scan the first few bytes one at a time because heavily-encoded content (e.g. non-Latin text)
+					// tends to have very short runs between '=' characters and the fixed overhead of IndexOf()
+					// and MemoryCopy() outweighs their benefit for short runs.
+					byte* scanEnd = inend - inptr > ScalarScanLength ? inptr + ScalarScanLength : inend;
+
+					while (inptr < scanEnd) {
 						c = *inptr++;
 
 						if (c == '=') {
 							state = QpDecoderState.EqualSign;
 							break;
-						} else if (rfc2047 && c == '_') {
-							*outptr++ = (byte) ' ';
-						} else {
-							*outptr++ = c;
 						}
+
+						*outptr++ = c;
+					}
+
+					if (state == QpDecoderState.PassThrough && inptr < inend) {
+						int count = (int) (inend - inptr);
+						int index = new ReadOnlySpan<byte> (inptr, count).IndexOf ((byte) '=');
+
+						if (index != -1) {
+							state = QpDecoderState.EqualSign;
+							count = index;
+						}
+
+						// Note: Buffer.MemoryCopy() handles overlapping buffers, so decoding in-place still works.
+						Buffer.MemoryCopy (inptr, outptr, count, count);
+						outptr += count;
+						inptr += count;
+
+						if (state == QpDecoderState.EqualSign)
+							inptr++;
 					}
 					break;
 				case QpDecoderState.EqualSign:
@@ -227,11 +265,11 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Decodes the specified input into the output buffer.
+		/// Decode the specified input into the output buffer.
 		/// </summary>
 		/// <remarks>
 		/// <para>Decodes the specified input into the output buffer.</para>
-		/// <para>The output buffer should be large enough to hold all of the
+		/// <para>The output buffer should be large enough to hold all the
 		/// decoded input. For estimating the size needed for the output buffer,
 		/// see <see cref="EstimateOutputLength"/>.</para>
 		/// </remarks>
@@ -241,9 +279,9 @@ namespace MimeKit.Encodings {
 		/// <param name="length">The length of the input buffer.</param>
 		/// <param name="output">The output buffer.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="input"/> is <c>null</c>.</para>
+		/// <para><paramref name="input"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="output"/> is <c>null</c>.</para>
+		/// <para><paramref name="output"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify
@@ -266,7 +304,58 @@ namespace MimeKit.Encodings {
 		}
 
 		/// <summary>
-		/// Resets the decoder.
+		/// Decode the final input, flushing any buffered input to the output.
+		/// </summary>
+		/// <remarks>
+		/// <para>Incomplete escapes, including a trailing equals sign, hex digit or carriage return,
+		/// are preserved literally.</para>
+		/// <para>Use <see cref="EstimateOutputLength"/> to size the output buffer, including buffered input.
+		/// Call <see cref="Reset"/> before decoding another stream.</para>
+		/// </remarks>
+		/// <returns>The number of bytes written to the output buffer.</returns>
+		/// <param name="input">The input buffer.</param>
+		/// <param name="startIndex">The starting index of the input buffer.</param>
+		/// <param name="length">The length of the input buffer.</param>
+		/// <param name="output">The output buffer.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <paramref name="input"/> or <paramref name="output"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ArgumentOutOfRangeException">
+		/// <paramref name="startIndex"/> and <paramref name="length"/> do not specify a valid input range.
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="output"/> is smaller than <see cref="EstimateOutputLength"/> requires.
+		/// </exception>
+		public int Flush (byte[] input, int startIndex, int length, byte[] output)
+		{
+			int count = Decode (input, startIndex, length, output);
+
+			unsafe {
+				fixed (byte* outptr = output)
+					return count + Flush (outptr + count);
+			}
+		}
+
+		internal unsafe int Flush (byte* output)
+		{
+			int count = 0;
+
+			if (state != QpDecoderState.PassThrough) {
+				output[count++] = (byte) '=';
+
+				if (state == QpDecoderState.DecodeByte)
+					output[count++] = saved;
+				else if (state == QpDecoderState.SoftBreak)
+					output[count++] = (byte) '\r';
+			}
+
+			Reset ();
+
+			return count;
+		}
+
+		/// <summary>
+		/// Reset the decoder.
 		/// </summary>
 		/// <remarks>
 		/// Resets the state of the decoder.

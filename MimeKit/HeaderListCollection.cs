@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets the number of groups in the collection.
+		/// Get the number of groups in the collection.
 		/// </summary>
 		/// <remarks>
 		/// Gets the number of groups in the collection.
@@ -64,18 +64,18 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets whether or not the header list collection is read only.
+		/// Get whether the header list collection is read only.
 		/// </summary>
 		/// <remarks>
 		/// A <see cref="HeaderListCollection"/> is never read-only.
 		/// </remarks>
-		/// <value><c>true</c> if this instance is read only; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if this instance is read only; otherwise, <see langword="false" />.</value>
 		public bool IsReadOnly {
 			get { return false; }
 		}
 
 		/// <summary>
-		/// Gets or sets the <see cref="HeaderList"/> at the specified index.
+		/// Get or set the <see cref="HeaderList"/> at the specified index.
 		/// </summary>
 		/// <remarks>
 		/// Gets or sets the <see cref="HeaderList"/> at the specified index.
@@ -83,7 +83,7 @@ namespace MimeKit {
 		/// <value>The group of headers at the specified index.</value>
 		/// <param name="index">The index.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="value"/> is <c>null</c>.
+		/// <paramref name="value"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="index"/> is out of range.
@@ -99,7 +99,7 @@ namespace MimeKit {
 				if (index < 0 || index >= Count)
 					throw new ArgumentOutOfRangeException (nameof (index));
 
-				if (value == null)
+				if (value is null)
 					throw new ArgumentNullException (nameof (value));
 
 				if (groups[index] == value)
@@ -112,18 +112,18 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Adds the group of headers to the collection.
+		/// Add a group of headers to the collection.
 		/// </summary>
 		/// <remarks>
 		/// Adds the group of headers to the collection.
 		/// </remarks>
 		/// <param name="group">The group of headers.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="group"/> is <c>null</c>.
+		/// <paramref name="group"/> is <see langword="null"/>.
 		/// </exception>
 		public void Add (HeaderList group)
 		{
-			if (group == null)
+			if (group is null)
 				throw new ArgumentNullException (nameof (@group));
 
 			group.Changed += OnGroupChanged;
@@ -132,10 +132,10 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Clears the header list collection.
+		/// Clear the header list collection.
 		/// </summary>
 		/// <remarks>
-		/// Removes all of the groups from the collection.
+		/// Removes all the groups from the collection.
 		/// </remarks>
 		public void Clear ()
 		{
@@ -147,27 +147,27 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Checks if the collection contains the specified group of headers.
+		/// Check if the collection contains the specified group of headers.
 		/// </summary>
 		/// <remarks>
-		/// Determines whether or not the collection contains the specified group of headers.
+		/// Determines whether the collection contains the specified group of headers.
 		/// </remarks>
-		/// <returns><value>true</value> if the specified group of headers is contained;
-		/// otherwise, <value>false</value>.</returns>
+		/// <returns><see langword="true" /> if the specified group of headers is contained;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="group">The group of headers.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="group"/> is <c>null</c>.
+		/// <paramref name="group"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Contains (HeaderList group)
 		{
-			if (group == null)
+			if (group is null)
 				throw new ArgumentNullException (nameof (@group));
 
 			return groups.Contains (group);
 		}
 
 		/// <summary>
-		/// Copies all of the header groups in the <see cref="HeaderListCollection"/> to the specified array.
+		/// Copy all of the header groups in the <see cref="HeaderListCollection"/> to the specified array.
 		/// </summary>
 		/// <remarks>
 		/// Copies all of the header groups within the <see cref="HeaderListCollection"/> into the array,
@@ -176,7 +176,7 @@ namespace MimeKit {
 		/// <param name="array">The array to copy the headers to.</param>
 		/// <param name="arrayIndex">The index into the array.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="array"/> is <c>null</c>.
+		/// <paramref name="array"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentOutOfRangeException">
 		/// <paramref name="arrayIndex"/> is out of range.
@@ -187,20 +187,20 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Removes the specified header group.
+		/// Remove a header group.
 		/// </summary>
 		/// <remarks>
 		/// Removes the specified header group from the collection, if it exists.
 		/// </remarks>
-		/// <returns><c>true</c> if the specified header group was removed;
-		/// otherwise <c>false</c>.</returns>
+		/// <returns><see langword="true" /> if the specified header group was removed;
+		/// otherwise, <see langword="false" />.</returns>
 		/// <param name="group">The group of headers.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="group"/> is <c>null</c>.
+		/// <paramref name="group"/> is <see langword="null"/>.
 		/// </exception>
 		public bool Remove (HeaderList group)
 		{
-			if (group == null)
+			if (group is null)
 				throw new ArgumentNullException (nameof (@group));
 
 			if (!groups.Remove (group))
@@ -236,17 +236,14 @@ namespace MimeKit {
 			return GetEnumerator ();
 		}
 
-		internal event EventHandler Changed;
+		internal event EventHandler? Changed;
 
 		void OnChanged ()
 		{
-			var handler = Changed;
-
-			if (handler != null)
-				handler (this, EventArgs.Empty);
+			Changed?.Invoke (this, EventArgs.Empty);
 		}
 
-		void OnGroupChanged (object sender, HeaderListChangedEventArgs e)
+		void OnGroupChanged (object? sender, HeaderListChangedEventArgs e)
 		{
 			OnChanged ();
 		}

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,17 +33,17 @@ namespace MimeKit {
 	/// <remarks>
 	/// Represents MIME entities with a Content-Type of text/rfc822-headers.
 	/// </remarks>
-	public class TextRfc822Headers : MessagePart
+	public class TextRfc822Headers : MessagePart, ITextRfc822Headers
 	{
 		/// <summary>
 		/// Initialize a new instance of the <see cref="TextRfc822Headers"/> class.
 		/// </summary>
 		/// <remarks>
-		/// This constructor is used by <see cref="MimeParser"/>.
+		/// This constructor is used by <see cref="IMimeParser"/>.
 		/// </remarks>
 		/// <param name="args">Information used by the constructor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="args"/> is <c>null</c>.
+		/// <paramref name="args"/> is <see langword="null"/>.
 		/// </exception>
 		public TextRfc822Headers (MimeEntityConstructorArgs args) : base (args)
 		{
@@ -57,7 +57,7 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="args">An array of initialization parameters: headers and message parts.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="args"/> is <c>null</c>.
+		/// <paramref name="args"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <para><paramref name="args"/> contains more than one <see cref="MimeMessage"/>.</para>
@@ -66,10 +66,10 @@ namespace MimeKit {
 		/// </exception>
 		public TextRfc822Headers (params object[] args) : this ()
 		{
-			MimeMessage message = null;
+			MimeMessage? message = null;
 
 			foreach (object obj in args) {
-				if (obj == null || TryInit (obj))
+				if (obj is null || TryInit (obj))
 					continue;
 
 				if (obj is MimeMessage mesg) {
@@ -110,11 +110,11 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="visitor">The visitor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="visitor"/> is <c>null</c>.
+		/// <paramref name="visitor"/> is <see langword="null"/>.
 		/// </exception>
 		public override void Accept (MimeVisitor visitor)
 		{
-			if (visitor == null)
+			if (visitor is null)
 				throw new ArgumentNullException (nameof (visitor));
 
 			visitor.VisitTextRfc822Headers (this);

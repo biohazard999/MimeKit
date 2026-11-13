@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,43 +26,381 @@
 
 using System;
 using System.IO;
+using System.Text;
+using System.Threading.Tasks;
 
 using BenchmarkDotNet.Attributes;
 
 using MimeKit;
 
 namespace Benchmarks {
-    public class MimeParserBenchmarks
-    {
+	[MemoryDiagnoser]
+	public class MimeParserBenchmarks
+	{
 		static readonly string MessagesDataDir = Path.Combine (BenchmarkHelper.ProjectDir, "TestData", "messages");
-		static readonly string MboxDataDir = Path.Combine (BenchmarkHelper.ProjectDir, "TestData", "mbox");
+		static readonly string MboxDataDir = Path.Combine (BenchmarkHelper.UnitTestsDir, "TestData", "mbox");
+		const string MessageHeaderStressTest = @"Return-Path: <info@someserver>
+Received: from maleman.mcom.com (maleman.mcom.com [198.93.92.3]) by urchin.netscape.com (8.6.12/8.6.9) with ESMTP id EAA18301; Thu, 25 Apr 1996 04:30:51 -0700
+Received: from ns.netscape.com (ns.netscape.com.mcom.com [198.95.251.10]) by maleman.mcom.com (8.6.9/8.6.9) with ESMTP id EAA01168; Thu, 25 Apr 1996 04:29:58 -0700
+Received: from RSA.COM (RSA.COM [192.80.211.33]) by ns.netscape.com (8.7.3/8.7.3) with SMTP id EAA17575; Thu, 25 Apr 1996 04:29:05 -0700 (PDT)
+Received: from callisto.HIP.Berkeley.EDU by RSA.COM with SMTP
+	id AA26475; Thu, 25 Apr 96 04:25:34 PDT
+Received: (from raph@localhost) by callisto.hip.berkeley.edu (8.6.12/8.6.12) id DAA00979 for smime-dev@rsa.com; Thu, 25 Apr 1996 03:26:57 -0700
+X-Antivirus: Avast (VPS 210729-0, 7/29/2021), Outbound message
+X-Antivirus-Status: Clean
+X-EOPAttributedMessage: 0
+X-EOPTenantAttributedMessage: 44d81603-6a98-429d-8ab9-bb947b669639:0
+X-MS-PublicTrafficType: Email
+X-MS-Office365-Filtering-Correlation-Id: eea4ffa7-7fd9-42d0-4e7b-08d9524bc48c
+X-MS-TrafficTypeDiagnostic: FRYP281MB0583:
+X-LD-Processed: 44d81603-6a98-429d-8ab9-bb947b669639,ExtFwd
+X-MS-Exchange-Transport-Forked: True
+X-Microsoft-Antispam-PRVS: =?utf-8?q?=3CFRYP281MB058343080804D92271C3A1D8E6EB9=40FRYP281MB0583=2EDEUP281?=
+ =?utf-8?q?=2EPROD=2EOUTLOOK=2ECOM=3E?=
+X-MS-Oob-TLC-OOBClassifiers: OLM:6108;
+X-MS-Exchange-SenderADCheck: 0
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: =?utf-8?q?JOmZ=2FsCm2X+QgnzHElzIVUYuE71YCZKgZrH90cQGqenMs1zwCDY0k4V7mHNii?=
+ =?utf-8?q?tAMIfrCv4eluiE1mqaS82GDEkhlGuFB18RFNecBMs6JyqJ+nofe4e19AFCnm3?=
+ =?utf-8?q?PwruBn3VdUmpXB0vnlgu4u6wy1jpcrHz8H64gTSIhDjWquqem9+SWjqZ0QvCO?=
+ =?utf-8?q?cOiM9s4jBLn4TKw1SYlb97MpihwAYuD6rIDdH3jQG5mtRxj9YNCgNFTo6KumD?=
+ =?utf-8?q?13alldCfqkaJ25FEnNdlvDwal7pUz7CjA9AIiyD0SYjs4L9tpC48C=2F7zW+9mH?=
+ =?utf-8?q?s+MJUyi5gYGdiueE1T8KKW73lLDAUmXY4vR+WP0c1KGmhxOVEahyORh29H6vp?=
+ =?utf-8?q?i28USMBVQ5h0QdigEzrjI0goTORAOqA8RE6VNcH9F+ZhVNH4vmTsLT4FtvSbf?=
+ =?utf-8?q?mlFCDxqPv2v9aiKwaf2DzOzp3+uoKxYiKfA3IKTKw7brVDz2WAAgL+HodRSGb?=
+ =?utf-8?q?ULwDAf8Zb0GBtBWvZwclibsS8fzOACTe8+IXdW8X58WJ5fbeUIOXDzS9lbpJM?=
+ =?utf-8?q?g1zIvb+9eBeSdeHKtm5P45giWOXO=2F41p=2FpfAjpATtmV9wp0NvdLfCMFP6=2FXJj?=
+ =?utf-8?q?ZSzYu19GUJOP5DusRK0p7ejlBjdYmZeYbP6vD6glAzjTQGNquwgJBAwVr+Hek?=
+ =?utf-8?q?DdYT84E4qnaU4WQuCe7jc47+vng9CmQpi?=
+X-Forefront-Antispam-Report: =?utf-8?q?CIP=3A82=2E102=2E144=2E78=3BCTRY=3AIL=3BLANG=3Aen=3BSCL=3A1=3BSRV=3A=3BIPV=3ANLI=3BSFV=3ANSPM?=
+ =?utf-8?q?=3BH=3Amtaout66=2E012=2Enet=2Eil=3BPTR=3Amtaout66=2E012=2Enet=2Eil=3BCAT=3ANONE=3BSFS=3A=28?=
+ =?utf-8?q?396003=29=28136003=29=2839830400003=29=28376002=29=28346002=29=2853546011=29=28863620?=
+ =?utf-8?q?01=29=282616005=29=2868406010=29=28956004=29=2870586007=29=285660300002=29=287596003=29?=
+ =?utf-8?q?=282906002=29=288676002=29=28498600001=29=28356005=29=2844736005=29=28166002=29=2834206?=
+ =?utf-8?q?002=29=2836756003=29=2866574015=29=2826005=29=28316002=29=28966005=29=2883380400001=29=28?=
+ =?utf-8?q?1420700001=29=28336012=29=3BDIR=3AOUT=3BSFP=3A1102=3B?=
+X-ExternalRecipientOutboundConnectors: 44d81603-6a98-429d-8ab9-bb947b669639
+X-MS-Exchange-ForwardingLoop: info@doe.com;44d81603-6a98-429d-8ab9-bb947b669639
+X-OriginatorOrg: foobar.de
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 26 Aug 2021 13:46:02.1598 (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: eea4ffa7-7fd9-42d0-4e7b-08d9524bc48c
+X-MS-Exchange-CrossTenant-Id: 44d81603-6a98-429d-8ab9-bb947b669639
+X-MS-Exchange-CrossTenant-AuthSource: FR2DEU01FT016.eop-deu01.prod.protection.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: Internet
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: FRYP281MB0583
+From: John Doe <john@doe.com>
+To: Jane Doe <jane@doe.com>
+Date: Thu, 26 Aug 2021 09:46:01 -0400
+Subject: Lets stress test the header parser!
+Message-Id: <0123456789.5932184607@doe.com>
+In-Reply-To: 
+References:
+X-Mailer: Microsoft Outlook 16.0
+Thread-index: Add41XPhHzNfrvGkRJ2TYsozzI9LOQLXuPZA
+MIME-version: 1.0
+Content-type: text/plain; charset=""utf-8""
+Content-language: en-us
+X-Spam-Score: 0.000
 
-		static void BenchmarkMimeParser (string fileName, bool persistent = false)
+Hello, there!
+
+This is a short message body that is meant to make sure that the parser spends most of its time in the
+header parser.
+
+";
+		static readonly byte[] MessageHeaderStressTestData = Encoding.ASCII.GetBytes (MessageHeaderStressTest);
+		static readonly byte[] StarTrekData = File.ReadAllBytes (Path.Combine (MessagesDataDir, "startrek.eml"));
+		static readonly byte[] ContentLengthMboxData = File.ReadAllBytes (Path.Combine (MboxDataDir, "content-length.mbox.txt"));
+		static readonly byte[] JwzMboxData = File.ReadAllBytes (Path.Combine (MboxDataDir, "jwz.mbox.txt"));
+
+		#region LegacyMimeParser
+
+		static void LegacyMimeParserSingleMessage (byte[] data, bool persistent = false)
 		{
-			var path = Path.Combine (MessagesDataDir, fileName);
+			using var stream = new MemoryStream (data, false);
+			var parser = new LegacyMimeParser (stream, MimeFormat.Entity, persistent);
+			var message = parser.ParseMessage ();
+			message.Dispose ();
+		}
 
-			using (var stream = File.OpenRead (path)) {
-				var parser = new MimeParser (stream, MimeFormat.Entity, persistent);
+		[Benchmark]
+		public void LegacyMimeParser_StarTrekMessage ()
+		{
+			LegacyMimeParserSingleMessage (StarTrekData);
+		}
 
-				for (int i = 0; i < 1000; i++) {
-					parser.ParseMessage ();
+		[Benchmark]
+		public void LegacyMimeParser_StarTrekMessagePersistent ()
+		{
+			LegacyMimeParserSingleMessage (StarTrekData, true);
+		}
 
-					stream.Position = 0;
-					parser.SetStream (stream, MimeFormat.Entity, persistent);
-				}
+		static void LegacyMimeParserMboxFile (byte[] data, bool persistent = false)
+		{
+			using var stream = new MemoryStream (data, false);
+			var parser = new LegacyMimeParser (stream, MimeFormat.Mbox, persistent);
+
+			while (!parser.IsEndOfStream) {
+				var message = parser.ParseMessage ();
+				message.Dispose ();
 			}
 		}
 
 		[Benchmark]
-		public void BenchmarkStarTrekMessage ()
+		public void LegacyMimeParser_ContentLengthMbox ()
 		{
-			BenchmarkMimeParser ("startrek.eml");
+			LegacyMimeParserMboxFile (ContentLengthMboxData);
 		}
 
 		[Benchmark]
-		public void BenchmarkStarTrekMessagePersistent ()
+		public void LegacyMimeParser_ContentLengthMboxPersistent ()
 		{
-			BenchmarkMimeParser ("startrek.eml", true);
+			LegacyMimeParserMboxFile (ContentLengthMboxData, true);
 		}
+
+		[Benchmark]
+		public void LegacyMimeParser_JwzMbox ()
+		{
+			LegacyMimeParserMboxFile (JwzMboxData);
+		}
+
+		[Benchmark]
+		public void LegacyMimeParser_JwzMboxPersistent ()
+		{
+			LegacyMimeParserMboxFile (JwzMboxData, true);
+		}
+
+		[Benchmark]
+		public void LegacyMimeParser_HeaderStressTest ()
+		{
+			using var stream = new MemoryStream (MessageHeaderStressTestData, false);
+			var parser = new LegacyMimeParser (stream, MimeFormat.Entity, true);
+			var message = parser.ParseMessage ();
+			message.Dispose ();
+		}
+
+		#endregion LegacyMimeParser
+
+		#region MimeParser
+
+		static void MimeParserSingleMessage (byte[] data, bool persistent = false)
+		{
+			using var stream = new MemoryStream (data, false);
+			var parser = new MimeParser (stream, MimeFormat.Entity, persistent ? MimeContentStorage.Source : MimeContentStorage.Memory);
+			var message = parser.ParseMessage ();
+			message.Dispose ();
+		}
+
+		[Benchmark]
+		public void MimeParser_StarTrekMessage ()
+		{
+			MimeParserSingleMessage (StarTrekData);
+		}
+
+		[Benchmark]
+		public void MimeParser_StarTrekMessagePersistent ()
+		{
+			MimeParserSingleMessage (StarTrekData, true);
+		}
+
+		static void MimeParserMboxFile (byte[] data, bool persistent = false)
+		{
+			using var stream = new MemoryStream (data, false);
+			var parser = new MimeParser (stream, MimeFormat.Mbox, persistent ? MimeContentStorage.Source : MimeContentStorage.Memory);
+
+			while (!parser.IsEndOfStream) {
+				var message = parser.ParseMessage ();
+				message.Dispose ();
+			}
+		}
+
+		[Benchmark]
+		public void MimeParser_ContentLengthMbox ()
+		{
+			MimeParserMboxFile (ContentLengthMboxData);
+		}
+
+		[Benchmark]
+		public void MimeParser_ContentLengthMboxPersistent ()
+		{
+			MimeParserMboxFile (ContentLengthMboxData, true);
+		}
+
+		[Benchmark]
+		public void MimeParser_JwzMbox ()
+		{
+			MimeParserMboxFile (JwzMboxData);
+		}
+
+		[Benchmark]
+		public void MimeParser_JwzMboxPersistent ()
+		{
+			MimeParserMboxFile (JwzMboxData, true);
+		}
+
+		[Benchmark]
+		public void MimeParser_HeaderStressTest ()
+		{
+			using var stream = new MemoryStream (MessageHeaderStressTestData, false);
+			var parser = new MimeParser (stream, MimeFormat.Entity, MimeContentStorage.Source);
+			var message = parser.ParseMessage ();
+			message.Dispose ();
+		}
+
+		#endregion MimeParser
+
+		#region MimeReader
+
+		static void MimeReaderSingleMessage (byte[] data)
+		{
+			using var stream = new MemoryStream (data, false);
+			var reader = new MimeReader (stream, MimeFormat.Entity);
+			reader.ReadMessage ();
+		}
+
+		[Benchmark]
+		public void MimeReader_StarTrekMessage ()
+		{
+			MimeReaderSingleMessage (StarTrekData);
+		}
+
+		static void MimeReaderMboxFile (byte[] data)
+		{
+			using var stream = new MemoryStream (data, false);
+			var reader = new MimeReader (stream, MimeFormat.Mbox);
+
+			while (!reader.IsEndOfStream) {
+				reader.ReadMessage ();
+			}
+		}
+
+		[Benchmark]
+		public void MimeReader_ContentLengthMbox ()
+		{
+			MimeReaderMboxFile (ContentLengthMboxData);
+		}
+
+		[Benchmark]
+		public void MimeReader_JwzMbox ()
+		{
+			MimeReaderMboxFile (JwzMboxData);
+		}
+
+		[Benchmark]
+		public void MimeReader_HeaderStressTest ()
+		{
+			using var stream = new MemoryStream (MessageHeaderStressTestData, false);
+			var reader = new MimeReader (stream, MimeFormat.Entity);
+
+			reader.ReadMessage ();
+		}
+
+		[Benchmark]
+		public async Task MimeReader_StarTrekMessageAsync ()
+		{
+			using var stream = new MemoryStream (StarTrekData, false);
+			var reader = new MimeReader (stream, MimeFormat.Entity);
+			await reader.ReadMessageAsync ();
+		}
+
+		[Benchmark]
+		public async Task MimeReader_JwzMboxAsync ()
+		{
+			using var stream = new MemoryStream (JwzMboxData, false);
+			var reader = new MimeReader (stream, MimeFormat.Mbox);
+
+			while (!reader.IsEndOfStream)
+				await reader.ReadMessageAsync ();
+		}
+
+		#endregion
+
+		#region Nesting
+
+		// A message that alternates between multipart/mixed and message/rfc822 parts (each multipart also has
+		// a text/plain sibling before and after the nested part).
+		static byte[] GenerateMixedNestedMessage (int depth)
+		{
+			var builder = new StringBuilder ();
+
+			builder.Append ("From: a@example.org\r\nSubject: nested\r\nMIME-Version: 1.0\r\n");
+
+			for (int i = 0; i < depth; i++) {
+				if (i % 2 == 0) {
+					builder.Append ($"Content-Type: multipart/mixed; boundary=\"b{i}\"\r\n\r\n");
+					builder.Append ($"--b{i}\r\nContent-Type: text/plain\r\n\r\nbefore {i}\r\n");
+					builder.Append ($"--b{i}\r\n");
+				} else {
+					builder.Append ("Content-Type: message/rfc822\r\n\r\n");
+					builder.Append ($"From: a@example.org\r\nSubject: level {i}\r\n");
+				}
+			}
+
+			builder.Append ("Content-Type: text/plain\r\n\r\ninnermost\r\n");
+
+			for (int i = depth - 1; i >= 0; i--) {
+				if (i % 2 == 0) {
+					builder.Append ($"--b{i}\r\nContent-Type: text/plain\r\n\r\nafter {i}\r\n");
+					builder.Append ($"--b{i}--\r\n");
+				}
+			}
+
+			return Encoding.ASCII.GetBytes (builder.ToString ());
+		}
+
+		static byte[] GenerateNestedRfc822Message (int depth)
+		{
+			var builder = new StringBuilder ();
+
+			builder.Append ("From: a@example.org\r\n");
+
+			for (int i = 0; i < depth; i++)
+				builder.Append ("Content-Type: message/rfc822\r\n\r\nFrom: a@example.org\r\n");
+
+			builder.Append ("Content-Type: text/plain\r\n\r\ninnermost\r\n");
+
+			return Encoding.ASCII.GetBytes (builder.ToString ());
+		}
+
+		static readonly byte[] MixedNested64Data = GenerateMixedNestedMessage (64);
+		static readonly byte[] NestedRfc822x1000Data = GenerateNestedRfc822Message (1000);
+
+		[Benchmark]
+		public void MimeReader_MixedNested64 ()
+		{
+			MimeReaderSingleMessage (MixedNested64Data);
+		}
+
+		[Benchmark]
+		public async Task MimeReader_MixedNested64Async ()
+		{
+			using var stream = new MemoryStream (MixedNested64Data, false);
+			var reader = new MimeReader (stream, MimeFormat.Entity);
+			await reader.ReadMessageAsync ();
+		}
+
+		[Benchmark]
+		public void MimeReader_NestedRfc822x1000 ()
+		{
+			MimeReaderSingleMessage (NestedRfc822x1000Data);
+		}
+
+		[Benchmark]
+		public async Task MimeReader_NestedRfc822x1000Async ()
+		{
+			using var stream = new MemoryStream (NestedRfc822x1000Data, false);
+			var reader = new MimeReader (stream, MimeFormat.Entity);
+			await reader.ReadMessageAsync ();
+		}
+
+		[Benchmark]
+		public void MimeParser_MixedNested64 ()
+		{
+			MimeParserSingleMessage (MixedNested64Data);
+		}
+
+		#endregion
 	}
 }

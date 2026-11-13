@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,8 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 using MimeKit.IO;
 using MimeKit.Text;
@@ -35,10 +37,10 @@ using MimeKit.IO.Filters;
 
 namespace MimeKit {
 	/// <summary>
-	/// A Textual MIME part.
+	/// A textual MIME part.
 	/// </summary>
 	/// <remarks>
-	/// <para>Unless overridden, all textual parts parsed by the <see cref="MimeParser"/>,
+	/// <para>Unless overridden, all textual parts parsed by the <see cref="IMimeParser"/>,
 	/// such as text/plain or text/html, will be represented by a <see cref="TextPart"/>.</para>
 	/// <para>For more information about text media types, see section 4.1 of
 	/// <a href="https://tools.ietf.org/html/rfc2046#section-4.1">rfc2046</a>.</para>
@@ -46,17 +48,17 @@ namespace MimeKit {
 	/// <example>
 	/// <code language="c#" source="Examples\MimeVisitorExamples.cs" region="HtmlPreviewVisitor" />
 	/// </example>
-	public class TextPart : MimePart
+	public class TextPart : MimePart, ITextPart
 	{
 		/// <summary>
 		/// Initialize a new instance of the <see cref="TextPart"/> class.
 		/// </summary>
 		/// <remarks>
-		/// This constructor is used by <see cref="MimeParser"/>.
+		/// This constructor is used by <see cref="IMimeParser"/>.
 		/// </remarks>
 		/// <param name="args">Information used by the constructor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="args"/> is <c>null</c>.
+		/// <paramref name="args"/> is <see langword="null"/>.
 		/// </exception>
 		public TextPart (MimeEntityConstructorArgs args) : base (args)
 		{
@@ -68,7 +70,7 @@ namespace MimeKit {
 		/// </summary>
 		/// <remarks>
 		/// <para>Creates a new <see cref="TextPart"/> with the specified subtype.</para>
-		/// <note type="note"><para>Typically the <paramref name="subtype"/> should either be
+		/// <note type="note"><para>Typically, the <paramref name="subtype"/> should either be
 		/// <c>"plain"</c> for plain text content or <c>"html"</c> for HTML content.</para>
 		/// <para>For more options, check the MIME-type registry at
 		/// <a href="http://www.iana.org/assignments/media-types/media-types.xhtml#text">
@@ -78,9 +80,9 @@ namespace MimeKit {
 		/// <param name="subtype">The media subtype.</param>
 		/// <param name="args">An array of initialization parameters: headers, charset encoding and text.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="subtype"/> is <c>null</c>.</para>
+		/// <para><paramref name="subtype"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="args"/> is <c>null</c>.</para>
+		/// <para><paramref name="args"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
 		/// <para><paramref name="args"/> contains more than one <see cref="System.Text.Encoding"/>.</para>
@@ -91,15 +93,15 @@ namespace MimeKit {
 		/// </exception>
 		public TextPart (string subtype, params object[] args) : this (subtype)
 		{
-			if (args == null)
+			if (args is null)
 				throw new ArgumentNullException (nameof (args));
 
 			// Default to UTF8 if not given.
-			Encoding encoding = null;
-			string text = null;
+			Encoding? encoding = null;
+			string? text = null;
 
 			foreach (object obj in args) {
-				if (obj == null || TryInit (obj))
+				if (obj is null || TryInit (obj))
 					continue;
 
 				if (obj is Encoding enc) {
@@ -122,7 +124,7 @@ namespace MimeKit {
 			}
 
 			if (text != null) {
-				encoding = encoding ?? Encoding.UTF8;
+				encoding ??= Encoding.UTF8;
 				SetText (encoding, text);
 			}
 		}
@@ -137,7 +139,7 @@ namespace MimeKit {
 		/// </summary>
 		/// <remarks>
 		/// <para>Creates a new <see cref="TextPart"/> with the specified subtype.</para>
-		/// <note type="note"><para>Typically the <paramref name="subtype"/> should either be
+		/// <note type="note"><para>Typically, the <paramref name="subtype"/> should either be
 		/// <c>"plain"</c> for plain text content or <c>"html"</c> for HTML content.</para>
 		/// <para>For more options, check the MIME-type registry at
 		/// <a href="http://www.iana.org/assignments/media-types/media-types.xhtml#text">
@@ -146,7 +148,7 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="subtype">The media subtype.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="subtype"/> is <c>null</c>.
+		/// <paramref name="subtype"/> is <see langword="null"/>.
 		/// </exception>
 		public TextPart (string subtype) : base ("text", subtype)
 		{
@@ -198,6 +200,11 @@ namespace MimeKit {
 		{
 		}
 
+		void CheckDisposed ()
+		{
+			CheckDisposed (nameof (TextPart));
+		}
+
 		/// <summary>
 		/// Get the text format of the content.
 		/// </summary>
@@ -205,14 +212,17 @@ namespace MimeKit {
 		/// Gets the text format of the content.
 		/// </remarks>
 		/// <value>The text format of the content.</value>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public TextFormat Format {
 			get {
-				if (ContentType.MediaType.Equals ("text", StringComparison.OrdinalIgnoreCase)) {
-					if (ContentType.MediaSubtype.Equals ("plain")) {
-						string format;
+				CheckDisposed ();
 
-						if (ContentType.Parameters.TryGetValue ("format", out format)) {
-							format = format.Trim ();
+				if (ContentType.MediaType.Equals ("text", StringComparison.OrdinalIgnoreCase)) {
+					if (ContentType.MediaSubtype.Equals ("plain", StringComparison.OrdinalIgnoreCase)) {
+						if (ContentType.Parameters.TryGetValue ("format", out string? format)) {
+							format = ParseUtils.TrimWhiteSpace (format);
 
 							if (format.Equals ("flowed", StringComparison.OrdinalIgnoreCase))
 								return TextFormat.Flowed;
@@ -235,75 +245,104 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Gets whether or not this text part contains enriched text.
+		/// Get whether this text part contains enriched text.
 		/// </summary>
 		/// <remarks>
-		/// Checks whether or not the text part's Content-Type is <c>text/enriched</c> or its
+		/// Checks whether the text part's Content-Type is <c>text/enriched</c> or its
 		/// predecessor, <c>text/richtext</c> (not to be confused with <c>text/rtf</c>).
 		/// </remarks>
-		/// <value><c>true</c> if the text is enriched; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the text is enriched; otherwise, <see langword="false" />.</value>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public bool IsEnriched {
-			get { return ContentType.IsMimeType ("text", "enriched") || ContentType.IsMimeType ("text", "richtext"); }
+			get {
+				CheckDisposed ();
+
+				return ContentType.IsMimeType ("text", "enriched") || ContentType.IsMimeType ("text", "richtext");
+			}
 		}
 
 		/// <summary>
-		/// Gets whether or not this text part contains flowed text.
+		/// Get whether this text part contains flowed text.
 		/// </summary>
 		/// <remarks>
-		/// Checks whether or not the text part's Content-Type is <c>text/plain</c> and
+		/// Checks whether the text part's Content-Type is <c>text/plain</c> and
 		/// has a format parameter with a value of <c>flowed</c>.
 		/// </remarks>
 		/// <example>
 		/// <code language="c#" source="Examples\MimeVisitorExamples.cs" region="HtmlPreviewVisitor" />
 		/// </example>
-		/// <value><c>true</c> if the text is flowed; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the text is flowed; otherwise, <see langword="false" />.</value>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public bool IsFlowed {
 			get {
-				string format;
-
-				if (!IsPlain || !ContentType.Parameters.TryGetValue ("format", out format))
+				if (!IsPlain || !ContentType.Parameters.TryGetValue ("format", out string? format))
 					return false;
 
-				format = format.Trim ();
+				format = ParseUtils.TrimWhiteSpace (format);
 
 				return format.Equals ("flowed", StringComparison.OrdinalIgnoreCase);
 			}
 		}
 
 		/// <summary>
-		/// Gets whether or not this text part contains HTML.
+		/// Get whether this text part contains HTML.
 		/// </summary>
 		/// <remarks>
-		/// Checks whether or not the text part's Content-Type is <c>text/html</c>.
+		/// Checks whether the text part's Content-Type is <c>text/html</c>.
 		/// </remarks>
 		/// <example>
 		/// <code language="c#" source="Examples\MimeVisitorExamples.cs" region="HtmlPreviewVisitor" />
 		/// </example>
-		/// <value><c>true</c> if the text is html; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the text is html; otherwise, <see langword="false" />.</value>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public bool IsHtml {
-			get { return ContentType.IsMimeType ("text", "html"); }
+			get {
+				CheckDisposed ();
+
+				return ContentType.IsMimeType ("text", "html");
+			}
 		}
 
 		/// <summary>
-		/// Gets whether or not this text part contains plain text.
+		/// Get whether this text part contains plain text.
 		/// </summary>
 		/// <remarks>
-		/// Checks whether or not the text part's Content-Type is <c>text/plain</c>.
+		/// Checks whether the text part's Content-Type is <c>text/plain</c>.
 		/// </remarks>
-		/// <value><c>true</c> if the text is html; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the text is html; otherwise, <see langword="false" />.</value>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public bool IsPlain {
-			get { return ContentType.IsMimeType ("text", "plain"); }
+			get {
+				CheckDisposed ();
+				
+				return ContentType.IsMimeType ("text", "plain");
+			}
 		}
 
 		/// <summary>
-		/// Gets whether or not this text part contains RTF.
+		/// Get whether this text part contains RTF.
 		/// </summary>
 		/// <remarks>
-		/// Checks whether or not the text part's Content-Type is <c>text/rtf</c>.
+		/// Checks whether the text part's Content-Type is <c>text/rtf</c>.
 		/// </remarks>
-		/// <value><c>true</c> if the text is RTF; otherwise, <c>false</c>.</value>
+		/// <value><see langword="true" /> if the text is RTF; otherwise, <see langword="false" />.</value>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public bool IsRichText {
-			get { return ContentType.IsMimeType ("text", "rtf") || ContentType.IsMimeType ("application", "rtf"); }
+			get {
+				CheckDisposed ();
+
+				return ContentType.IsMimeType ("text", "rtf") || ContentType.IsMimeType ("application", "rtf");
+			}
 		}
 
 		/// <summary>
@@ -320,9 +359,12 @@ namespace MimeKit {
 		/// or <see cref="GetText(String)"/>.</para>
 		/// </remarks>
 		/// <value>The decocded text.</value>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public string Text {
 			get {
-				return GetText (out Encoding encoding);
+				return GetText (out _);
 			}
 			set {
 				SetText (Encoding.UTF8, value);
@@ -342,24 +384,32 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="visitor">The visitor.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="visitor"/> is <c>null</c>.
+		/// <paramref name="visitor"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
 		/// </exception>
 		public override void Accept (MimeVisitor visitor)
 		{
-			if (visitor == null)
+			if (visitor is null)
 				throw new ArgumentNullException (nameof (visitor));
+
+			CheckDisposed ();
 
 			visitor.VisitTextPart (this);
 		}
 
 		/// <summary>
-		/// Determines whether or not the text is in the specified format.
+		/// Determine whether the text is in the specified format.
 		/// </summary>
 		/// <remarks>
-		/// Determines whether or not the text is in the specified format.
+		/// Determines whether the text is in the specified format.
 		/// </remarks>
-		/// <returns><c>true</c> if the text is in the specified format; otherwise, <c>false</c>.</returns>
+		/// <returns><see langword="true" /> if the text is in the specified format; otherwise, <see langword="false" />.</returns>
 		/// <param name="format">The text format.</param>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		internal bool IsFormat (TextFormat format)
 		{
 			switch (format) {
@@ -372,13 +422,180 @@ namespace MimeKit {
 			}
 		}
 
+		enum HtmlTagState
+		{
+			None,
+			Html,
+			Head,
+			Stop
+		}
+
+		static bool TryDetectHtmlEncoding (TextReader reader, [NotNullWhen (true)] out Encoding? encoding, out TextEncodingConfidence confidence)
+		{
+			var tokenizer = new HtmlTokenizer (reader);
+			var state = HtmlTagState.None;
+
+			// https://html.spec.whatwg.org/multipage/parsing.html#prescan-a-byte-stream-to-determine-its-encoding
+			while (tokenizer.ReadNextToken (out var token)) {
+				if (token.Kind != HtmlTokenKind.Tag)
+					continue;
+
+				var tag = (HtmlTagToken) token;
+
+				switch (tag.Id) {
+				case HtmlTagId.Html:
+					if (state == HtmlTagState.None) {
+						if (tag.IsEndTag || tag.IsEmptyElement)
+							state = HtmlTagState.Stop;
+						else
+							state = HtmlTagState.Html;
+					}
+					break;
+				case HtmlTagId.Head:
+					if (state == HtmlTagState.Html) {
+						if (tag.IsEndTag || tag.IsEmptyElement)
+							state = HtmlTagState.Stop;
+						else
+							state = HtmlTagState.Head;
+					}
+					break;
+				case HtmlTagId.Meta:
+					if (state == HtmlTagState.Head && !tag.IsEndTag) {
+						var attributes = new HashSet<HtmlAttributeId> ();
+						bool? need_pragma = null;
+						var got_pragma = false;
+						string? charset = null;
+
+						foreach (var attribute in tag.Attributes) {
+							if (attribute.Value is null || !attributes.Add (attribute.Id))
+								continue;
+
+							switch (attribute.Id) {
+							case HtmlAttributeId.HttpEquiv:
+								if (attribute.Value.Equals ("Content-Type", StringComparison.OrdinalIgnoreCase))
+									got_pragma = true;
+								break;
+							case HtmlAttributeId.Content:
+								if (charset is null && ContentType.TryParse (attribute.Value, out var contentType) && !string.IsNullOrEmpty (contentType.Charset)) {
+									charset = contentType.Charset.Trim ();
+									need_pragma = true;
+								}
+								break;
+							case HtmlAttributeId.Charset:
+								if (!string.IsNullOrEmpty (attribute.Value)) {
+									charset = attribute.Value.Trim ();
+									need_pragma = false;
+								}
+								break;
+							}
+						}
+
+						if (need_pragma.HasValue && charset != null && (!need_pragma.Value || got_pragma)) {
+							if (charset.Equals ("x-user-defined", StringComparison.OrdinalIgnoreCase))
+								charset = "windows-1252";
+
+							try {
+								encoding = CharsetUtils.GetEncoding (charset);
+								if (encoding.CodePage == Encoding.Unicode.CodePage || encoding.CodePage == Encoding.BigEndianUnicode.CodePage)
+									encoding = CharsetUtils.UTF8;
+
+								confidence = TextEncodingConfidence.Tentative;
+								return true;
+							} catch {
+								encoding = null;
+							}
+						}
+					}
+					break;
+				case HtmlTagId.Body:
+					state = HtmlTagState.Stop;
+					break;
+				}
+
+				if (state == HtmlTagState.Stop)
+					break;
+			}
+
+			confidence = TextEncodingConfidence.Undefined;
+			encoding = null;
+
+			return false;
+		}
+
+		static bool TryDetectHtmlEncoding (IMimeContent content, [NotNullWhen (true)] out Encoding? encoding, out TextEncodingConfidence confidence)
+		{
+			using (var contentStream = content.Open ()) {
+				// limit processing to first 1024 bytes as per https://html.spec.whatwg.org/multipage/parsing.html#the-input-byte-stream
+				using (var bounded = new BoundedStream (contentStream, 0, 1024, true)) {
+					using (var reader = new StreamReader (bounded, CharsetUtils.Latin1, false, 1024, true))
+						return TryDetectHtmlEncoding (reader, out encoding, out confidence);
+				}
+			}
+		}
+
+		/// <summary>
+		/// Try to detect the encoding of the text content.
+		/// </summary>
+		/// <remarks>
+		/// <para>Attempts to detect the encoding of the text content.</para>
+		/// <para>If no content is defined, then <paramref name="encoding"/> is set to ASCII and <paramref name="confidence"/>
+		/// is set to <see cref="TextEncodingConfidence.Irrelevant"/>.</para>
+		/// <para>If a charset is specified on the <c>Content-Type</c> header and it is a supported encoding, then
+		/// <paramref name="encoding"/> is set to the encoding for the specified charset and <paramref name="confidence"/>
+		/// is set to <see cref="TextEncodingConfidence.Certain"/>.</para>
+		/// <para>If a Byte-Order-Mark (BOM) is found, then <paramref name="encoding"/> is set to the corresponding unicode
+		/// encoding and <paramref name="confidence"/> is set to <see cref="TextEncodingConfidence.Certain"/>.</para>
+		/// <para>If the content is in HTML format, then the first 1024 bytes are processed for <c>&lt;meta&gt;</c> tags
+		/// containing charset information. If charset information is found and the charset is a supported encoding, then
+		/// <paramref name="encoding"/> is set to the encoding for the specified charset and <paramref name="confidence"/> is
+		/// set to <see cref="TextEncodingConfidence.Tentative"/>.</para>
+		/// </remarks>
+		/// <returns><see langword="true" /> if an encoding was detected; otherwise, <see langword="false" />.</returns>
+		/// <param name="encoding">The detected encoding; otherwise, <see langword="null"/>.</param>
+		/// <param name="confidence">The confidence in the detected encoding being correct.</param>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
+		public bool TryDetectEncoding ([NotNullWhen (true)] out Encoding? encoding, out TextEncodingConfidence confidence)
+		{
+			CheckDisposed ();
+
+			if (Content is null) {
+				confidence = TextEncodingConfidence.Irrelevant;
+				encoding = Encoding.ASCII;
+				return true;
+			}
+
+			// If the transport layer specifies a character encoding, and it is supported, return that encoding with the confidence certain.
+			encoding = ContentType.CharsetEncoding;
+			if (encoding != null) {
+				confidence = TextEncodingConfidence.Certain;
+				return true;
+			}
+
+			using (var content = Content.Open ()) {
+				if (CharsetUtils.TryGetBomEncoding (content, out encoding)) {
+					confidence = TextEncodingConfidence.Certain;
+					return true;
+				}
+			}
+
+			if (IsHtml)
+				return TryDetectHtmlEncoding (Content, out encoding, out confidence);
+
+			confidence = TextEncodingConfidence.Undefined;
+			encoding = null;
+
+			return false;
+		}
+
 		/// <summary>
 		/// Get the decoded text and the encoding used to convert it into unicode.
 		/// </summary>
 		/// <remarks>
 		/// <para>If the charset parameter on the <see cref="MimeEntity.ContentType"/>
 		/// is set, it will be used in order to convert the raw content into unicode.
-		/// If that fails or if the charset parameter is not set, the first 2 bytes of
+		/// If that fails or if the charset parameter is not set, the first 3 bytes of
 		/// the content will be checked for a unicode BOM. If a BOM exists, then that
 		/// will be used for conversion. If no BOM is found, then UTF-8 is attempted.
 		/// If conversion fails, then iso-8859-1 will be used as the final fallback.</para>
@@ -387,34 +604,28 @@ namespace MimeKit {
 		/// </remarks>
 		/// <param name="encoding">The encoding used to convert the text into unicode.</param>
 		/// <returns>The decoded text.</returns>
-		public string GetText (out Encoding encoding)
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
+		public string GetText ([NotNull] out Encoding? encoding)
 		{
-			if (Content == null) {
-				encoding = Encoding.ASCII;
-				return string.Empty;
-			}
+			CheckDisposed ();
 
-			encoding = ContentType.CharsetEncoding;
+			if (!TryDetectEncoding (out encoding, out _))
+				encoding = CharsetUtils.UTF8;
 
-			if (encoding == null) {
-				try {
-					using (var content = Content.Open ()) {
-						if (!CharsetUtils.TryGetBomEncoding (content, out encoding))
-							encoding = CharsetUtils.UTF8;
-					}
-
-					return GetText (encoding);
-				} catch (DecoderFallbackException) {
-					// fall back to iso-8859-1
-					encoding = CharsetUtils.Latin1;
-				}
+			try {
+				return GetText (encoding);
+			} catch (DecoderFallbackException) {
+				// fall back to iso-8859-1
+				encoding = CharsetUtils.Latin1;
 			}
 
 			return GetText (encoding);
 		}
 
 		/// <summary>
-		/// Gets the decoded text content using the provided charset encoding to
+		/// Get the decoded text content using the provided charset encoding to
 		/// override the charset specified in the Content-Type parameters.
 		/// </summary>
 		/// <remarks>
@@ -425,14 +636,19 @@ namespace MimeKit {
 		/// <returns>The decoded text.</returns>
 		/// <param name="encoding">The charset encoding to use.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="encoding"/> is <c>null</c>.
+		/// <paramref name="encoding"/> is <see langword="null"/>.
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
 		/// </exception>
 		public string GetText (Encoding encoding)
 		{
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
-			if (Content == null)
+			CheckDisposed ();
+
+			if (Content is null)
 				return string.Empty;
 
 			using (var memory = new MemoryStream ()) {
@@ -443,18 +659,14 @@ namespace MimeKit {
 					filtered.Flush ();
 				}
 
-#if !NETSTANDARD1_3 && !NETSTANDARD1_6
 				var buffer = memory.GetBuffer ();
-#else
-				var buffer = memory.ToArray ();
-#endif
 
 				return CharsetUtils.UTF8.GetString (buffer, 0, (int) memory.Length);
 			}
 		}
 
 		/// <summary>
-		/// Gets the decoded text content using the provided charset to override
+		/// Get the decoded text content using the provided charset to override
 		/// the charset specified in the Content-Type parameters.
 		/// </summary>
 		/// <remarks>
@@ -465,21 +677,24 @@ namespace MimeKit {
 		/// <returns>The decoded text.</returns>
 		/// <param name="charset">The charset encoding to use.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <paramref name="charset"/> is <c>null</c>.
+		/// <paramref name="charset"/> is <see langword="null"/>.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
 		/// The <paramref name="charset"/> is not supported.
 		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public string GetText (string charset)
 		{
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
 			return GetText (CharsetUtils.GetEncoding (charset));
 		}
 
 		/// <summary>
-		/// Sets the text content and the charset parameter in the Content-Type header.
+		/// Set the text content and the charset parameter in the Content-Type header.
 		/// </summary>
 		/// <remarks>
 		/// This method is similar to setting the <see cref="TextPart.Text"/> property,
@@ -489,17 +704,22 @@ namespace MimeKit {
 		/// <param name="encoding">The charset encoding.</param>
 		/// <param name="text">The text content.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="encoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="encoding"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="text"/> is <c>null</c>.</para>
+		/// <para><paramref name="text"/> is <see langword="null"/>.</para>
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
 		/// </exception>
 		public void SetText (Encoding encoding, string text)
 		{
-			if (encoding == null)
+			if (encoding is null)
 				throw new ArgumentNullException (nameof (encoding));
 
-			if (text == null)
+			if (text is null)
 				throw new ArgumentNullException (nameof (text));
+
+			CheckDisposed ();
 
 			var content = new MemoryStream (encoding.GetBytes (text));
 			ContentType.CharsetEncoding = encoding;
@@ -507,7 +727,7 @@ namespace MimeKit {
 		}
 
 		/// <summary>
-		/// Sets the text content and the charset parameter in the Content-Type header.
+		/// Set the text content and the charset parameter in the Content-Type header.
 		/// </summary>
 		/// <remarks>
 		/// This method is similar to setting the <see cref="TextPart.Text"/> property,
@@ -517,19 +737,22 @@ namespace MimeKit {
 		/// <param name="charset">The charset encoding.</param>
 		/// <param name="text">The text content.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="charset"/> is <c>null</c>.</para>
+		/// <para><paramref name="charset"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="text"/> is <c>null</c>.</para>
+		/// <para><paramref name="text"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
 		/// The <paramref name="charset"/> is not supported.
 		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="TextPart"/> has been disposed.
+		/// </exception>
 		public void SetText (string charset, string text)
 		{
-			if (charset == null)
+			if (charset is null)
 				throw new ArgumentNullException (nameof (charset));
 
-			if (text == null)
+			if (text is null)
 				throw new ArgumentNullException (nameof (text));
 
 			SetText (CharsetUtils.GetEncoding (charset), text);

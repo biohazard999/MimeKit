@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,14 +24,9 @@
 // THE SOFTWARE.
 //
 
-using System;
-using System.IO;
 using System.Text;
 
-using MimeKit;
 using MimeKit.Text;
-
-using NUnit.Framework;
 
 namespace UnitTests.Text {
 	[TestFixture]
@@ -58,45 +53,45 @@ namespace UnitTests.Text {
 		{
 			var previewer = new HtmlTextPreviewer ();
 
-			Assert.AreEqual (string.Empty, previewer.GetPreviewText (string.Empty), "string");
+			Assert.That (previewer.GetPreviewText (string.Empty), Is.EqualTo (string.Empty), "string");
 
 			using (var reader = new StringReader (string.Empty))
-				Assert.AreEqual (string.Empty, previewer.GetPreviewText (reader), "TextReader");
+				Assert.That (previewer.GetPreviewText (reader), Is.EqualTo (string.Empty), "TextReader");
 
-			using (var stream = new MemoryStream (new byte[0], false)) {
-				Assert.AreEqual (string.Empty, previewer.GetPreviewText (stream, "x-unknown"), "Stream, string");
-				Assert.AreEqual (string.Empty, previewer.GetPreviewText (stream, Encoding.UTF8), "Stream, Encoding");
+			using (var stream = new MemoryStream (Array.Empty<byte> (), false)) {
+				Assert.That (previewer.GetPreviewText (stream, "x-unknown"), Is.EqualTo (string.Empty), "Stream, string");
+				Assert.That (previewer.GetPreviewText (stream, Encoding.UTF8), Is.EqualTo (string.Empty), "Stream, Encoding");
 			}
 		}
 
-		void AssertPreviewText (string path, string expected, int maxPreviewLen)
+		static void AssertPreviewText (string path, string expected, int maxPreviewLen)
 		{
 			var previewer = new HtmlTextPreviewer { MaximumPreviewLength = maxPreviewLen };
 			var buffer = new byte[16 * 1024];
 			string actual;
 			int nread;
 
-			Assert.AreEqual (TextFormat.Html, previewer.InputFormat);
+			Assert.That (previewer.InputFormat, Is.EqualTo (TextFormat.Html));
 
 			using (var stream = File.OpenRead (path))
 				nread = stream.Read (buffer, 0, buffer.Length);
 
 			var text = Encoding.UTF8.GetString (buffer, 0, nread);
 			actual = previewer.GetPreviewText (text);
-			Assert.AreEqual (expected, actual, "GetPreviewText(string)");
+			Assert.That (actual, Is.EqualTo (expected), "GetPreviewText(string)");
 
 			using (var stream = new MemoryStream (buffer, 0, nread, false)) {
 				actual = previewer.GetPreviewText (stream, "utf-8");
-				Assert.AreEqual (expected, actual, "GetPreviewText(Stream, string)");
+				Assert.That (actual, Is.EqualTo (expected), "GetPreviewText(Stream, string)");
 
 				stream.Position = 0;
 				actual = previewer.GetPreviewText (stream, Encoding.UTF8);
-				Assert.AreEqual (expected, actual, "GetPreviewText(Stream, Encoding)");
+				Assert.That (actual, Is.EqualTo (expected), "GetPreviewText(Stream, Encoding)");
 
 				stream.Position = 0;
 				using (var reader = new StreamReader (stream, Encoding.UTF8, false, 4096, true)) {
 					actual = previewer.GetPreviewText (stream, Encoding.UTF8);
-					Assert.AreEqual (expected, actual, "GetPreviewText(TextReader)");
+					Assert.That (actual, Is.EqualTo (expected), "GetPreviewText(TextReader)");
 				}
 			}
 		}
@@ -135,6 +130,62 @@ namespace UnitTests.Text {
 			var path = Path.Combine (TestHelper.ProjectDir, "TestData", "text", "mimekit.net.html");
 
 			AssertPreviewText (path, expected, 230);
+		}
+
+		[TestCase ("<body><ol><li>a<ul><li>b</ul><li>c</ol>d", "1. a b 2. cd")]
+		[TestCase ("<body><ol><li>a<ul><li>b</ol><li>c</ul>d", "1. a b cd")]
+		[TestCase ("<body><ul><li>a<ol><li>b</ul><li>c</ol>d", "a 1. b 2. cd")]
+		[TestCase ("<body><ol><li>a<ol><li>b</ol><li>c</ol>d", "1. a 1. b 2. cd")]
+		[TestCase ("<body><b>a<script>b<i>c</b>d</script>e</i>f", "aef")]
+		[TestCase ("<body><table><td>a</table>b<tr>c</td>d</tr>e", "abe")]
+		[TestCase ("<body>a</body>b<body>c", "ac")]
+		[TestCase ("<body><noscript><b>Fallback &amp; text</b></noscript></body>", "Fallback & text")]
+		public void TestNestedAndMisnestedElements (string input, string expected)
+		{
+			var previewer = new HtmlTextPreviewer ();
+
+			Assert.That (previewer.GetPreviewText (input), Is.EqualTo (expected));
+		}
+
+		static string Repeat (string value, int count)
+		{
+			var builder = new StringBuilder (value.Length * count);
+
+			for (int i = 0; i < count; i++)
+				builder.Append (value);
+
+			return builder.ToString ();
+		}
+
+		// Prior to using an O(1) open element stack, each of these took time quadratic in the number of unclosed tags.
+		[Test]
+		public void TestManyUnclosedTagsFollowedByUnmatchedEndTags ()
+		{
+			const int count = 100000;
+			var input = "<body>" + Repeat ("<b>", count) + Repeat ("</i>", count) + "text";
+			var previewer = new HtmlTextPreviewer ();
+
+			Assert.That (previewer.GetPreviewText (input), Is.EqualTo ("text"));
+		}
+
+		[Test]
+		public void TestManyListItemsWithoutList ()
+		{
+			const int count = 100000;
+			var input = "<body>" + Repeat ("<li>", count) + "text";
+			var previewer = new HtmlTextPreviewer ();
+
+			Assert.That (previewer.GetPreviewText (input), Is.EqualTo ("text"));
+		}
+
+		[Test]
+		public void TestManyUnclosedTagsFollowedByReopenedList ()
+		{
+			const int count = 100000;
+			var input = "<body><ul>" + Repeat ("<b>", count) + Repeat ("</ul><ul>", count) + "<li>text";
+			var previewer = new HtmlTextPreviewer ();
+
+			Assert.That (previewer.GetPreviewText (input), Is.EqualTo ("text"));
 		}
 
 		[Test]

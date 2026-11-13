@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,7 @@
 // THE SOFTWARE.
 //
 
-using System;
 using System.Text;
-
-using NUnit.Framework;
 
 using MimeKit;
 using MimeKit.Utils;
@@ -72,6 +69,17 @@ namespace UnitTests.Utils {
 			Assert.Throws<ArgumentNullException> (() => Rfc2047.DecodeText (null));
 
 			// EncodePhrase
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (null, Encoding.UTF8, "phrase", 0, 6));
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (FormatOptions.Default, null, "phrase", 0, 6));
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (FormatOptions.Default, Encoding.UTF8, null, 0, 0));
+			Assert.Throws<ArgumentOutOfRangeException> (() => Rfc2047.EncodePhrase (FormatOptions.Default, Encoding.UTF8, "phrase", -1, 6));
+			Assert.Throws<ArgumentOutOfRangeException> (() => Rfc2047.EncodePhrase (FormatOptions.Default, Encoding.UTF8, "phrase", 0, 7));
+
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (null, "phrase", 0, 6));
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (Encoding.UTF8, null, 0, 0));
+			Assert.Throws<ArgumentOutOfRangeException> (() => Rfc2047.EncodePhrase (Encoding.UTF8, "phrase", -1, 6));
+			Assert.Throws<ArgumentOutOfRangeException> (() => Rfc2047.EncodePhrase (Encoding.UTF8, "phrase", 0, 7));
+
 			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (null, Encoding.UTF8, "phrase"));
 			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (FormatOptions.Default, null, "phrase"));
 			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (FormatOptions.Default, Encoding.UTF8, null));
@@ -80,6 +88,17 @@ namespace UnitTests.Utils {
 			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodePhrase (Encoding.UTF8, null));
 
 			// EncodeText
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodeText (null, Encoding.UTF8, "text", 0, 4));
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodeText (FormatOptions.Default, null, "text", 0, 4));
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodeText (FormatOptions.Default, Encoding.UTF8, null, 0, 0));
+			Assert.Throws<ArgumentOutOfRangeException> (() => Rfc2047.EncodeText (FormatOptions.Default, Encoding.UTF8, "text", -1, 4));
+			Assert.Throws<ArgumentOutOfRangeException> (() => Rfc2047.EncodeText (FormatOptions.Default, Encoding.UTF8, "text", 0, 5));
+
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodeText (null, "text", 0, 4));
+			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodeText (Encoding.UTF8, null, 0, 0));
+			Assert.Throws<ArgumentOutOfRangeException> (() => Rfc2047.EncodeText (Encoding.UTF8, "text", -1, 4));
+			Assert.Throws<ArgumentOutOfRangeException> (() => Rfc2047.EncodeText (Encoding.UTF8, "text", 0, 5));
+
 			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodeText (null, Encoding.UTF8, "text"));
 			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodeText (FormatOptions.Default, null, "text"));
 			Assert.Throws<ArgumentNullException> (() => Rfc2047.EncodeText (FormatOptions.Default, Encoding.UTF8, null));
@@ -91,51 +110,108 @@ namespace UnitTests.Utils {
 		[Test]
 		public void TestDecodeEmptyString ()
 		{
-			var empty = new byte[0];
+			var empty = Array.Empty<byte> ();
 
-			Assert.AreEqual (string.Empty, Rfc2047.DecodePhrase (empty));
-			Assert.AreEqual (string.Empty, Rfc2047.DecodePhrase (empty, 0, 0));
-			Assert.AreEqual (string.Empty, Rfc2047.DecodePhrase (ParserOptions.Default, empty));
-			Assert.AreEqual (string.Empty, Rfc2047.DecodePhrase (ParserOptions.Default, empty, 0, 0));
-			Assert.AreEqual (string.Empty, Rfc2047.DecodePhrase (ParserOptions.Default, empty, 0, 0, out _));
+			Assert.That (Rfc2047.DecodePhrase (empty), Is.EqualTo (string.Empty));
+			Assert.That (Rfc2047.DecodePhrase (empty, 0, 0), Is.EqualTo (string.Empty));
+			Assert.That (Rfc2047.DecodePhrase (ParserOptions.Default, empty), Is.EqualTo (string.Empty));
+			Assert.That (Rfc2047.DecodePhrase (ParserOptions.Default, empty, 0, 0), Is.EqualTo (string.Empty));
+			Assert.That (Rfc2047.DecodePhrase (ParserOptions.Default, empty, 0, 0, out _), Is.EqualTo (string.Empty));
 
-			Assert.AreEqual (string.Empty, Rfc2047.DecodeText (empty));
-			Assert.AreEqual (string.Empty, Rfc2047.DecodeText (empty, 0, 0));
-			Assert.AreEqual (string.Empty, Rfc2047.DecodeText (ParserOptions.Default, empty));
-			Assert.AreEqual (string.Empty, Rfc2047.DecodeText (ParserOptions.Default, empty, 0, 0));
-			Assert.AreEqual (string.Empty, Rfc2047.DecodeText (ParserOptions.Default, empty, 0, 0, out _));
+			Assert.That (Rfc2047.DecodeText (empty), Is.EqualTo (string.Empty));
+			Assert.That (Rfc2047.DecodeText (empty, 0, 0), Is.EqualTo (string.Empty));
+			Assert.That (Rfc2047.DecodeText (ParserOptions.Default, empty), Is.EqualTo (string.Empty));
+			Assert.That (Rfc2047.DecodeText (ParserOptions.Default, empty, 0, 0), Is.EqualTo (string.Empty));
+			Assert.That (Rfc2047.DecodeText (ParserOptions.Default, empty, 0, 0, out _), Is.EqualTo (string.Empty));
+		}
+
+		[TestCase ("=?utf-8?b?TQ?=", "M")]
+		[TestCase ("=?utf-8?b?TWE?=", "Ma")]
+		[TestCase ("=?utf-8?b?TQ=?=", "M")]
+		[TestCase ("=?utf-8?q?abc=?=", "abc=")]
+		[TestCase ("=?utf-8?q?abc=4?=", "abc=4")]
+		[TestCase ("=?utf-8?q?=4?= =?utf-8?q?1?=", "A")]
+		[TestCase ("=?utf-8?b?TW?= =?utf-8?b?Fu?=", "Man")]
+		[TestCase ("=?utf-8?q?abc=?= =?utf-8?b?TQ?=", "abc=M")]
+		[TestCase ("=?utf-8?b?TQ?= =?iso-8859-1?b?TWE?=", "MMa")]
+		[TestCase ("=?utf-8?q?abc=?= text", "abc= text")]
+		[TestCase ("prefix =?utf-8?b?TQ?= suffix", "prefix M suffix")]
+		public void TestDecodeEncodedWordFlush (string text, string expected)
+		{
+			var input = Encoding.ASCII.GetBytes (text);
+
+			Assert.That (Rfc2047.DecodeText (input), Is.EqualTo (expected));
+			Assert.That (Rfc2047.DecodePhrase (input), Is.EqualTo (expected));
 		}
 
 		[Test]
-		public void TestEncodedWordEmptyCharset ()
+		public void TestDecodeEncodedWordEmptyCharset ()
 		{
 			const string text = "blurdy bloop =??q?no_charset?= beep boop";
 			var buffer = Encoding.UTF8.GetBytes (text);
 			string result;
 
 			result = Rfc2047.DecodePhrase (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 
 			result = Rfc2047.DecodeText (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[TestCase ("=?utf-8?q?Ren=C3=A9e?=", "Ren\u00e9e")]
+		[TestCase ("=?utf-8?q?=E6=9D=8E=F0=9F=98=80?=", "\u674e\U0001f600")]
+		[TestCase ("=?utf-8?q?=C3?= =?utf-8?q?=A9?=", "\u00e9")]
+		[TestCase ("=?utf-8?b?ww==?= =?utf-8?b?qQ==?=", "\u00e9")]
+		[TestCase ("=?utf-8?q?=C3=A9=FF?=", "\u00e9\ufffd")]
+		[TestCase ("=?utf-8?q?=E2=82?=", "\ufffd")]
+		[TestCase ("=?unknown?q?=C3=A9?=", "\u00e9")]
+		[TestCase ("=?unknown?q?=C3=A9=FF?=", "\u00c3\u00a9\u00ff")]
+		[TestCase ("=?iso-8859-1?q?=C3=A9?=", "\u00c3\u00a9")]
+		[TestCase ("=?utf-16?b?QQBCAGkA?=", "ABi")]
+		[TestCase ("=?utf-8?q?=C3=A9?= =?iso-8859-1?q?=E9?= =?utf-8?q?=F0=9F=98=80?=", "\u00e9\u00e9\U0001f600")]
+		public void TestDecodeUtf8IntoExistingOutput (string text, string expected)
+		{
+			var input = Encoding.ASCII.GetBytes ("!prefix " + text + " suffix!");
+			var options = new ParserOptions { CharsetEncoding = Encoding.GetEncoding (28591) };
+
+			Assert.That (Rfc2047.DecodePhrase (options, input, 1, input.Length - 2), Is.EqualTo ("prefix " + expected + " suffix"));
+			Assert.That (Rfc2047.DecodeText (options, input, 1, input.Length - 2), Is.EqualTo ("prefix " + expected + " suffix"));
+		}
+
+		[TestCase (new byte[] { 0xc3, 0xa9 }, 28591, "\u00e9")]
+		[TestCase (new byte[] { 0xc3, 0xa9, 0xff }, 28591, "\u00c3\u00a9\u00ff")]
+		[TestCase (new byte[] { 0xe2, 0x82 }, 28591, "\u00e2\u0082")]
+		[TestCase (new byte[] { 0x80 }, 1252, "\u20ac")]
+		public void TestDecodeRawUtf8IntoExistingOutput (byte[] bytes, int codepage, string expected)
+		{
+			var prefix = Encoding.ASCII.GetBytes ("!prefix ");
+			var suffix = Encoding.ASCII.GetBytes (" suffix!");
+			var input = new byte[prefix.Length + bytes.Length + suffix.Length];
+			prefix.CopyTo (input, 0);
+			bytes.CopyTo (input, prefix.Length);
+			suffix.CopyTo (input, prefix.Length + bytes.Length);
+			var options = new ParserOptions { CharsetEncoding = Encoding.GetEncoding (codepage) };
+
+			Assert.That (Rfc2047.DecodePhrase (options, input, 1, input.Length - 2), Is.EqualTo ("prefix " + expected + " suffix"));
+			Assert.That (Rfc2047.DecodeText (options, input, 1, input.Length - 2), Is.EqualTo ("prefix " + expected + " suffix"));
 		}
 
 		[Test]
-		public void TestEncodedWordEmptyCharsetWithLang ()
+		public void TestDecodeEncodedWordEmptyCharsetWithLang ()
 		{
 			const string text = "blurdy bloop =?*en?q?no_charset?= beep boop";
 			var buffer = Encoding.UTF8.GetBytes (text);
 			string result;
 
 			result = Rfc2047.DecodePhrase (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 
 			result = Rfc2047.DecodeText (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 		}
 
 		[Test]
-		public void TestEncodedWordWithLang ()
+		public void TestDecodeEncodedWordWithLang ()
 		{
 			const string text = "blurdy bloop =?iso-8859-1*en?q?this_is_english?= beep boop";
 			const string expected = "blurdy bloop this is english beep boop";
@@ -143,52 +219,183 @@ namespace UnitTests.Utils {
 			string result;
 
 			result = Rfc2047.DecodePhrase (buffer);
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 
 			result = Rfc2047.DecodeText (buffer);
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
-		public void TestEncodedWordInvalidEncoding ()
+		public void TestDecodeEncodedWordInvalidEncoding ()
 		{
 			const string text = "blurdy bloop =?iso-8859-1?x?invalid_encoding?= beep boop";
 			var buffer = Encoding.UTF8.GetBytes (text);
 			string result;
 
 			result = Rfc2047.DecodePhrase (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 
 			result = Rfc2047.DecodeText (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 		}
 
 		[Test]
-		public void TestEncodedWordIncompletePayload ()
+		public void TestDecodeEncodedWordInvalidMultiCharacterEncoding ()
+		{
+			const string text = "blurdy bloop =?iso-8859-1?qb?invalid_encoded_word?= beep boop";
+			var buffer = Encoding.UTF8.GetBytes (text);
+			string result;
+
+			result = Rfc2047.DecodePhrase (buffer);
+			Assert.That (result, Is.EqualTo (text));
+
+			result = Rfc2047.DecodeText (buffer);
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[Test]
+		public void TestDecodeEncodedWordIncompletePayload ()
 		{
 			const string text = "blurdy bloop =?iso-8859-1?q?invalid_encoding";
 			var buffer = Encoding.UTF8.GetBytes (text);
 			string result;
 
 			result = Rfc2047.DecodePhrase (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 
 			result = Rfc2047.DecodeText (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 		}
 
 		[Test]
-		public void TestEncodedWordIncompleteCharset ()
+		public void TestDecodeEncodedWordIncompleteCharset ()
 		{
 			const string text = "blurdy bloop =?iso-8859-1";
 			var buffer = Encoding.UTF8.GetBytes (text);
 			string result;
 
 			result = Rfc2047.DecodePhrase (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
 
 			result = Rfc2047.DecodeText (buffer);
-			Assert.AreEqual (text, result);
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[Test]
+		public void TestDecodeEncodedWordInvalidCharsetName ()
+		{
+			const string text = "blurdy bloop =?isö-8859-1?q?invalid_charset_name?= beep boop";
+			var buffer = Encoding.UTF8.GetBytes (text);
+			string result;
+
+			result = Rfc2047.DecodePhrase (buffer);
+			Assert.That (result, Is.EqualTo (text));
+
+			result = Rfc2047.DecodeText (buffer);
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[Test]
+		public void TestDecodeEncodedWordInvalidLanguageCode ()
+		{
+			const string text = "blurdy bloop =?iso-8859-1*eñ-US?q?invalid_charset_name?= beep boop";
+			var buffer = Encoding.UTF8.GetBytes (text);
+			string result;
+
+			result = Rfc2047.DecodePhrase (buffer);
+			Assert.That (result, Is.EqualTo (text));
+
+			result = Rfc2047.DecodeText (buffer);
+			Assert.That (result, Is.EqualTo (text));
+		}
+
+		[TestCase ("abc=? =?utf-8?q?caf=C3=A9?=", "abc=? café")]
+		[TestCase ("=? =?utf-8?q?caf=C3=A9?=", "=? café")]
+		[TestCase ("x =?foo bar =?utf-8?q?caf=C3=A9?= end", "x =?foo bar café end")]
+		[TestCase ("=?utf-8?x? =?utf-8?q?caf=C3=A9?=", "=?utf-8?x? café")]
+		[TestCase ("=?utf-8?q?foo, bar =?utf-8?q?caf=C3=A9?=", "=?utf-8?q?foo, bar café")]
+		[TestCase ("=?utf-8?q?foo=?utf-8?q?caf=C3=A9?=", "=?utf-8?q?foocafé")]
+		[TestCase ("=?iso-8859-1?q?caf=E9 au lait?=", "café au lait")]
+		public void TestDecodeEncodedWordAfterIncompleteEncodedWord (string text, string expected)
+		{
+			var buffer = Encoding.UTF8.GetBytes (text);
+			string result;
+
+			result = Rfc2047.DecodePhrase (buffer);
+			Assert.That (result, Is.EqualTo (expected), "DecodePhrase");
+
+			result = Rfc2047.DecodeText (buffer);
+			Assert.That (result, Is.EqualTo (expected), "DecodeText");
+		}
+
+		[Test]
+		public void TestDecodeEncodedWordEmbeddedInAnotherWord ()
+		{
+			const string text = "blurdy bloop=?iso-8859-1?q?_encoded_word_?=beep boop";
+			const string expected = "blurdy bloop encoded word beep boop";
+			var buffer = Encoding.UTF8.GetBytes (text);
+			string result;
+
+			result = Rfc2047.DecodePhrase (buffer);
+			Assert.That (result, Is.EqualTo (expected));
+
+			result = Rfc2047.DecodeText (buffer);
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestDecodeMultipleEncodedWordsWithCommonCodePage ()
+		{
+			const string text = "=?iso-8859-1?q?latin1_?= =?utf-8?q?unicode_?= =?iso-8859-1?q?and_latin1_again?=";
+			const string expected = "latin1 unicode and latin1 again";
+			var buffer = Encoding.UTF8.GetBytes (text);
+			string result;
+			int codepage;
+
+			result = Rfc2047.DecodePhrase (ParserOptions.Default, buffer, 0, buffer.Length, out codepage);
+			Assert.That (result, Is.EqualTo (expected), "DecodePhrase");
+			Assert.That (codepage, Is.EqualTo (28591), "DecodePhrase");
+
+			result = Rfc2047.DecodeText (ParserOptions.Default, buffer, 0, buffer.Length, out codepage);
+			Assert.That (result, Is.EqualTo (expected), "DecodeText");
+			Assert.That (codepage, Is.EqualTo (28591), "DecodeText");
+		}
+
+		// TODO: When no common codepage can be found, this logic should be smarter?
+		[Test]
+		public void TestDecodeMultipleEncodedWordsWithoutCommonCodePage ()
+		{
+			const string text = "=?iso-8859-1?q?latin1_?= =?iso-8859-2?q?latin2_?= =?iso-8859-3?q?latin3?=";
+			const string expected = "latin1 latin2 latin3";
+			var buffer = Encoding.UTF8.GetBytes (text);
+			string result;
+			int codepage;
+
+			result = Rfc2047.DecodePhrase (ParserOptions.Default, buffer, 0, buffer.Length, out codepage);
+			Assert.That (result, Is.EqualTo (expected), "DecodePhrase");
+			Assert.That (codepage, Is.EqualTo (28591), "DecodePhrase");
+
+			result = Rfc2047.DecodeText (ParserOptions.Default, buffer, 0, buffer.Length, out codepage);
+			Assert.That (result, Is.EqualTo (expected), "DecodeText");
+			Assert.That (codepage, Is.EqualTo (28591), "DecodeText");
+		}
+
+		[Test]
+		public void TestDecodeEnsuresCodePageCapacity ()
+		{
+			const string text = "=?us-ascii?q?0?= =?iso-8859-1?q?1?= =?iso-8859-2?q?2?= =?iso-8859-3?q?3?= =?iso-8859-4?q?4?= =?iso-8859-5?q?5?= =?iso-8859-6?q?6?= =?iso-8859-7?q?7?= =?iso-8859-8?q?8?= =?iso-8859-9?q?9?= =?koi8-r?q?a?= =?koi8-u?q?b?= =?big5?q?c?= =?euc-cn?q?d?= =?euc-kr?q?e?= =?utf-8?q?f?= =?gb2312?q?g?=";
+			const string expected = "0123456789abcdefg";
+			var buffer = Encoding.UTF8.GetBytes (text);
+			string result;
+			int codepage;
+
+			result = Rfc2047.DecodePhrase (ParserOptions.Default, buffer, 0, buffer.Length, out codepage);
+			Assert.That (result, Is.EqualTo (expected), "DecodePhrase");
+			Assert.That (codepage, Is.EqualTo (20127), "DecodePhrase"); // FIXME: it should not select us-ascii
+
+			result = Rfc2047.DecodeText (ParserOptions.Default, buffer, 0, buffer.Length, out codepage);
+			Assert.That (result, Is.EqualTo (expected), "DecodeText");
+			Assert.That (codepage, Is.EqualTo (20127), "DecodeText"); // FIXME: it should not select us-ascii
 		}
 
 		[Test]
@@ -199,10 +406,16 @@ namespace UnitTests.Utils {
 			string result;
 
 			result = Encoding.ASCII.GetString (Rfc2047.EncodePhrase (Encoding.UTF8, text));
-			Assert.AreEqual (expected, result, "EncodePhrase");
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase(Encoding, string)");
+
+			result = Encoding.ASCII.GetString (Rfc2047.EncodePhrase (Encoding.UTF8, text, 0, text.Length));
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase(Encoding, string, int, int)");
 
 			result = Encoding.ASCII.GetString (Rfc2047.EncodeText (Encoding.UTF8, text));
-			Assert.AreEqual (expected, result, "EncodeText");
+			Assert.That (result, Is.EqualTo (expected), "EncodeText(Encoding, string)");
+
+			result = Encoding.ASCII.GetString (Rfc2047.EncodeText (Encoding.UTF8, text, 0, text.Length));
+			Assert.That (result, Is.EqualTo (expected), "EncodeText(Encoding, string, int, int)");
 		}
 
 		[Test]
@@ -213,10 +426,16 @@ namespace UnitTests.Utils {
 			string result;
 
 			result = Encoding.ASCII.GetString (Rfc2047.EncodePhrase (Encoding.UTF8, text));
-			Assert.AreEqual (expected, result, "EncodePhrase");
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase(Encoding, string)");
+
+			result = Encoding.ASCII.GetString (Rfc2047.EncodePhrase (Encoding.UTF8, text, 0, text.Length));
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase(Encoding, string, int, int)");
 
 			result = Encoding.ASCII.GetString (Rfc2047.EncodeText (Encoding.UTF8, text));
-			Assert.AreEqual (expected, result, "EncodeText");
+			Assert.That (result, Is.EqualTo (expected), "EncodeText(Encoding, string)");
+
+			result = Encoding.ASCII.GetString (Rfc2047.EncodeText (Encoding.UTF8, text, 0, text.Length));
+			Assert.That (result, Is.EqualTo (expected), "EncodeText(Encoding, string, int, int)");
 		}
 
 		[Test]
@@ -228,10 +447,284 @@ namespace UnitTests.Utils {
 			string result;
 
 			result = Encoding.ASCII.GetString (Rfc2047.EncodePhrase (latin1, text));
-			Assert.AreEqual (expected, result, "EncodePhrase");
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase(Encoding, string)");
+
+			result = Encoding.ASCII.GetString (Rfc2047.EncodePhrase (latin1, text, 0, text.Length));
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase(Encoding, string, int, int)");
 
 			result = Encoding.ASCII.GetString (Rfc2047.EncodeText (latin1, text));
-			Assert.AreEqual (expected, result, "EncodeText");
+			Assert.That (result, Is.EqualTo (expected), "EncodeText(Encoding, string)");
+
+			result = Encoding.ASCII.GetString (Rfc2047.EncodeText (latin1, text, 0, text.Length));
+			Assert.That (result, Is.EqualTo (expected), "EncodeText(Encoding, string, int, int)");
+		}
+
+		[Test]
+		public void TestEncodeTextThatLooksLikeEncodedWords ()
+		{
+			const string text = "Hello =?utf-8?b?4oI=?= =?utf-8?b?rA==?= and foo=?bar";
+
+			foreach (var phrase in new[] { false, true }) {
+				var encoded = phrase ? Rfc2047.EncodePhrase (Encoding.UTF8, text) : Rfc2047.EncodeText (Encoding.UTF8, text);
+				var result = Encoding.ASCII.GetString (encoded);
+
+				Assert.That (result, Does.Not.Contain ("=?utf-8?b?4oI="), $"Encoded (phrase = {phrase})");
+
+				var decoded = phrase ? Rfc2047.DecodePhrase (encoded) : Rfc2047.DecodeText (encoded);
+
+				Assert.That (decoded, Is.EqualTo (text), $"Decoded (phrase = {phrase})");
+			}
+		}
+
+		[TestCase ("Hello \"=?utf-8?b?4oI=?= quoted\" world")]
+		[TestCase ("Hello \"unterminated =?utf-8?b?4oI=?= quote")]
+		public void TestEncodePhraseWithQuotedTextThatLooksLikeEncodedWords (string text)
+		{
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+
+			Assert.That (result, Does.Not.Contain ("=?utf-8?b?4oI="), "Encoded");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+
+			Assert.That (decoded, Is.EqualTo (text), "Decoded");
+
+			// Note: Loose mode also decodes encoded-words that appear within quoted-strings.
+			var mailbox = new MailboxAddress (text, "user@example.com");
+			var options = ParserOptions.Default.Clone ();
+			options.AddressParserComplianceMode = RfcComplianceMode.Loose;
+
+			Assert.That (MailboxAddress.TryParse (options, mailbox.ToString (true), out var parsed), Is.True, "TryParse");
+			Assert.That (parsed.Name, Is.EqualTo (text), "Name");
+		}
+
+		[TestCase ("Hiller\u00f8 W\u200Bu")]
+		[TestCase ("Hiller\u00f8 \u65e5\u672c\u8a9e")]
+		[TestCase ("\U0001F600 Hiller\u00f8")]
+		public void TestEncodeCharactersNotRepresentableInCharset (string text)
+		{
+			var latin1 = Encoding.GetEncoding (28591);
+			var options = ParserOptions.Default.Clone ();
+
+			foreach (var phrase in new[] { true, false }) {
+				var encoded = phrase ? Rfc2047.EncodePhrase (latin1, text) : Rfc2047.EncodeText (latin1, text);
+				var decoded = phrase ? Rfc2047.DecodePhrase (encoded) : Rfc2047.DecodeText (encoded);
+
+				Assert.That (decoded, Is.EqualTo (text), $"Decoded (phrase = {phrase})");
+			}
+
+			// Note: An address name decoded from an iso-8859-1 encoded-word remembers that charset and uses it when re-encoding.
+			var mailbox = new MailboxAddress (latin1, text, "user@example.com");
+
+			Assert.That (MailboxAddress.TryParse (options, mailbox.ToString (true), out var parsed), Is.True, "TryParse");
+			Assert.That (parsed.Name, Is.EqualTo (text), "Name");
+
+			var group = new GroupAddress (latin1, text, new InternetAddress[] { parsed });
+
+			Assert.That (GroupAddress.TryParse (options, group.ToString (true), out var parsedGroup), Is.True, "TryParse group");
+			Assert.That (parsedGroup.Name, Is.EqualTo (text), "Group name");
+		}
+
+		[Test]
+		public void TestEncodePhraseLongQuotedWord ()
+		{
+			// a single word that is too long to fit on a line and that requires quoting must not gain whitespace when it is split
+			var text = "S" + new string ('2', 12) + ";" + new string ('2', 60) + "-elr\0\0b" + new string ('2', 16) + "kywalker of the Jedi";
+			var mailbox = new MailboxAddress (text, "skyojedi@phoenix.net");
+			var encoded = mailbox.ToString (true);
+
+			Assert.That (MailboxAddress.TryParse (encoded, out var parsed), Is.True, "TryParse");
+			Assert.That (parsed.Name, Is.EqualTo (text), "Name");
+		}
+
+		[Test]
+		public void TestEncodeLiteralEncodedWordAtLineBoundary ([Values (60, 78)] int maxLineLength, [Values (false, true)] bool phrase)
+		{
+			var options = FormatOptions.Default.Clone ();
+			options.MaxLineLength = maxLineLength;
+
+			for (int length = 0; length < maxLineLength * 2; length++) {
+				var text = ":" + new string ('a', length) + "=?utf-8?q?hello?=";
+				var encoded = phrase ? Rfc2047.EncodePhrase (options, Encoding.UTF8, text) : Rfc2047.EncodeText (options, Encoding.UTF8, text);
+				var decoded = phrase ? Rfc2047.DecodePhrase (encoded) : Rfc2047.DecodeText (encoded);
+
+				Assert.That (decoded, Is.EqualTo (text), $"Prefix length: {length}");
+
+				if (phrase) {
+					var mailbox = new MailboxAddress (text, "user@example.com");
+
+					Assert.That (MailboxAddress.TryParse (mailbox.ToString (options, true), out var parsed), Is.True);
+					Assert.That (parsed.Name, Is.EqualTo (text), $"Mailbox prefix length: {length}");
+				}
+			}
+		}
+
+		[Test]
+		public void TestEncodePhraseLongSentenceWithCommas ()
+		{
+			const string expected = "\"Once upon a time, back when things that are old now were new, there lived a man with a very particular set of skills.\"";
+			const string text = "Once upon a time, back when things that are old now were new, there lived a man with a very particular set of skills.";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var unquoted = MimeUtils.Unquote (result);
+			Assert.That (unquoted, Is.EqualTo (text), "Unquote");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerQuotedString ()
+		{
+			const string expected = "\"John \\\"Jacob Jingle Heimer\\\" Schmidt\"";
+			const string text = "John \"Jacob Jingle Heimer\" Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var unquoted = MimeUtils.Unquote (result);
+			Assert.That (unquoted, Is.EqualTo (text), "Unquote");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeQuotedString1 ()
+		{
+			const string expected = "John =?utf-8?b?Ium7nueci0DlkI3jgYzjg4njg6HjgqTjg7MgSmFjb2IgSmluZ2xlIEhlaW1lciI=?= Schmidt";
+			const string text = "John \"點看@名がドメイン Jacob Jingle Heimer\" Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+			Assert.That (decoded, Is.EqualTo (text), "DecodePhrase");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeQuotedString2 ()
+		{
+			const string expected = "John =?utf-8?b?IkphY29iIEppbmdsZSDpu57nnItA5ZCN44GM44OJ44Oh44Kk44OzIEhlaW1lciI=?= Schmidt";
+			const string text = "John \"Jacob Jingle 點看@名がドメイン Heimer\" Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+			Assert.That (decoded, Is.EqualTo (text), "DecodePhrase");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeQuotedString3 ()
+		{
+			const string expected = "John =?utf-8?b?IkphY29iIEppbmdsZSBIZWltZXIg6bue55yLQOWQjeOBjOODieODoeOCpOODsyI=?= Schmidt";
+			const string text = "John \"Jacob Jingle Heimer 點看@名がドメイン\" Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+			Assert.That (decoded, Is.EqualTo (text), "DecodePhrase");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeQuotedString4 ()
+		{
+			const string expected = "John =?utf-8?q?=22Jacob_Jingle_Heimer=2C_his_name_is_my_name_too!_Whenever_he_goes_out=2C_the_?=\t=?utf-8?q?people_always_shout=2C_=5C=22There_goes_John_Jacob_Jingle_Heimer_Schmidt!=5C=22_?=\t=?utf-8?b?6bue55yLQOWQjeOBjOODieODoeOCpOODsyI=?= Schmidt";
+			const string text = "John \"Jacob Jingle Heimer, his name is my name too! Whenever he goes out, the people always shout, \\\"There goes John Jacob Jingle Heimer Schmidt!\\\" 點看@名がドメイン\" Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+			Assert.That (decoded, Is.EqualTo (text), "DecodePhrase");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeQuotedString5 ()
+		{
+			const string expected = "\"John \\\"Whenever he goes out, the people always shout, \\\\\\\"There goes John Jacob Jingle Heimer Schmidt!\\\\\\\"\\\" Schmidt\"";
+			const string text = "John \"Whenever he goes out, the people always shout, \\\"There goes John Jacob Jingle Heimer Schmidt!\\\"\" Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var unquoted = MimeUtils.Unquote (result);
+			Assert.That (unquoted, Is.EqualTo (text), "Unquote");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeComment ()
+		{
+			const string expected = "\"John (Jacob Jingle Heimer) Schmidt\"";
+			const string text = "John (Jacob Jingle Heimer) Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var unquoted = MimeUtils.Unquote (result);
+			Assert.That (unquoted, Is.EqualTo (text), "Unquote");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeComment1 ()
+		{
+			const string expected = "John =?utf-8?b?KOm7nueci0DlkI3jgYzjg4njg6HjgqTjg7MgSmFjb2IgSmluZ2xlIEhlaW1lcik=?= Schmidt";
+			const string text = "John (點看@名がドメイン Jacob Jingle Heimer) Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+			Assert.That (decoded, Is.EqualTo (text), "DecodePhrase");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeComment2 ()
+		{
+			const string expected = "John =?utf-8?b?KEphY29iIEppbmdsZSDpu57nnItA5ZCN44GM44OJ44Oh44Kk44OzIEhlaW1lcik=?= Schmidt";
+			const string text = "John (Jacob Jingle 點看@名がドメイン Heimer) Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+			Assert.That (decoded, Is.EqualTo (text), "DecodePhrase");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeComment3 ()
+		{
+			const string expected = "John =?utf-8?b?KEphY29iIEppbmdsZSBIZWltZXIg6bue55yLQOWQjeOBjOODieODoeOCpOODsyk=?= Schmidt";
+			const string text = "John (Jacob Jingle Heimer 點看@名がドメイン) Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+			Assert.That (decoded, Is.EqualTo (text), "DecodePhrase");
+		}
+
+		[Test]
+		public void TestEncodePhraseWithInnerUnicodeComment4 ()
+		{
+			const string expected = "John =?utf-8?q?=28Jacob_Jingle_Heimer=2C_his_name_is_my_name_too!_Whenever_he_goes_out=2C_the_p?=\t=?utf-8?q?eople_always_shout=2C_=22There_goes_John_Jacob_Jingle_Heimer_Schmidt!=22?=\t=?utf-8?b?IOm7nueci0DlkI3jgYzjg4njg6HjgqTjg7Mp?= Schmidt";
+			const string text = "John (Jacob Jingle Heimer, his name is my name too! Whenever he goes out, the people always shout, \"There goes John Jacob Jingle Heimer Schmidt!\" 點看@名がドメイン) Schmidt";
+
+			var encoded = Rfc2047.EncodePhrase (Encoding.UTF8, text);
+			var result = Encoding.ASCII.GetString (encoded);
+			Assert.That (result, Is.EqualTo (expected), "EncodePhrase");
+
+			var decoded = Rfc2047.DecodePhrase (encoded);
+			Assert.That (decoded, Is.EqualTo (text), "DecodePhrase");
 		}
 
 		[Test]
@@ -244,7 +737,7 @@ namespace UnitTests.Utils {
 			options.NewLineFormat = NewLineFormat.Dos;
 
 			var result = Encoding.ASCII.GetString (Rfc2047.FoldUnstructuredHeader (options, "Subject", Encoding.ASCII.GetBytes (text)));
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -257,7 +750,7 @@ namespace UnitTests.Utils {
 			options.NewLineFormat = NewLineFormat.Dos;
 
 			var result = Encoding.ASCII.GetString (Rfc2047.FoldUnstructuredHeader (options, "Subject", Encoding.ASCII.GetBytes (text)));
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
 		}
 
 		[Test]
@@ -270,7 +763,59 @@ namespace UnitTests.Utils {
 			options.NewLineFormat = NewLineFormat.Dos;
 
 			var result = Encoding.ASCII.GetString (Rfc2047.FoldUnstructuredHeader (options, "Subject", Encoding.ASCII.GetBytes (text)));
-			Assert.AreEqual (expected, result);
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestFoldHeaderValueWithEncodedWordsIncludingLanguageCodes ()
+		{
+			const string expected = " I'm so happy! =?utf-8*en-US?b?8J+YgA==?= I love MIME so much\r\n =?utf-8*en-US?b?4p2k77iP4oCN8J+UpSE=?= Isn't it great?\r\n";
+			const string text = "I'm so happy! =?utf-8*en-US?b?8J+YgA==?= I love MIME so much =?utf-8*en-US?b?4p2k77iP4oCN8J+UpSE=?= Isn't it great?";
+			var options = FormatOptions.Default.Clone ();
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			var result = Encoding.ASCII.GetString (Rfc2047.FoldUnstructuredHeader (options, "Subject", Encoding.ASCII.GetBytes (text)));
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestFoldHeaderValueAtTabs ()
+		{
+			const string expected = " I'm so happy! =?utf-8*en-US?b?8J+YgA==?= I love MIME so much\r\n\t=?utf-8*en-US?b?4p2k77iP4oCN8J+UpSE=?= Isn't it great? MIME is\r\n\tsupercalafragalisticexpialadotious, don't you think?\r\n";
+			const string text = "I'm so happy! =?utf-8*en-US?b?8J+YgA==?= I love MIME so much\t=?utf-8*en-US?b?4p2k77iP4oCN8J+UpSE=?= Isn't it great? MIME is\tsupercalafragalisticexpialadotious, don't you think?";
+			var options = FormatOptions.Default.Clone ();
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			var result = Encoding.ASCII.GetString (Rfc2047.FoldUnstructuredHeader (options, "Subject", Encoding.ASCII.GetBytes (text)));
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestFoldHeaderValueWithEmbeddedEncodedWordTokens ()
+		{
+			const string expected = " This subject has embedded\r\n =?iso-8859-1*en-US?q?rfc2047_encoded_word_tokens?=... How does the folding\r\n logic handle these embedded=?iso-8859-1*en-US?q?rfc2047_encoded_word_tokens?=\r\n ...?\r\n";
+			const string text = "This subject has embedded=?iso-8859-1*en-US?q?rfc2047_encoded_word_tokens?=... How does the folding logic handle these embedded=?iso-8859-1*en-US?q?rfc2047_encoded_word_tokens?=...?";
+			var options = FormatOptions.Default.Clone ();
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			var result = Encoding.ASCII.GetString (Rfc2047.FoldUnstructuredHeader (options, "Subject", Encoding.ASCII.GetBytes (text)));
+			Assert.That (result, Is.EqualTo (expected));
+		}
+
+		[Test]
+		public void TestFolderHeaderValueDoesNotIgnoreWhitespaceBetweenEncodedWords ()
+		{
+			const string expected = " This test should demonstrate that\r\n =?iso-8859-1*en-US?q?whitespace_between_rfc2047_encoded_word_tokens?= \t \t \r\n\t =?iso-8859-1*en-US?q?does_not_get_ignored?=\r\n";
+			const string text = "This test should demonstrate that =?iso-8859-1*en-US?q?whitespace_between_rfc2047_encoded_word_tokens?= \t \t \t =?iso-8859-1*en-US?q?does_not_get_ignored?=";
+			var options = FormatOptions.Default.Clone ();
+
+			options.NewLineFormat = NewLineFormat.Dos;
+
+			var result = Encoding.ASCII.GetString (Rfc2047.FoldUnstructuredHeader (options, "Subject", Encoding.ASCII.GetBytes (text)));
+			Assert.That (result, Is.EqualTo (expected));
 		}
 	}
 }

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,9 @@ namespace MimeKit.IO.Filters {
 	/// <remarks>
 	/// Incrementally converts text from one charset encoding to another.
 	/// </remarks>
+	/// <example>
+	/// <code language="c#" source="Examples\FilterExamples.cs" region="ConvertCharset"/>
+	/// </example>
 	public class CharsetFilter : MimeFilterBase
 	{
 		readonly char[] chars = new char[1024];
@@ -45,7 +48,7 @@ namespace MimeKit.IO.Filters {
 
 		static Encoding GetEncoding (string paramName, string encodingName)
 		{
-			if (encodingName == null)
+			if (encodingName is null)
 				throw new ArgumentNullException (paramName);
 
 			return CharsetUtils.GetEncoding (encodingName);
@@ -61,9 +64,9 @@ namespace MimeKit.IO.Filters {
 		/// <param name="sourceEncodingName">Source encoding name.</param>
 		/// <param name="targetEncodingName">Target encoding name.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="sourceEncodingName"/> is <c>null</c>.</para>
+		/// <para><paramref name="sourceEncodingName"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="targetEncodingName"/> is <c>null</c>.</para>
+		/// <para><paramref name="targetEncodingName"/> is <see langword="null"/>.</para>
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
 		/// <para>The <paramref name="sourceEncodingName"/> is not supported by the system.</para>
@@ -71,8 +74,8 @@ namespace MimeKit.IO.Filters {
 		/// <para>The <paramref name="targetEncodingName"/> is not supported by the system.</para>
 		/// </exception>
 		public CharsetFilter (string sourceEncodingName, string targetEncodingName)
-			: this (GetEncoding ("sourceEncodingName", sourceEncodingName),
-				GetEncoding ("targetEncodingName", targetEncodingName))
+			: this (GetEncoding (nameof (sourceEncodingName), sourceEncodingName),
+				GetEncoding (nameof (targetEncodingName), targetEncodingName))
 		{
 		}
 
@@ -110,27 +113,27 @@ namespace MimeKit.IO.Filters {
 		/// <param name="sourceEncoding">Source encoding.</param>
 		/// <param name="targetEncoding">Target encoding.</param>
 		/// <exception cref="System.ArgumentNullException">
-		/// <para><paramref name="sourceEncoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="sourceEncoding"/> is <see langword="null"/>.</para>
 		/// <para>-or-</para>
-		/// <para><paramref name="targetEncoding"/> is <c>null</c>.</para>
+		/// <para><paramref name="targetEncoding"/> is <see langword="null"/>.</para>
 		/// </exception>
 		public CharsetFilter (Encoding sourceEncoding, Encoding targetEncoding)
 		{
-			if (sourceEncoding == null)
+			if (sourceEncoding is null)
 				throw new ArgumentNullException (nameof (sourceEncoding));
 
-			if (targetEncoding == null)
+			if (targetEncoding is null)
 				throw new ArgumentNullException (nameof (targetEncoding));
 
 			SourceEncoding = sourceEncoding;
 			TargetEncoding = targetEncoding;
 
-			decoder = (Decoder) SourceEncoding.GetDecoder ();
-			encoder = (Encoder) TargetEncoding.GetEncoder ();
+			decoder = SourceEncoding.GetDecoder ();
+			encoder = TargetEncoding.GetEncoder ();
 		}
 
 		/// <summary>
-		/// Gets the source encoding.
+		/// Get the source encoding.
 		/// </summary>
 		/// <remarks>
 		/// Gets the source encoding.
@@ -141,7 +144,7 @@ namespace MimeKit.IO.Filters {
 		}
 
 		/// <summary>
-		/// Gets the target encoding.
+		/// Get the target encoding.
 		/// </summary>
 		/// <remarks>
 		/// Gets the target encoding.
@@ -164,7 +167,7 @@ namespace MimeKit.IO.Filters {
 		/// <param name="length">The length of the input buffer, starting at <paramref name="startIndex"/>.</param>
 		/// <param name="outputIndex">The output index.</param>
 		/// <param name="outputLength">The output length.</param>
-		/// <param name="flush">If set to <c>true</c>, all internally buffered data should be flushed to the output buffer.</param>
+		/// <param name="flush">If set to <see langword="true" />, all internally buffered data should be flushed to the output buffer.</param>
 		protected override byte[] Filter (byte[] input, int startIndex, int length, out int outputIndex, out int outputLength, bool flush)
 		{
 			int inputIndex = startIndex;
@@ -181,7 +184,8 @@ namespace MimeKit.IO.Filters {
 				charsLeft = chars.Length;
 				charIndex = 0;
 
-				if (!decoded && inputLeft > 0) {
+				// The decoder may still have buffered input even when inputLeft is zero.
+				if (!decoded) {
 					decoder.Convert (input, inputIndex, inputLeft, chars, charIndex, charsLeft, flush, out nread, out nwritten, out decoded);
 					if (nwritten > 0)
 						encoded = false;
@@ -210,11 +214,11 @@ namespace MimeKit.IO.Filters {
 			outputLength = outputOffset;
 			outputIndex = 0;
 
-			return OutputBuffer;
+			return OutputBuffer!; // EnsureOutputSize has been called at least once at this point
 		}
 
 		/// <summary>
-		/// Resets the filter.
+		/// Reset the filter.
 		/// </summary>
 		/// <remarks>
 		/// Resets the filter.

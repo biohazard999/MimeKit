@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2021 .NET Foundation and Contributors
+// Copyright (c) 2013-2026 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,13 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 //
-
-using System;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
-
-using NUnit.Framework;
 
 using MimeKit;
 
@@ -71,12 +64,59 @@ namespace UnitTests {
 
 				using (var dest = new MemoryStream ()) {
 					Assert.Throws<OperationCanceledException> (() => content.WriteTo (dest, source.Token));
-					Assert.AreEqual (0, dest.Length);
+					Assert.That (dest.Length, Is.EqualTo (0));
 
 					Assert.ThrowsAsync<TaskCanceledException> (async () => await content.WriteToAsync (dest, source.Token));
-					Assert.AreEqual (0, dest.Length);
+					Assert.That (dest.Length, Is.EqualTo (0));
 				}
 			}
+		}
+
+		[Test]
+		public void TestDisposedContentThrows ()
+		{
+			var content = new MimeContent (new MemoryStream ());
+
+			content.Dispose ();
+
+			using var output = new MemoryStream ();
+
+			Assert.Throws<ObjectDisposedException> (() => content.WriteTo (output));
+		}
+
+		[Test]
+		public void TestWriteToUsesCancellableStreams ()
+		{
+			var source = new CancellableMemoryStream ();
+			var expected = new byte[] { 1, 2, 3 };
+			source.Write (expected, 0, expected.Length);
+			source.Position = 0;
+			var content = new MimeContent (source);
+
+			using var output = new CancellableMemoryStream ();
+			content.WriteTo (output);
+
+			Assert.That (output.ToArray (), Is.EqualTo (expected));
+			Assert.That (source.CancellableReads, Is.EqualTo (2));
+			Assert.That (output.CancellableWrites, Is.EqualTo (1));
+		}
+
+		[Test]
+		public void TestWriteToIgnoresIOExceptionResettingAfterCancellation ()
+		{
+			var content = new MimeContent (new ThrowingReadStream (() => new OperationCanceledException ()) { SeekLimit = 1 });
+			using var output = new MemoryStream ();
+
+			Assert.Throws<OperationCanceledException> (() => content.WriteTo (output));
+		}
+
+		[Test]
+		public void TestWriteToAsyncIgnoresIOExceptionResettingAfterCancellation ()
+		{
+			var content = new MimeContent (new ThrowingReadStream (() => new OperationCanceledException ()) { SeekLimit = 1 });
+			using var output = new MemoryStream ();
+
+			Assert.ThrowsAsync<OperationCanceledException> (async () => await content.WriteToAsync (output));
 		}
 	}
 }
